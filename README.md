@@ -240,7 +240,9 @@ steps in headless Chromium. It passes on Python 3.11 and 3.12.
 
 `tests/test_live.py` runs the same things on the real services and is opt-in because it costs money:
 `TESTBENCH_TEST_MODAL=1` (plans on CPU and a T4, cancelling a GPU run mid-flight, a live session, a T4 session)
-and `TESTBENCH_TEST_COLAB=1` (a plan and a live session on a Colab CPU VM).
+and `TESTBENCH_TEST_COLAB=1` (a plan and a live session on a Colab CPU VM). Colab T4 sessions and plans were also
+run by hand: PyTorch and CuPy on the GPU, a 70-second cell, an interrupted cell whose kernel kept its state, plots
+coming back as images.
 
 [docs/demo.md](https://github.com/sarptandoven/agent-testbench/blob/main/docs/demo.md) shows Claude Code, given only this plugin and a project with a planted bug, finding
 and fixing it and proving the fix with a run.

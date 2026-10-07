@@ -122,10 +122,16 @@ def main(argv=None):
     ap.add_argument("--connection", required=True)
     ap.add_argument("--request", required=True)
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--result-file", help="also write the result line here (atomically), for callers that poll")
     a = ap.parse_args(argv)
     req = json.loads(Path(a.request).read_text())
     res = execute(a.connection, req["code"], float(req.get("timeout", 600)), a.out_dir, req.get("prefix", "exec"))
-    print("TESTBENCH_RESULT " + json.dumps(res), flush=True)
+    line = "TESTBENCH_RESULT " + json.dumps(res)
+    if a.result_file:
+        tmp = Path(a.result_file + ".tmp")
+        tmp.write_text(line + "\n")
+        tmp.replace(a.result_file)
+    print(line, flush=True)
 
 
 if __name__ == "__main__":

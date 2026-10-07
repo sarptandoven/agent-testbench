@@ -295,15 +295,31 @@ else:
     print("TESTBENCH_SYNCED", flush=True)
 '''
 
-COLAB_EXEC = r'''
+# On Colab, `exec` starts the client in the background on the VM and returns at once; short polls then read the
+# result. A long cell never depends on one long-lived Colab CLI connection (which can stall), and a poll that
+# stalls is simply retried.
+COLAB_EXEC_START = r'''
 import json, os, subprocess, sys
 env = {**os.environ, "PYTHONPATH": "/content/.testbench_pkg" + os.pathsep + os.environ.get("PYTHONPATH", "")}
-os.makedirs("/tmp/testbench", exist_ok=True)
+out = "/tmp/testbench/out/" + PREFIX
+os.makedirs(out, exist_ok=True)
 open("/tmp/testbench/" + PREFIX + ".json", "w").write(json.dumps(REQUEST))
-p = subprocess.run([sys.executable, "-m", "agent_testbench.kernelkit.client", "--connection", "/tmp/testbench/kernel/kernel.json",
-                    "--request", "/tmp/testbench/" + PREFIX + ".json", "--out-dir", "/tmp/testbench/out/" + PREFIX],
-                   env=env, capture_output=True, text=True)
-print(p.stdout[-400000:] + p.stderr[-4000:], flush=True)
+subprocess.Popen([sys.executable, "-m", "agent_testbench.kernelkit.client", "--connection", "/tmp/testbench/kernel/kernel.json",
+                  "--request", "/tmp/testbench/" + PREFIX + ".json", "--out-dir", out, "--result-file", out + "/result.txt"],
+                 env=env, start_new_session=True, stdout=open(out + "/client.log", "w"), stderr=subprocess.STDOUT)
+print("TESTBENCH_STARTED", flush=True)
+'''
+
+COLAB_EXEC_POLL = r'''
+import os
+out = "/tmp/testbench/out/" + PREFIX
+if os.path.exists(out + "/result.txt"):
+    print(open(out + "/result.txt").read(), flush=True)
+else:
+    log = open(out + "/client.log").read()[-3000:] if os.path.exists(out + "/client.log") else ""
+    print("TESTBENCH_RUNNING " + str(len(log)), flush=True)
+    if "Traceback" in log:
+        print("TESTBENCH_CLIENT_FAILED\n" + log, flush=True)
 '''
 
 
@@ -318,9 +334,17 @@ class ColabSession:
                                                                           + time.strftime("%H%M%S"))[:60]
 
     def _colab(self, *argv, timeout: float = 900, check: bool = True) -> subprocess.CompletedProcess:
-        p = subprocess.run([*self.args, *argv], capture_output=True, text=True, timeout=timeout)
+        began = time.time()
+        try:
+            p = subprocess.run([*self.args, *argv], capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            with (self.sdir / "colab.log").open("a") as log:
+                log.write(f"$ colab {argv[0]} ... no answer after {timeout:.0f} s\n")
+            raise SessionError(f"`colab {argv[0]}` did not answer within {timeout:.0f} s (the Colab connection may have "
+                               "stalled); the session is still there - try again, or `testbench session list`") from None
         with (self.sdir / "colab.log").open("a") as log:
-            log.write(f"$ colab {argv[0]} ...\n{p.stdout[-3000:]}{p.stderr[-3000:]}\n")
+            log.write(f"$ colab {argv[0]} ... ({time.time() - began:.1f} s, exit {p.returncode})\n"
+                      f"{p.stdout[-3000:]}{p.stderr[-3000:]}\n")
         if check and p.returncode != 0:
             raise SessionError(f"`colab {argv[0]}` failed (exit {p.returncode}): "
                                f"{((p.stderr or p.stdout).strip().splitlines() or [''])[-1]} - see colab.log")
@@ -369,11 +393,36 @@ class ColabSession:
         except Exception:
             return False
 
+    def _try(self, *argv, timeout: float, attempts: int = 3) -> subprocess.CompletedProcess | None:
+        for _ in range(attempts):
+            try:
+                return self._colab(*argv, timeout=timeout, check=False)
+            except SessionError:
+                time.sleep(2)
+        return None
+
     def exec(self, code: str, timeout: float, prefix: str, out_dir: Path) -> dict:
-        script = self._script(COLAB_EXEC, PREFIX=prefix, REQUEST={"code": code, "timeout": timeout, "prefix": prefix})
-        p = self._colab("exec", "-s", self.session, "-f", str(script), "--timeout", str(int(timeout + 120)),
-                        timeout=timeout + 300, check=False)
-        res = _parse(p.stdout)
+        start = self._script(COLAB_EXEC_START, PREFIX=prefix, REQUEST={"code": code, "timeout": timeout, "prefix": prefix})
+        p = self._try("exec", "-s", self.session, "-f", str(start), "--timeout", "120", timeout=180)
+        if p is None or "TESTBENCH_STARTED" not in p.stdout:
+            raise SessionError("could not start the code on the Colab VM" + (f": {p.stdout[-800:]}" if p else ""))
+        poll = self._script(COLAB_EXEC_POLL, PREFIX=prefix)
+        deadline = time.time() + timeout + 180          # the client itself interrupts the kernel at `timeout`
+        wait = 0.5
+        res = None
+        while time.time() < deadline:
+            p = self._try("exec", "-s", self.session, "-f", str(poll), "--timeout", "20", timeout=30, attempts=1)
+            if p is not None and MARK in p.stdout:
+                res = _parse(p.stdout)
+                break
+            if p is not None and "TESTBENCH_CLIENT_FAILED" in p.stdout:
+                raise SessionError("the session's kernel client failed on the Colab VM:\n" + p.stdout[-2000:])
+            time.sleep(wait)
+            wait = min(wait * 1.5, 5)
+        if res is None:
+            return {"status": "timeout", "stdout": "", "stderr": "", "result": None, "displays": [], "images": [],
+                    "seconds": round(timeout + 180, 1), "execution_count": None,
+                    "error": {"ename": "SessionTimeout", "evalue": "no result came back from the Colab VM in time"}}
         local = []
         for remote in res.get("images", []):
             dst = Path(out_dir) / Path(remote).name
