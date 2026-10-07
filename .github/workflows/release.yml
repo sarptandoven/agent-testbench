@@ -1,8 +1,10 @@
 name: release
-# Publishes to PyPI when a GitHub release is published, with PyPI trusted publishing (no API token anywhere).
+# Publishes to PyPI with PyPI trusted publishing (no API token anywhere): when a GitHub release is published,
+# or by hand from the Actions tab (`gh workflow run release.yml`). PyPI rejects a version that already exists.
 on:
   release:
     types: [published]
+  workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
