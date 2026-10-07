@@ -321,7 +321,11 @@ def cmd_session(a):
     if a.sess_cmd == "stop":
         targets = [d for d in S.all_sessions(root) if S.read(d).get("status") in S.ACTIVE] if a.all else [S.resolve(root, a.name)]
         for d in targets:
+            was = S.read(d).get("status")
             s = S.stop(root, cfg, d)
+            if was not in S.ACTIVE:
+                print(f"{s['name']} was not running ({was}: {s.get('stop_reason', '')})")
+                continue
             print(f"{s['name']} stopped after {(s['stopped'] - (s.get('started') or s['created'])) / 60:.1f} min, "
                   f"about ${s.get('cost_usd', 0):.3f}")
         if not targets:

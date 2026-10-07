@@ -1,5 +1,9 @@
 # agent-testbench
 
+[![tests](https://github.com/sarptandoven/agent-testbench/actions/workflows/ci.yml/badge.svg)](https://github.com/sarptandoven/agent-testbench/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/agent-testbench.svg)](https://pypi.org/project/agent-testbench/)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sarptandoven/agent-testbench/blob/main/LICENSE)
+
 **A test bench your coding agent operates.** Claude, GPT/Codex or any agent can start a live kernel on a Modal GPU,
 a Colab VM or your machine, run code and notebook cells in it, inspect variables and plots, install packages,
 move files, fix and rerun - and then prove the result with a clean, checked run. Everything stays inside a
@@ -46,7 +50,7 @@ gpu stopped after 1.4 min, about $0.017
 pip install "agent-testbench[all]"     # or: uv tool install "agent-testbench[all]"
 ```
 
-Until it is on PyPI: `pip install "agent-testbench[all] @ git+https://github.com/sarptandoven/agent-testbench"`.
+The latest from GitHub: `pip install "agent-testbench[all] @ git+https://github.com/sarptandoven/agent-testbench"`.
 
 - **Modal**: `modal setup` once (your account, your card; [pricing](https://modal.com/pricing)).
 - **Colab**: `uv tool install google-colab-cli`, then log in once (`colab new` opens the sign-in; or set
@@ -108,7 +112,16 @@ testbench session stop                                      # or let it stop its
 | `colab` | a Colab VM (CPU, T4, L4, A100, H100 by subscription), project in `/content` | after `idle_minutes` unused or `max_minutes` (Colab may also reclaim VMs after an hour or two) |
 
 A call that runs past `--timeout` is interrupted; the kernel and its variables survive. One command runs at a
-time per session. Notebooks see a headless `google.colab` (uploads from files you name, downloads kept,
+time per session.
+
+**GPU libraries on Modal**: the default image is Debian slim with the NVIDIA driver but no CUDA toolkit.
+PyTorch works as it is (its wheels bring their own CUDA libraries - checked on a T4). Libraries that expect the
+CUDA toolkit on the machine, such as CuPy, fail there with errors like
+`libcurand.so.10: cannot open shared object file` (also checked). Give them the CUDA libraries they need as
+described in their install guide (for CuPy: docs.cupy.dev, "Installation"), and confirm it in a short GPU
+session (`testbench session start --backend modal --gpu T4 --max-minutes 5`) before a long run.
+
+Notebooks see a headless `google.colab` (uploads from files you name, downloads kept,
 secrets from the environment, Drive as a local folder), so Colab notebooks run as they are.
 
 ## Plans
@@ -170,7 +183,7 @@ A report leads with what failed: the cell, the error, the line that raised it, e
 what was found instead, then what changed since the previous run of the plan ("Fixed: train", "Broke: eval",
 "accuracy 0.71 -> 0.93"), the evidence files to look at, and GPU use per step (an idle GPU shows as 0%).
 Steps are `notebook:`, `run:` (a shell command) or `web:` (a page driven in headless Chromium: click, fill,
-press, wait for, screenshot). The full reference is in [docs/reference.md](docs/reference.md).
+press, wait for, screenshot). The full reference is in [docs/reference.md](https://github.com/sarptandoven/agent-testbench/blob/main/docs/reference.md).
 
 ## Guardrails
 
@@ -212,10 +225,10 @@ enforced in code either way.
 
 ## Examples
 
-- [`examples/tiny-model`](examples/tiny-model): a Colab-style notebook that trains a small network, with plans
+- [`examples/tiny-model`](https://github.com/sarptandoven/agent-testbench/tree/main/examples/tiny-model): a Colab-style notebook that trains a small network, with plans
   for local, Modal CPU, Modal T4 and Colab.
   [Open in Colab](https://colab.research.google.com/github/sarptandoven/agent-testbench/blob/main/examples/tiny-model/tiny_model.ipynb)
-- [`examples/web-ui`](examples/web-ui): a page checked in a headless browser - clicks, text, console errors, screenshots.
+- [`examples/web-ui`](https://github.com/sarptandoven/agent-testbench/tree/main/examples/web-ui): a page checked in a headless browser - clicks, text, console errors, screenshots.
 
 ## How it is tested
 
@@ -229,7 +242,7 @@ steps in headless Chromium. It passes on Python 3.11 and 3.12.
 `TESTBENCH_TEST_MODAL=1` (plans on CPU and a T4, cancelling a GPU run mid-flight, a live session, a T4 session)
 and `TESTBENCH_TEST_COLAB=1` (a plan and a live session on a Colab CPU VM).
 
-[docs/demo.md](docs/demo.md) shows Claude Code, given only this plugin and a project with a planted bug, finding
+[docs/demo.md](https://github.com/sarptandoven/agent-testbench/blob/main/docs/demo.md) shows Claude Code, given only this plugin and a project with a planted bug, finding
 and fixing it and proving the fix with a run.
 
 ## Limits
