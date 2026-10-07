@@ -27,6 +27,30 @@ $ testbench session stop
 gpu stopped after 1.4 min, about $0.017
 ```
 
+## Quick start
+
+**Claude Code** (the plugin adds the skills and a guard for spending and secrets):
+
+```bash
+pip install "agent-testbench[all]"
+claude plugin marketplace add sarptandoven/agent-testbench
+claude plugin install agent-testbench@agent-testbench
+cd your-project && testbench init
+```
+
+Then ask Claude in plain words: *"get training working on a Modal T4 and prove it with a plan"*.
+
+**Claude Desktop, Cursor, Codex or any MCP client** (nothing to install if you have [uv](https://docs.astral.sh/uv/)):
+
+```json
+{ "mcpServers": { "agent-testbench": { "command": "uvx", "args": ["--from", "agent-testbench[all]", "testbench", "mcp"] } } }
+```
+
+Tell your assistant which project folder to work in; every tool takes it as `project_dir`.
+
+**Just the command line**: `pip install "agent-testbench[all]"`, then `testbench init` in your project and
+`testbench session start` or `testbench run <plan>`.
+
 ## What your agent can do with it
 
 - **Work live** in a kernel that stays up - on this machine, in a [Modal](https://modal.com) Sandbox with any
@@ -78,8 +102,11 @@ Then ask in plain words ("get training working on a T4 and prove it with the smo
 **Claude Desktop, Cursor, Codex and other MCP clients**:
 
 ```json
-{ "mcpServers": { "agent-testbench": { "command": "testbench", "args": ["mcp"] } } }
+{ "mcpServers": { "agent-testbench": { "command": "uvx", "args": ["--from", "agent-testbench[all]", "testbench", "mcp"] } } }
 ```
+
+(or `"command": "testbench", "args": ["mcp"]` if you installed it with pip). The server starts outside your
+project, so tell the assistant the project folder; each tool takes it as `project_dir`.
 
 Tools: `session_start`, `session_exec`, `session_files`, `session_sync`, `session_install`, `session_shell`,
 `session_list`, `session_stop`, `plans`, `run_plan`, `wait_run`, `get_report`, `list_runs`, `cancel_run`,

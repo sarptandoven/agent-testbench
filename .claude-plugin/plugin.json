@@ -1,7 +1,7 @@
 {
   "name": "agent-testbench",
   "displayName": "Agent Testbench",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A test bench your coding agent operates: live kernels on this machine, a Modal GPU or a Colab VM to run code and notebook cells, inspect, fix and rerun; plan runs that prove the result with evidence; all inside a budget. Skills for the loop and setup, and a guard hook that keeps cloud spend and secrets in check.",
   "author": {
     "name": "Sarp Tandoven",
