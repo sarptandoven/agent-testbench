@@ -21,10 +21,11 @@ except ImportError:                          # mcp 1.x
 from . import cli
 
 INSTRUCTIONS = (
-    "agent-testbench runs a project's plans (notebooks, scripts, web UIs) locally, on Modal or on Colab within the budget "
-    "in its testbench.yaml, and reports what passed, what failed and why. Work like an testbench: list plans, run the "
-    "cheapest plan that can show a change works, read the report, fix one thing, rerun. Only set "
-    "approved_by_person=true when the person explicitly agreed to that run's cost in this conversation."
+    "agent-testbench is a test bench you operate. Live sessions give you a kernel that stays up on this machine, a "
+    "Modal GPU or a Colab VM: run code or notebook cells, inspect variables, fix and rerun, move files - then stop the "
+    "session. Plans run a project's notebooks, scripts or web UIs end to end and report what passed, what failed and "
+    "why. Everything stays inside the budget in testbench.yaml. Explore in a session, prove with a plan. Only set "
+    "approved_by_person=true when the person explicitly agreed to that cost in this conversation."
 )
 
 server = _Server(name="agent-testbench", instructions=INSTRUCTIONS)

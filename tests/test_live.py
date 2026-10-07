@@ -1,8 +1,9 @@
-"""Live runs on the real services, opt in: they cost money or compute units.
+"""Live runs and sessions on the real services, opt in: they cost money or compute units.
 
-    TESTBENCH_TEST_MODAL=1 python -m pytest tests/test_live.py -k modal    # Modal: about $0.02 (needs `modal setup`)
-    TESTBENCH_TEST_COLAB=1 python -m pytest tests/test_live.py -k colab    # Colab: a CPU runtime for a few minutes
-                                                                        # (needs the Colab CLI and a login)
+    TESTBENCH_TEST_MODAL=1 python -m pytest tests/test_live.py -k modal   # Modal: about $0.05 (needs `modal setup`)
+    TESTBENCH_TEST_COLAB=1 python -m pytest tests/test_live.py -k colab   # Colab: CPU runtimes for a few minutes
+                                                                          # (needs the Colab CLI and a login; set
+                                                                          # TESTBENCH_COLAB_AUTH=adc if you use ADC)
 """
 import json
 import os

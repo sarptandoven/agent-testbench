@@ -10,7 +10,7 @@
       "name": "agent-testbench",
       "source": "./",
       "description": "Skills and a guard hook for operating agent-testbench: live sessions, plan runs, budgets.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "category": "development",
       "tags": [
         "testbench",

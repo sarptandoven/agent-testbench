@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """agent-testbench's guard for Claude Code: a PreToolUse hook on Bash and on the run_plan / session_start MCP tools.
 
-It acts only inside a project with an testbench.yaml, and only on four things:
+It acts only inside a project with a testbench.yaml, and only on four things:
   1. raw cloud launches (`modal run/deploy/serve/shell`, `colab new/run/ssh/exec`) are refused, because
      `testbench run` is what enforces the budget and keeps the evidence;
   2. a run or session with --approve (or approved_by_person=true) becomes a question to the person;

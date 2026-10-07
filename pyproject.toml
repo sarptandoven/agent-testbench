@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-testbench"
-version = "0.1.0"
-description = "Let a coding agent iterate on notebooks, models and UIs like an testbench: run, read the evidence, fix, rerun - locally, on Modal or on Colab, inside a budget."
+version = "0.1.1"
+description = "A test bench your coding agent operates: live kernels and verified runs on Modal GPUs, Colab or your machine, inside a budget."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
