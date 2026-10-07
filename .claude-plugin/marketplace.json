@@ -1,0 +1,25 @@
+{
+  "name": "agent-testbench",
+  "owner": {
+    "name": "Sarp Tandoven",
+    "url": "https://github.com/sarptandoven"
+  },
+  "description": "Agent Testbench: let your agent operate notebooks and GPUs on Modal, Colab or this machine - inside a budget.",
+  "plugins": [
+    {
+      "name": "agent-testbench",
+      "source": "./",
+      "description": "Skills and a guard hook for operating agent-testbench: live sessions, plan runs, budgets.",
+      "version": "0.1.0",
+      "category": "development",
+      "tags": [
+        "testbench",
+        "notebooks",
+        "colab",
+        "modal",
+        "gpu",
+        "agents"
+      ]
+    }
+  ]
+}

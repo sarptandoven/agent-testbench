@@ -1,0 +1,23 @@
+# agent-testbench example: an agent checks a web UI the way a person would - opens it, clicks, reads, looks.
+project: web-ui
+
+plans:
+  ui-check:
+    backend: local
+    description: open the app in a headless browser, click twice, check the count and the console
+    steps:
+      - name: counter works
+        web:
+          serve: python -m http.server 8971 --bind 127.0.0.1 -d site
+          url: http://127.0.0.1:8971/
+          actions:
+            - click: "#increment"
+            - click: "#increment"
+            - screenshot: after-two-clicks
+        max_minutes: 2
+        expect:
+          web:
+            status: 200
+            title: Counter
+            text: ["Count: 2"]
+            no_console_errors: true

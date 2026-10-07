@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-testbench"
+version = "0.1.0"
+description = "Let a coding agent iterate on notebooks, models and UIs like an testbench: run, read the evidence, fix, rerun - locally, on Modal or on Colab, inside a budget."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Sarp Tandoven" }]
+keywords = ["claude", "claude-code", "mcp", "agents", "notebooks", "colab", "modal", "gpu", "testing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "pyyaml>=6",
+    "nbformat>=5.9",
+    "nbclient>=0.10",
+    "ipykernel>=6.29",
+    "jupyter_client>=8",
+]
+
+[project.optional-dependencies]
+modal = ["modal>=1.5"]
+web = ["playwright>=1.45"]
+mcp = ["mcp>=1.2"]
+all = ["modal>=1.5", "playwright>=1.45", "mcp>=1.2"]
+dev = ["pytest>=8", "modal>=1.5", "playwright>=1.45", "mcp>=1.2"]
+
+[project.scripts]
+testbench = "agent_testbench.cli:main"
+agent-testbench = "agent_testbench.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/sarptandoven/agent-testbench"
+Issues = "https://github.com/sarptandoven/agent-testbench/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_testbench"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/agent_testbench", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "web: needs Playwright and a Chromium download",
+    "modal: runs on Modal and costs money (opt in with TESTBENCH_TEST_MODAL=1)",
+    "colab: runs on Colab and uses compute units (opt in with TESTBENCH_TEST_COLAB=1)",
+]

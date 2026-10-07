@@ -1,0 +1,72 @@
+# agent-testbench example: a Colab-style notebook tested locally, on Modal and on Colab.
+project: tiny-model
+
+budget:
+  max_run_usd: 0.50
+  ask_above_usd: 0.20
+  max_day_usd: 2.00
+
+modal:
+  python: "3.11"
+  pip: [scikit-learn==1.5.2, matplotlib==3.9.2]
+  cpu: 2
+  memory_gb: 4
+
+plans:
+  smoke:
+    backend: local
+    description: lint, then a quick train on this machine (seconds, free)
+    steps:
+      - name: lint
+        run: testbench lint tiny_model.ipynb --strict
+        max_minutes: 1
+      - name: train quick
+        notebook: tiny_model.ipynb
+        params: {EPOCHS: 15}
+        max_minutes: 5
+        artifacts: [outputs/*]
+        expect:
+          files: [outputs/metrics.json, outputs/confusion.png]
+          json:
+            outputs/metrics.json: {accuracy: ">= 0.85", epochs: "<= 15"}
+
+  full-modal:
+    backend: modal
+    description: the full training in a Modal CPU container (about a cent)
+    steps:
+      - name: train full
+        notebook: tiny_model.ipynb
+        max_minutes: 10
+        artifacts: [outputs/*]
+        expect:
+          json:
+            outputs/metrics.json: {accuracy: ">= 0.95"}
+
+  gpu-check:
+    backend: modal
+    gpu: T4
+    description: prove a GPU container works end to end before paying for a long GPU run (a few cents)
+    steps:
+      - name: see the GPU
+        run: nvidia-smi --query-gpu=name,memory.total --format=csv
+        max_minutes: 2
+        expect:
+          text: {stdout: ["T4"]}
+      - name: train on the GPU box
+        notebook: tiny_model.ipynb
+        max_minutes: 5
+        expect:
+          json:
+            outputs/metrics.json: {accuracy: ">= 0.95"}
+
+  colab-cpu:
+    backend: colab
+    description: the same notebook on a Colab CPU runtime (needs the Colab CLI; uses a little compute)
+    steps:
+      - name: train on Colab
+        notebook: tiny_model.ipynb
+        max_minutes: 10
+        artifacts: [outputs/*]
+        expect:
+          json:
+            outputs/metrics.json: {accuracy: ">= 0.95"}
