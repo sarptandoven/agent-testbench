@@ -5,6 +5,10 @@
 - Backends are plugins: each one (local, Modal, Colab, or a package with an `agent_testbench.backends` entry point)
   owns its GPUs, prices, config section, remote cancel and `doctor` checks. `testbench doctor` lists the
   backends and any that failed to load. No change for existing projects. See docs/reference.md, "Backends".
+- Colab sessions and plans get a hard stop on the VM itself: a watchdog started before anything is installed ends
+  the work and releases the VM at the time limit (and after a session sits idle), even if this machine is asleep.
+  Before, only the supervisor on this machine stopped a Colab session. Colab estimates now allow 10 start-up
+  minutes instead of 5, so they still bound the cost. `session start` says which hard stop the session got.
 
 ## 0.1.2 - 2026-10-07
 

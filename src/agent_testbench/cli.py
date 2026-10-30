@@ -311,6 +311,8 @@ def cmd_session(a):
         s = S.start(root, cfg, a.name, backend=a.backend, gpu=a.gpu, idle_minutes=a.idle_minutes,
                     max_minutes=a.max_minutes, secrets=a.secret, approve=a.approve)
         print(S.describe(S.sessions_dir(root) / a.name))
+        if (s.get("handles") or {}).get("remote_stop"):
+            print(f"Hard stop {s['handles']['remote_stop']}.")
         print(f"{s['budget_message']} Work in it with `testbench exec`; it stops by itself after "
               f"{s['idle_minutes']:g} idle minutes - stop it sooner with `testbench session stop {a.name}`.")
         return 0

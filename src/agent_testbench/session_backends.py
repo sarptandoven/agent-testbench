@@ -3,7 +3,8 @@
 Each backend starts the same kernel launcher (kernelkit.launcher) next to the project's files and runs code
 through the same client (kernelkit.client), so `exec` returns the same evidence everywhere. Remote machines get
 a hard stop on their own side: a Modal Sandbox has a lifetime timeout and an idle timeout (a running command
-counts as activity); a Colab session is stopped by the session's supervisor.
+counts as activity); a Colab VM runs kernelkit's watchdog, started before anything else, which ends the session
+and releases the VM at max_minutes or when it has sat idle. The supervisor on this machine stops either sooner.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ import time
 from pathlib import Path
 
 from .backends import project_files
+from .backends.colab_backend import REMOTE_STOP, start_watchdog
 
 PKG = Path(__file__).resolve().parent
 BASE_PIP = ["nbformat>=5.9", "nbclient>=0.10", "ipykernel>=6.29", "jupyter_client>=8", "pyyaml>=6"]
@@ -178,7 +180,8 @@ class ModalSession:
             secrets=[modal.Secret.from_name(n) for n in s.get("secrets", [])],
             env={"TESTBENCH_CACHE": "/testbench/cache", "TESTBENCH_SESSION": s["name"]},
             tags={"testbench_project": self.cfg["project"], "testbench_session": s["name"]})
-        handles = {"sandbox_id": self._sb.object_id, "workdir": self.WORK, "app": self._app_name()}
+        handles = {"sandbox_id": self._sb.object_id, "workdir": self.WORK, "app": self._app_name(),
+                   "remote_stop": "by Modal itself: the Sandbox's lifetime and idle timeouts, even if this machine is off"}
         self.state["handles"] = handles
         self._upload_project()
         for _ in range(240):
@@ -292,7 +295,23 @@ if START:
     else:
         print("TESTBENCH_NOT_READY", open("/tmp/testbench_kernel.log").read()[-2000:], flush=True)
 else:
+    if os.path.isdir("/tmp/testbench/kernel"):                # a sync is activity, for the VM's watchdog
+        open("/tmp/testbench/kernel/last_used", "w").write(str(time.time()))
     print("TESTBENCH_SYNCED", flush=True)
+'''
+
+# A shell command counts as activity for the VM's watchdog, as kernel code does.
+COLAB_SHELL = r'''
+import os, subprocess, time
+k = "/tmp/testbench/kernel"
+if os.path.isdir(k):
+    open(k + "/busy", "w").write(str(time.time() + TIMEOUT + 120))
+r = subprocess.run(COMMAND, shell=True, capture_output=True, text=True)
+if os.path.isdir(k):
+    open(k + "/last_used", "w").write(str(time.time()))
+    if os.path.exists(k + "/busy"):
+        os.remove(k + "/busy")
+print(r.stdout + r.stderr)
 '''
 
 # On Colab, `exec` starts the client in the background on the VM and returns at once; short polls then read the
@@ -325,6 +344,9 @@ else:
 
 class ColabSession:
     """A kernel on a Colab VM driven through Google's Colab CLI. The project is in /content, as on Colab."""
+
+    IDLE_SLACK = 10        # the VM's watchdog waits this much longer than the supervisor here: it only sees commands
+                           # that reach the VM, and it is the backstop for when this machine is asleep
 
     def __init__(self, root: Path, cfg: dict, sdir: Path, state: dict):
         self.root, self.cfg, self.sdir, self.state = Path(root), cfg, Path(sdir), state
@@ -371,6 +393,14 @@ class ColabSession:
         self._colab("new", "-s", self.session, *(["--gpu", gpu] if gpu else []))
         handles = {"colab_session": self.session, "workdir": "/content", "cli": self.args}
         self.state["handles"] = handles
+        from .backends import get
+        try:                           # first, before the slow install: the VM's own hard stop
+            stop = start_watchdog(self._colab, self.session, "/tmp/testbench/kernel",
+                                  self.state["max_minutes"] + get("colab").startup_minutes,
+                                  self.state["idle_minutes"] + self.IDLE_SLACK)
+        except RuntimeError as exc:
+            raise SessionError(str(exc)) from None
+        handles["remote_stop"] = REMOTE_STOP[stop]
         pkgs = BASE_PIP + list((self.cfg.get("colab") or {}).get("pip") or [])
         self._colab("install", "-s", self.session, *pkgs, timeout=1800)
         self._send_bundle(with_pkg=True)
@@ -455,8 +485,7 @@ class ColabSession:
         return "project files copied to /content (variables in the kernel are kept)"
 
     def shell(self, command: str, timeout: float) -> str:
-        code = f"import subprocess\nr = subprocess.run({command!r}, shell=True, capture_output=True, text=True)\nprint(r.stdout + r.stderr)"
-        script = self._script(code)
+        script = self._script(COLAB_SHELL, COMMAND=command, TIMEOUT=float(timeout))
         return self._colab("exec", "-s", self.session, "-f", str(script), "--timeout", str(int(timeout)),
                            timeout=timeout + 120, check=False).stdout[-20000:]
 

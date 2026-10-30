@@ -136,7 +136,7 @@ testbench session stop                                      # or let it stop its
 |---|---|---|
 | `local` | this machine, in the project folder | after `idle_minutes` unused or `max_minutes` |
 | `modal` | a Modal Sandbox with your GPU (T4 ... H100, B200), project in `/work/project` and `/content`, a persistent volume at `/testbench` | Modal enforces both limits itself (a running command counts as activity), so it stops even if your laptop is off |
-| `colab` | a Colab VM (CPU, T4, L4, A100, H100 by subscription), project in `/content` | after `idle_minutes` unused or `max_minutes` (Colab may also reclaim VMs after an hour or two) |
+| `colab` | a Colab VM (CPU, T4, L4, A100, H100 by subscription), project in `/content` | after `idle_minutes` unused or `max_minutes`; a watchdog on the VM itself also stops it and releases the VM, so it stops even if your laptop is off (Colab may also reclaim VMs after an hour or two) |
 
 A call that runs past `--timeout` is interrupted; the kernel and its variables survive. One command runs at a
 time per session.
@@ -219,7 +219,9 @@ press, wait for, screenshot). The full reference is in [docs/reference.md](https
   Code the hook turns it into a question to you. Every finished run and session is written to a ledger;
   `testbench spend --modal` also reads Modal's own bill.
 - **Hard stops**: plans and sessions on Modal carry their limits in Modal itself (function and Sandbox
-  timeouts, no retries, 2-second scale-down). Colab sessions and runs are stopped by their supervisor and always
+  timeouts, no retries, 2-second scale-down). Colab VMs get a watchdog first thing, before anything is installed,
+  that ends the work and releases the VM at the time limit (and when a session sits idle). Colab sessions and runs
+  are also stopped by their supervisor and always
   released, even when a run fails.
 - **Secrets**: by name only; values come from Modal secrets or your environment. The hook refuses commands that
   would print them.

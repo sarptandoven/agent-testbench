@@ -5,6 +5,11 @@ bundle (in chunks - uploads over ~100 MB fail), execute the plan with a timeout 
 the run folder back, and always stop the session, so compute units stop with it. The project lands in
 /content, where Colab notebooks expect their files.
 
+The hard stop is on the VM itself: right after the VM is assigned, kernelkit's stand-alone watchdog is copied
+there and started. At the plan's time limit (its max_minutes plus the start-up the estimate allows) it interrupts
+the plan and asks Colab to release the VM, the way google.colab.runtime.unassign() does - so the bound holds
+even if this machine is asleep. (`colab exec --timeout` alone is not one: the CLI enforces it on this side.)
+
 Colab notes: VMs can be reclaimed after a couple of hours even while busy, so keep Colab plans short and
 use Modal for long jobs; set `colab: {auth: adc}` in testbench.yaml if you log in with Application Default
 Credentials.
@@ -28,6 +33,37 @@ UNITS_PER_HOUR = {"CPU": 0.1, "T4": 1.8, "L4": 2.0, "G4": 4.0, "A100": 5.4, "H10
 USD_PER_UNIT = 0.10
 CHUNK = 45 * 1024 * 1024
 PKG = Path(__file__).resolve().parents[1]          # the agent_testbench package, shipped with the project
+WATCHDOG = PKG / "kernelkit" / "watchdog.py"       # standard library only: it runs before anything is installed
+
+WATCHDOG_START = r'''
+import os, subprocess, sys
+os.makedirs(STATE, exist_ok=True)
+argv = [sys.executable, "/content/.testbench_watchdog.py", "--state-dir", STATE, "--max-minutes", str(MAX_MINUTES),
+        "--release", "colab"] + (["--idle-minutes", str(IDLE_MINUTES)] if IDLE_MINUTES else [])
+subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL, stdout=open(STATE + "/watchdog.log", "a"),
+                 stderr=subprocess.STDOUT)
+print("TESTBENCH_WATCHDOG " + ("releases-vm" if os.environ.get("TBE_RUNTIME_ADDR") else "ends-kernel"), flush=True)
+'''
+
+REMOTE_STOP = {
+    "releases-vm": "on the VM itself: it releases itself at the time limit, even if this machine is asleep",
+    "ends-kernel": ("on the VM itself: everything testbench started there is ended at the time limit, even if this "
+                    "machine is asleep; the VM could not be told to release itself (no TBE_RUNTIME_ADDR there), so "
+                    "Colab takes it back once it sits idle (Colab does not publish how long that takes)"),
+}
+
+
+def start_watchdog(colab, session: str, state_dir: str, max_minutes: float, idle_minutes: float | None = None) -> str:
+    """Copy the watchdog to a freshly assigned VM and start it there; returns 'releases-vm' or 'ends-kernel'.
+    `colab` is a backend's own CLI caller (colab(*argv, timeout=...))."""
+    colab("upload", "-s", session, str(WATCHDOG), "/content/.testbench_watchdog.py", timeout=300)
+    script = Path(tempfile.mkdtemp()) / "testbench_watchdog_start.py"
+    script.write_text(f"STATE = {state_dir!r}\nMAX_MINUTES = {float(max_minutes)!r}\n"
+                      f"IDLE_MINUTES = {idle_minutes!r}\n" + WATCHDOG_START)
+    p = colab("exec", "-s", session, "-f", str(script), "--timeout", "120", timeout=300)
+    if "TESTBENCH_WATCHDOG" not in p.stdout:
+        raise RuntimeError("could not start the hard stop on the Colab VM, so it was not used: " + p.stdout[-800:])
+    return "releases-vm" if "TESTBENCH_WATCHDOG releases-vm" in p.stdout else "ends-kernel"
 
 BOOTSTRAP = r'''
 import glob, json, os, subprocess, sys, tarfile
@@ -48,6 +84,8 @@ with tarfile.open("/content/.testbench_bundle.tar.gz") as t:
             m.name = m.name[len("pkg/"):]
             t.extract(m, "/content/.testbench_pkg", **safe)
 sys.path.insert(0, "/content/.testbench_pkg")
+os.makedirs("/tmp/testbench/plan", exist_ok=True)
+open("/tmp/testbench/plan/interrupt.pid", "w").write(str(os.getpid()))   # the VM's watchdog interrupts this at the limit
 os.environ["TESTBENCH_CACHE"] = "/content/.testbench_cache"
 os.makedirs("/content/.testbench_cache", exist_ok=True)
 from agent_testbench.executor import execute_plan
@@ -115,6 +153,10 @@ class ColabBackend:
         self._colab("new", "-s", self.session, *(["--gpu", gpu] if gpu else []), timeout=900)
         self.started = time.time()
         try:
+            limit = sum(s["max_minutes"] for s in self.plan["steps"]) + backend.startup_minutes
+            stop = start_watchdog(self._colab, self.session, "/tmp/testbench/plan", limit)
+            runs.write_state(self.run_dir, remote_stop=REMOTE_STOP[stop])
+            print(f"[testbench] hard stop after {limit:g} min {REMOTE_STOP[stop]}", flush=True)
             pkgs = ["nbformat>=5.9", "nbclient>=0.10", "ipykernel>=6.29", "pyyaml>=6", *self.cfg["colab"].get("pip", [])]
             self._colab("install", "-s", self.session, *pkgs, timeout=1200)
             if self.cfg["colab"].get("requirements"):
@@ -136,9 +178,13 @@ class ColabBackend:
             (self.run_dir / "colab_exec.log").write_text(proc.stdout + proc.stderr)
             pack = Path(tempfile.mkdtemp()) / "testbench_pack.py"
             pack.write_text(f"RUN_ID = {self.run_dir.name!r}\n" + PACK)
-            self._colab("exec", "-s", self.session, "-f", str(pack), "--timeout", "300", timeout=600)
             local = Path(tempfile.mkdtemp()) / "result.tar.gz"
-            self._colab("download", "-s", self.session, "/content/.testbench_result.tar.gz", str(local), timeout=1800)
+            try:
+                self._colab("exec", "-s", self.session, "-f", str(pack), "--timeout", "300", timeout=600)
+                self._colab("download", "-s", self.session, "/content/.testbench_result.tar.gz", str(local), timeout=1800)
+            except RuntimeError as exc:
+                raise RuntimeError(f"could not bring the run back from the Colab VM ({exc}). If the plan ran to its "
+                                   "time limit, the VM's own hard stop may have released it already.") from None
             with tarfile.open(local) as t:
                 t.extractall(self.run_dir, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
         finally:
@@ -164,6 +210,8 @@ class Colab(Backend):
     """Plans and sessions on a Colab VM through Google's Colab CLI; billed in your Colab compute units."""
     name = "colab"
     gpus = ("T4", "L4", "G4", "A100", "H100")
+    startup_minutes = 10.0     # assigning, installing and uploading, plus bringing the evidence back before the
+                               # VM's own hard stop (at the time limit plus this) - so the estimate bounds it
     config_defaults = {"colab": {"pip": [], "requirements": None}}
 
     def rate_per_minute(self, cfg: dict, hardware: dict) -> float:

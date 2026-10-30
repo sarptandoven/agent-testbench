@@ -88,7 +88,7 @@ notebook: run code or cells, look at the values and plots, fix, run again, witho
 |---|---|---|---|
 | `local` | this machine, this Python environment | the project folder itself | supervisor: idle / max minutes |
 | `modal` | a Modal Sandbox (what Modal Notebooks run on) with the GPU you pick; image from `modal:` | copied to `/work/project` (also `/content`); `/testbench` is the project's volume (`$TESTBENCH_CACHE` = `/testbench/cache`) | Modal itself (lifetime = max minutes, idle timeout = idle minutes; a running command counts as activity) and the supervisor |
-| `colab` | a Colab VM through Google's Colab CLI | copied to `/content` | supervisor: idle / max minutes |
+| `colab` | a Colab VM through Google's Colab CLI | copied to `/content` | the VM's own watchdog (max minutes + 10, idle minutes + 10; it releases the VM) and the supervisor (idle / max minutes) |
 
 ```
 testbench session start [NAME] [--backend B] [--gpu G] [--idle-minutes N] [--max-minutes N] [--secret NAME] [--approve]
@@ -107,6 +107,15 @@ refused or no such session. Notebook cells are numbered among code cells from 1,
 Each session's start is checked against the budget like a plan (worst case = `max_minutes` of its hardware), and
 its measured cost is written to the ledger when it stops. Its folder, `.testbench/sessions/NAME/`, holds
 `state.json`, `exec.log` (every command and its outcome) and `outputs/`.
+
+**The hard stop on a Colab VM.** Right after the VM is assigned, before anything is installed, kernelkit's
+watchdog (standard library only) is copied to it and started. At the time limit - a session's `max_minutes`, or a
+plan's total `max_minutes`, plus the 10 start-up minutes the estimate allows for - and, for a session, after
+`idle_minutes` + 10 without a command reaching the VM, it ends everything testbench started there and asks Colab
+to release the VM (what `google.colab.runtime.unassign()` does: a request to the VM's runtime service). `session
+start` says which stop it got: if the VM has no runtime service to ask (no `TBE_RUNTIME_ADDR`), the work is still
+ended, and Colab takes the idle VM back on its own schedule. The supervisor on this machine stops the session
+sooner, at `idle_minutes` / `max_minutes`, while this machine is awake.
 
 ## Plans
 
