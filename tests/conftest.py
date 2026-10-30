@@ -41,6 +41,14 @@ def cli(root: Path, *args, timeout=600, env=None) -> subprocess.CompletedProcess
                           timeout=timeout, env={**os.environ, **(env or {})})
 
 
+@pytest.fixture(autouse=True)
+def machine_limits(tmp_path, monkeypatch) -> Path:
+    """Every test gets its own ~/.testbench (limits for all projects, the machine's ledger), never the real one."""
+    d = tmp_path / "user-testbench"
+    monkeypatch.setenv("TESTBENCH_USER_DIR", str(d))
+    return d
+
+
 @pytest.fixture
 def tiny(tmp_path) -> Path:
     """A fresh copy of the tiny-model example."""

@@ -11,6 +11,7 @@ to write instead.
 | `budget.max_run_usd` | `2.0` | refuse a run whose worst case is higher |
 | `budget.ask_above_usd` | `0.5` | above this, `testbench run` needs `--approve` (a person's yes) |
 | `budget.max_day_usd` | `10.0` | refuse a run that would take today's committed total over this |
+| | | each budget value is capped by this machine's `~/.testbench/limits.yaml`, if set (see below) |
 | `exclude` | `.git`, `.testbench`, `__pycache__`, `*.pyc`, `.venv`, `venv`, `node_modules`, ... | files never shipped to Modal or Colab |
 | `modal.python` | `"3.11"` | Python of the Modal image |
 | `modal.pip` | `[]` | packages for the Modal image (pin them) |
@@ -32,6 +33,25 @@ to write instead.
 | `sessions.secrets` | `[]` | secret NAMES passed into every session |
 | `sessions.cpu`, `sessions.memory_gb` | from `modal:` | Modal sessions only |
 | `guard.ask` | `git push`, `gh repo create`, `gh pr merge`, `gh release create` | commands the Claude Code hook asks about first |
+
+## Machine limits
+
+`~/.testbench/limits.yaml` holds limits for every project on this machine. `testbench init` writes it when it is
+missing; after that only you change it.
+
+```yaml
+max_run_usd: 5.00        # refuse any run or session that could cost more, in any project
+ask_above_usd: 1.00      # above this, a person approves (--approve), in any project
+max_day_usd: 20.00       # everything today, all projects together
+```
+
+A project's `budget:` can lower these limits, never raise them; a refusal says which limit it hit and where that
+limit is set. Every launch and finish is written to the project's `.testbench/ledger.jsonl` and to
+`~/.testbench/ledger.jsonl`, so the machine's day limit counts every project, including a new or deleted one. A
+file that is not valid refuses every launch until it is fixed. In Claude Code the guard hook asks you before an
+agent's edit raises a budget in testbench.yaml, changes its `pricing:` or `guard:`, or touches limits.yaml, and
+refuses edits to the ledgers and commands that point testbench at another limits folder. This keeps an agent from
+raising its own limits; it is not a sandbox against an agent set on getting around it.
 
 ## Backends
 

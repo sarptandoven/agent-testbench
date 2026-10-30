@@ -71,8 +71,9 @@ This project uses agent-testbench. Change things, then prove them on real hardwa
    naming the failing cell and line, the missed expectations, and what changed since the previous run.
 3. Look at the evidence (plots, screenshots, videos) yourself before calling a visual result good.
 4. Fix one thing at a time, rerun, and record what you learned: `testbench note "..."`.
-5. Never pass `--approve` yourself: show the person the estimate and wait for a yes. Never print or copy
-   secret values; refer to secrets by NAME. Paid APIs get strict mocks in tests.
+5. Never pass `--approve` yourself: show the person the estimate and wait for a yes. Never raise `budget:` values
+   or edit ~/.testbench/limits.yaml. Never print or copy secret values; refer to secrets by NAME. Paid APIs get
+   strict mocks in tests.
 6. Done means a passing report for the plan that matters. Say which run proves it and what it cost.
 <!-- /agent-testbench -->
 """
@@ -107,17 +108,25 @@ def cmd_init(a):
             body = AGENTS_SECTION if name == "AGENTS.md" else "See AGENTS.md for how to work in this project (agent-testbench).\n"
             f.write_text((text.rstrip() + "\n\n" if text.strip() else "") + body)
     first = next(iter(C.load(root)["plans"]))
+    machine = budget.write_limits_if_missing()
     print(f"Wrote {target.name}" + (f" with a plan for each of {len(nbs)} notebook(s)" if nbs else "")
           + ", and the working rules in AGENTS.md (CLAUDE.md points to it).\n"
+          + (f"Wrote {machine}: limits for every project on this machine, which a project's budget can lower but "
+             "never raise (edit it yourself to raise them).\n" if machine else "")
           + f"Next: fill in the plans' expect: blocks, then `testbench run {first}`.")
     return 0
 
 
 def cmd_plans(a):
     root, cfg = _root_cfg()
-    b = cfg["budget"]
-    print(f"project {cfg['project']}: runs over ${b['max_run_usd']:.2f} refused, over ${b['ask_above_usd']:.2f} need "
-          f"approval, ${budget.spent_today(root):.2f} of ${b['max_day_usd']:.2f} committed today\n")
+    lim = budget.limits(cfg)
+    print(f"project {cfg['project']}: runs over ${lim['max_run_usd'][0]:.2f} refused, over "
+          f"${lim['ask_above_usd'][0]:.2f} need approval, ${budget.spent_today(root):.2f} of "
+          f"${cfg['budget']['max_day_usd']:.2f} committed today")
+    capped = [where for _, where in lim.values() if "this machine's limit" in where]
+    if capped:
+        print("capped by this machine: " + "; ".join(w.split(" (")[0] for w in capped))
+    print()
     for name, plan in cfg["plans"].items():
         est = budget.worst_case(cfg, name)
         hw = plan["backend"] + (f" {plan['gpu']}" if plan.get("gpu") else "")
@@ -208,6 +217,10 @@ def cmd_spend(a):
     total = sum(e["usd"] for e in finished)
     print(f"today: ${budget.spent_today(root):.3f} committed (budget ${cfg['budget']['max_day_usd']:.2f}); "
           f"all time: ${total:.3f} over {len(finished)} finished run(s) (estimates from time x price)")
+    machine = budget.user_limits()
+    print(f"this machine, every project: ${budget.spent_today_everywhere():.3f} committed today"
+          + (f" (limit ${machine['max_day_usd']:.2f} in {budget.limits_path()})" if "max_day_usd" in machine
+             else f" (no machine-wide day limit; set max_day_usd in {budget.limits_path()})"))
     for e in finished[-a.n:]:
         print(f"  {e['time']}  {e['run']}  {e['backend']}  {e['status']}  {e.get('minutes')} min  ${e['usd']:.3f}")
     if a.modal:

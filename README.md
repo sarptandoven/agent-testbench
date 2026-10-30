@@ -216,7 +216,10 @@ press, wait for, screenshot). The full reference is in [docs/reference.md](https
 
 - **Budget**: worst case = hardware price x time limit (+ start-up). Over `max_run_usd` or the day's cap:
   refused. Over `ask_above_usd`: needs `--approve`, which the agent is told never to pass itself - and in Claude
-  Code the hook turns it into a question to you. Every finished run and session is written to a ledger;
+  Code the hook turns it into a question to you. `~/.testbench/limits.yaml` (written by `testbench init`) caps
+  every project on the machine: a project's budget can lower those limits, never raise them, and its day limit
+  counts all projects together. In Claude Code the hook asks you before an edit raises a budget or changes prices,
+  and refuses edits to the ledgers. Every finished run and session is written to a ledger;
   `testbench spend --modal` also reads Modal's own bill.
 - **Hard stops**: plans and sessions on Modal carry their limits in Modal itself (function and Sandbox
   timeouts, no retries, 2-second scale-down). Colab VMs get a watchdog first thing, before anything is installed,

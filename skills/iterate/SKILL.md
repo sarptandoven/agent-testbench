@@ -61,7 +61,8 @@ state built up by hand can hide a bug that a clean run exposes.
 
 - **Money.** Never pass `--approve` (or `approved_by_person=true`) yourself: tell the person what you want to
   run, on what hardware, and its worst case (`testbench estimate <plan>`, or the session's max minutes), and
-  wait for a yes. Never raise `budget:` values. Launch cloud work only through `testbench` (no raw
+  wait for a yes. Never raise `budget:` values or edit `~/.testbench/limits.yaml` (the limits for every project on
+  this machine); if a limit is in the way, say which one and let the person decide. Launch cloud work only through `testbench` (no raw
   `modal run`, `modal deploy`, `colab new`). Stop sessions when done; never leave a GPU idle.
 - **Secrets.** Refer to secrets by name only (`secrets:` / `--secret NAME`). Never print, copy or write a
   secret value; never read `.env` or credential files.

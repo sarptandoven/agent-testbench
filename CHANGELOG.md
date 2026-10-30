@@ -9,6 +9,11 @@
   the work and releases the VM at the time limit (and after a session sits idle), even if this machine is asleep.
   Before, only the supervisor on this machine stopped a Colab session. Colab estimates now allow 10 start-up
   minutes instead of 5, so they still bound the cost. `session start` says which hard stop the session got.
+- Limits an agent cannot raise: `~/.testbench/limits.yaml` (written by `testbench init` when missing) caps every
+  project on the machine, and a machine-wide ledger makes its day limit count all projects together. The Claude
+  Code hook now also watches file edits: it asks before an edit raises a budget or changes `pricing:`/`guard:` in
+  testbench.yaml or touches limits.yaml, and refuses edits to ledgers. `testbench plans` and `spend` show the
+  limits in force.
 
 ## 0.1.2 - 2026-10-07
 
