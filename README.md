@@ -223,6 +223,14 @@ what was found instead, then what changed since the previous run of the plan ("F
 Steps are `notebook:`, `run:` (a shell command) or `web:` (a page driven in headless Chromium: click, fill,
 press, wait for, screenshot). The full reference is in [docs/reference.md](https://github.com/sarptandoven/agent-testbench/blob/main/docs/reference.md).
 
+**Proof records.** Each report also names what it proves: the git commit it ran (and a hash of any uncommitted
+changes), the Python, platform and packages where it ran, and the sha256 of every evidence file.
+`testbench verify` says whether the evidence still matches. `testbench report --format html` writes one
+self-contained page with the evidence images, `--format junit` gives XML for CI, `testbench history <plan>` shows a
+plan over time, and `testbench ui` writes static pages for every run, with a trend line per checked number. The
+format is published as a JSON Schema
+([`schema/report-v1.schema.json`](https://github.com/sarptandoven/agent-testbench/blob/main/src/agent_testbench/schema/report-v1.schema.json)).
+
 ## Loops
 
 An improvement loop the agent drives and testbench judges - autoresearch, with proof and a budget:
@@ -279,8 +287,9 @@ enforced in code either way.
 |---|---|
 | `testbench session start/list/stop/sync/install/shell` | live kernels |
 | `testbench exec` / `testbench files` | work in a session |
-| `testbench plans` / `run` / `wait` / `report` / `runs` / `cancel` | plans |
-| `testbench estimate <plan>` / `spend [--modal]` | money |
+| `testbench plans` / `run` / `wait` / `report [--format html\|junit]` / `runs` / `cancel` | plans |
+| `testbench history <plan>` / `verify [run]` / `ui` | a plan over time, a run's evidence checked, static pages |
+| `testbench estimate <plan>` / `spend [--modal]` / `prices [--update]` | money |
 | `testbench lint` / `nb split/build/fields` | notebooks |
 | `testbench loop start/try/status/stop` | an improvement loop: tries kept or reverted by a plan's metric |
 | `testbench note "..."` | the project's lab notebook (`.testbench/NOTES.md`) |

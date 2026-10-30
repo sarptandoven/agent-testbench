@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Proof records: each report.json now names the git commit it ran (and a hash of uncommitted changes), the
+  machine and packages where it ran, and the sha256 of every evidence file; it follows a published JSON Schema
+  (schema/report-v1.schema.json). `testbench verify` checks the evidence still matches.
+- `testbench report --format html|junit`, `testbench history <plan>`, and `testbench ui` (static pages for every run,
+  with a trend line per checked number).
+- `testbench prices [--update]`: every price in use and where it comes from; a fetched catalog can raise prices or
+  add hardware, never lower a price.
 - `backend: ssh`: plans and live sessions on any machine you reach with ssh (a GPU box, a university server, a
   rented instance), in a copy of the project and a virtualenv there, priced by `ssh.usd_per_hour`, with the
   watchdog as the hard stop on the machine itself. Secrets go over stdin. Checked against a real sshd.

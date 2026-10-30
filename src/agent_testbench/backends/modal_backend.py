@@ -18,6 +18,7 @@ import threading
 import time
 from pathlib import Path
 
+from .. import prices
 from . import Backend, split_gpu
 
 # US dollars per second (modal.com/pricing, checked 2026-10). Override any of them under `pricing:`.
@@ -223,21 +224,41 @@ class Modal(Backend):
     """Plans run as a deployed Modal function (its timeout is the plan's budget); sessions in a Modal Sandbox with a
     lifetime and an idle timeout. Modal enforces both, so they stop even if this machine is off."""
     name = "modal"
-    gpus = ("T4", "L4", "A10", "A10G", "L40S", "A100-40GB", "A100-80GB", "A100", "H100", "H200", "B200", "B300",
-            "RTX-PRO-6000")
+    built_in_gpus = ("T4", "L4", "A10", "A10G", "L40S", "A100-40GB", "A100-80GB", "A100", "H100", "H200", "B200", "B300",
+                     "RTX-PRO-6000")
     max_session_minutes = 24 * 60
     config_defaults = {"modal": {"python": "3.11", "pip": [], "requirements": None, "apt": [], "cpu": 2.0, "memory_gb": 8}}
 
+    @property
+    def gpus(self) -> tuple[str, ...]:
+        """The built-in GPUs, and any a fetched price catalog added."""
+        fetched = (prices.cached().get("modal") or {}).get("gpu_per_s") or {}
+        return self.built_in_gpus + tuple(g for g in fetched if g not in self.built_in_gpus)
+
+    def _rates(self, cfg: dict) -> tuple[dict, float, float]:
+        own = cfg.get("pricing") or {}
+        cat = prices.cached().get("modal") or {}
+        gpu = {**prices.raised(GPU_PER_S, cat.get("gpu_per_s")), **(own.get("modal_gpu_per_s") or {})}
+        cpu = float(own.get("modal_cpu_core_per_s", prices.raised_value(CPU_CORE_PER_S, cat.get("cpu_core_per_s"))))
+        mem = float(own.get("modal_mem_gib_per_s", prices.raised_value(MEM_GIB_PER_S, cat.get("mem_gib_per_s"))))
+        return gpu, cpu, mem
+
     def rate_per_minute(self, cfg: dict, hardware: dict) -> float:
-        prices = cfg.get("pricing") or {}
+        gpu_rates, cpu_rate, mem_rate = self._rates(cfg)
         gpu, count = split_gpu(hardware.get("gpu"))
-        gpu_rates = {**GPU_PER_S, **(prices.get("modal_gpu_per_s") or {})}
         cpu = float(hardware.get("cpu") or cfg["modal"]["cpu"])
         mem = float(hardware.get("memory_gb") or cfg["modal"]["memory_gb"])
-        per_s = (gpu_rates.get(gpu, 0.0) * count if gpu else 0.0) \
-            + cpu * float(prices.get("modal_cpu_core_per_s", CPU_CORE_PER_S)) \
-            + mem * float(prices.get("modal_mem_gib_per_s", MEM_GIB_PER_S))
+        per_s = (gpu_rates.get(gpu, 0.0) * count if gpu else 0.0) + cpu * cpu_rate + mem * mem_rate
         return per_s * 60
+
+    def prices(self, cfg: dict) -> list[str]:
+        gpu_rates, cpu_rate, mem_rate = self._rates(cfg)
+        fetched = (prices.cached().get("modal") or {}).get("gpu_per_s")
+        own = (cfg.get("pricing") or {}).get("modal_gpu_per_s")
+        lines = [f"  {g:<13} ${v:.6f}/s  ${v * 3600:.2f}/h  ({prices.source(g, GPU_PER_S, fetched, own)})"
+                 for g, v in sorted(gpu_rates.items(), key=lambda kv: kv[1])]
+        return lines + [f"  CPU core ${cpu_rate:.7f}/s, memory ${mem_rate:.8f}/GiB/s; a {cfg['modal']['cpu']:g}-core, "
+                        f"{cfg['modal']['memory_gb']:g} GB machine adds ${(cfg['modal']['cpu'] * cpu_rate + cfg['modal']['memory_gb'] * mem_rate) * 3600:.3f}/h"]
 
     def plan_runner(self):
         return ModalBackend

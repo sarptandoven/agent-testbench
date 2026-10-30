@@ -190,8 +190,9 @@ def execute_plan(plan: dict, *, project_dir: str | Path, run_dir: str | Path, wo
     project, run_dir = Path(project_dir).resolve(), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     workdir = Path(workdir).resolve() if workdir else project
+    from .provenance import environment
     report = {"testbench_version": __version__, **(meta or {}), "status": "running", "started": time.time(),
-              "steps": [], "workdir": str(workdir)}
+              "steps": [], "workdir": str(workdir), "environment": environment()}
     sampler = GpuSampler()
     base_env = {**os.environ, "TESTBENCH_RUN_DIR": str(run_dir), "TESTBENCH_PROJECT_DIR": str(project)}
     # steps see the Python that runs testbench first, so `python` and `testbench` in a step mean this environment

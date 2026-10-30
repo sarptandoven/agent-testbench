@@ -15,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import budget, config as C, report as R
+from . import budget, config as C, provenance, report as R
 
 DONE = ("passed", "failed", "cancelled", "error")
 
@@ -74,6 +74,7 @@ def launch(root: Path, cfg: dict, plan_name: str, approve: bool = False, foregro
     if plan_name not in cfg["plans"]:
         raise LaunchRefused(f"No plan {plan_name!r}. Plans: {', '.join(cfg['plans'])}")
     plan = cfg["plans"][plan_name]
+    source = provenance.source(root)                   # the code this run proves, before anything changes it
     with budget.launching():
         ok, message, est = budget.check_launch(cfg, plan_name, approve)
         if not ok:
@@ -88,7 +89,8 @@ def launch(root: Path, cfg: dict, plan_name: str, approve: bool = False, foregro
         (run_dir / "plan.json").write_text(json.dumps(plan, indent=1))
         write_state(run_dir, run_id=run_dir.name, plan=plan_name, backend=plan["backend"], gpu=plan.get("gpu"),
                     status="queued", created=time.time(), worst_case_usd=est["worst_case_usd"],
-                    usd_per_minute=est["usd_per_minute"], approved=bool(approve), budget_message=message)
+                    usd_per_minute=est["usd_per_minute"], approved=bool(approve), budget_message=message,
+                    source=source)
         budget.record(root, {"event": "launch", "run": run_dir.name, "plan": plan_name, "backend": plan["backend"],
                              "worst_case_usd": est["worst_case_usd"]})
     _gitignore(root)
@@ -227,7 +229,10 @@ def cancel(run_dir: Path) -> str:
 def finalize(root: Path, run_dir: Path, rep: dict, cost_usd: float) -> dict:
     state = read_state(run_dir)
     rep.update(run_id=run_dir.name, plan=state["plan"], backend=state["backend"], gpu=state.get("gpu"),
-               cost_usd=round(cost_usd, 4))
+               cost_usd=round(cost_usd, 4), schema_version=provenance.SCHEMA_VERSION, source=state.get("source"),
+               worst_case_usd=state.get("worst_case_usd"), approved=bool(state.get("approved")),
+               remote_stop=state.get("remote_stop"))
+    rep["evidence"], rep["evidence_sha256"] = provenance.evidence(run_dir)
     rep["delta"] = R.compare(previous_report(root, run_dir, state["plan"]), rep)
     R.write(run_dir, rep)
     write_state(run_dir, status=rep["status"], finished=time.time(), cost_usd=round(cost_usd, 4),

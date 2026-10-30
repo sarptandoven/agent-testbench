@@ -91,6 +91,10 @@ class Backend:
         """(what, ok, detail) lines for `testbench doctor`: is this machine set up to use the backend?"""
         return []
 
+    def prices(self, cfg: dict) -> list[str]:
+        """Lines for `testbench prices`: what this backend charges for, and where each price comes from."""
+        return []
+
 
 def split_gpu(gpu) -> tuple[str, int]:
     """'H100:2' -> ('H100', 2); None -> ('', 1)."""

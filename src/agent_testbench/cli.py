@@ -197,10 +197,96 @@ def cmd_runs(a):
 def cmd_report(a):
     root, _ = _root_cfg()
     run_dir = runs.resolve(root, a.run)
-    if a.json:
-        print((run_dir / "report.json").read_text() if (run_dir / "report.json").exists() else "{}")
-    else:
+    fmt = "json" if a.json else a.format
+    rep = R.load(run_dir)
+    if fmt == "md" or (rep is None and fmt != "json"):
         _print_report(run_dir)
+        return 0
+    if fmt == "json":
+        text = json.dumps(rep, indent=1) if rep else "{}"
+    elif fmt == "junit":
+        text = R.render_junit(rep)
+    else:
+        target = Path(a.output) if a.output else run_dir / "report.html"
+        target.write_text(R.render_html(rep, run_dir))
+        print(f"wrote {target} (one self-contained page: open it in a browser)")
+        return 0
+    if a.output:
+        Path(a.output).write_text(text)
+        print(f"wrote {a.output}")
+    else:
+        print(text)
+    return 0
+
+
+def cmd_history(a):
+    root, cfg = _root_cfg()
+    reports = [rep for p in runs.all_runs(root) if (rep := R.load(p)) and rep.get("plan") == a.plan
+               and rep.get("status") in runs.DONE]
+    if a.plan not in cfg["plans"] and not reports:
+        print(f"no plan {a.plan!r} and no runs of it. Plans: {', '.join(cfg['plans'])}")
+        return 2
+    h = R.history(reports[-a.n:])
+    print(json.dumps(h, indent=1) if a.json else R.render_history(a.plan, h))
+    return 0
+
+
+def cmd_prices(a):
+    from . import backends, prices
+    if a.update:
+        try:
+            changes = prices.update(a.url or prices.URL)
+        except prices.PriceError as exc:
+            print(f"testbench: {exc}")
+            return 2
+        got = prices.cached()
+        print(f"price catalog {got.get('version')} kept in {prices.cache_path()}: "
+              + ("; ".join(changes) if changes else "no price above the built-in table, so nothing changes")
+              + ". (A catalog can raise prices, never lower them.)\n")
+    try:
+        root, cfg = _root_cfg()
+        where = f"project {cfg['project']}"
+    except C.ConfigError:
+        cfg, where = C.validate({"project": "none"}, Path.cwd()), "no project here (testbench.yaml overrides not shown)"
+    got = prices.cached()
+    print(f"Prices for worst-case estimates ({where}); catalog: "
+          + (f"{got.get('version')}, fetched {got.get('fetched', '?')}" if got else "none fetched (`testbench prices --update`)"))
+    for name, b in backends.registry().items():
+        lines = b.prices(cfg)
+        if lines:
+            print(f"{name}\n" + "\n".join(lines))
+    return 0
+
+
+def cmd_ui(a):
+    from . import ui
+    root, cfg = _root_cfg()
+    index = ui.build(root, cfg)
+    print(f"wrote {index} (static pages: open it in a browser; each run's page is report.html in its folder)")
+    if a.open:
+        import webbrowser
+        webbrowser.open(index.as_uri())
+    return 0
+
+
+def cmd_verify(a):
+    from . import provenance
+    root, _ = _root_cfg()
+    run_dir = runs.resolve(root, a.run)
+    rep = R.load(run_dir)
+    if not rep or "evidence" not in rep:
+        print(f"{run_dir.name} has no recorded evidence to check (it ran before agent-testbench recorded hashes, or "
+              "never finished)")
+        return 2
+    problems = provenance.verify(run_dir, rep)
+    if problems:
+        print(f"{run_dir.name}: the evidence no longer matches its report:\n  " + "\n  ".join(problems))
+        return 1
+    src = rep.get("source") or {}
+    print(f"{run_dir.name}: all {len(rep['evidence'])} evidence files match their recorded sha256 "
+          f"({rep['evidence_sha256'][:16]}); ran on "
+          + (f"commit {src['commit'][:12]}" + (" with uncommitted changes" if src.get("dirty") else "") if src
+             else "code outside git"))
     return 0
 
 
@@ -476,12 +562,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=540)
     p.set_defaults(fn=cmd_wait)
     for name, fn, helptext in (("status", cmd_status, "one line about a run"), ("report", cmd_report, "a run's report"),
-                               ("cancel", cmd_cancel, "stop a run, locally and remotely")):
+                               ("cancel", cmd_cancel, "stop a run, locally and remotely"),
+                               ("verify", cmd_verify, "check a run's evidence still matches the hashes in its report")):
         p = sub.add_parser(name, help=helptext)
         p.add_argument("run", nargs="?", help="run id or prefix (default: the latest)")
         if name == "report":
-            p.add_argument("--json", action="store_true")
+            p.add_argument("--format", choices=["md", "json", "html", "junit"], default="md",
+                           help="md (default), json, html (a page with the evidence images; written to the run "
+                                "folder) or junit (XML for CI)")
+            p.add_argument("--json", action="store_true", help="same as --format json")
+            p.add_argument("-o", "--output", help="write to this file")
         p.set_defaults(fn=fn)
+    p = sub.add_parser("prices", help="the prices estimates use and where each comes from; --update fetches the catalog")
+    p.add_argument("--update", action="store_true", help="fetch the price catalog (it can raise prices, never lower them)")
+    p.add_argument("--url", default=None, help="fetch the catalog from here instead of the repository")
+    p.set_defaults(fn=cmd_prices)
+    p = sub.add_parser("ui", help="the project's runs as static pages: .testbench/ui/index.html")
+    p.add_argument("--open", action="store_true", help="also open it in the browser")
+    p.set_defaults(fn=cmd_ui)
+    p = sub.add_parser("history", help="a plan over time: each run's outcome and the numbers its checks found")
+    p.add_argument("plan")
+    p.add_argument("-n", type=int, default=30, help="the latest N runs (default 30)")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_history)
     p = sub.add_parser("runs", help="recent runs")
     p.add_argument("-n", type=int, default=10)
     p.set_defaults(fn=cmd_runs)

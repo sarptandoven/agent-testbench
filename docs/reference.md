@@ -276,6 +276,34 @@ testbench loop stop
   try and why) and checks out the branch the loop started from. The kept commits stay on the loop's branch.
 - Every verdict also goes to the lab notebook, `.testbench/NOTES.md`.
 
+## Proof records
+
+`report.json` follows a published JSON Schema (`src/agent_testbench/schema/report-v1.schema.json`, `schema_version:
+1`; later versions only add fields). Besides the steps, checks and costs, it records:
+
+| field | |
+|---|---|
+| `source` | at launch: `commit`, `branch`, `dirty` (uncommitted changes or untracked files were part of the run), `changes_sha256` (the diff against the commit and the untracked files), `untracked_files`; null outside git. `.testbench/` is not counted |
+| `environment` | where the plan ran (recorded on that machine, Modal, Colab and ssh too): `python`, `platform`, `machine`, `packages` and `packages_sha256` (of the sorted name==version list) |
+| `evidence`, `evidence_sha256` | every file under `steps/` with its size and sha256, and one sha256 over all of them |
+| `worst_case_usd`, `approved`, `remote_stop` | the bound checked before launch, whether a person approved it, and the hard stop on the remote side |
+
+```
+testbench verify [RUN]                     # exit 0: every evidence file matches; 1: what changed, went missing or was added
+testbench report [RUN] --format html|junit [-o FILE]
+testbench history PLAN [-n N] [--json]     # each run's outcome and every number its checks found, oldest first
+testbench ui [--open]                      # .testbench/ui/index.html: plans, trend lines, runs, loops, sessions
+```
+
+## Prices
+
+`testbench prices` lists every price estimates use and where it comes from: the table built into this version, a
+fetched catalog, or the project's `pricing:`. `testbench prices --update [--url URL]` fetches `pricing/catalog.json`
+from the repository into `~/.testbench/prices.json`. A catalog can raise a price above the built-in one or add
+hardware this version does not know (a new GPU becomes allowed); it never lowers a price - that comes with a
+release - so a stale or tampered catalog only makes estimates more cautious. A project's `pricing:` overrides
+both. Nothing is fetched unless asked.
+
 ## Run folder
 
 `.testbench/runs/<YYYYmmdd-HHMMSS-plan>/`:
@@ -284,8 +312,9 @@ testbench loop stop
 state.json        status, process, remote handles (Modal call id / Colab session), cost
 plan.json         the plan as run
 progress.jsonl    one line per event
-report.json       machine-readable report (rewritten after each step)
+report.json       machine-readable report (rewritten after each step; schema/report-v1.schema.json)
 report.md         the report
+report.html       the report as one page with the evidence images (`testbench report --format html`, `testbench ui`)
 driver.log        the background driver's own output
 steps/NN-name/    log.txt, result.json, executed.ipynb, cellNN_imageK.png, downloads/, artifacts/, screenshots
 ```

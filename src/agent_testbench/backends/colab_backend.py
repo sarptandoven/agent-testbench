@@ -25,6 +25,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from .. import prices
 from . import Backend, project_files, split_gpu, tool_check
 
 # Colab bills compute units. These per-hour rates are approximate and vary by account and region; `colab usage`
@@ -209,16 +210,34 @@ class ColabBackend:
 class Colab(Backend):
     """Plans and sessions on a Colab VM through Google's Colab CLI; billed in your Colab compute units."""
     name = "colab"
-    gpus = ("T4", "L4", "G4", "A100", "H100")
+    built_in_gpus = ("T4", "L4", "G4", "A100", "H100")
     startup_minutes = 10.0     # assigning, installing and uploading, plus bringing the evidence back before the
                                # VM's own hard stop (at the time limit plus this) - so the estimate bounds it
     config_defaults = {"colab": {"pip": [], "requirements": None}}
 
+    @property
+    def gpus(self) -> tuple[str, ...]:
+        fetched = (prices.cached().get("colab") or {}).get("units_per_hour") or {}
+        return self.built_in_gpus + tuple(g for g in fetched if g not in self.built_in_gpus and g != "CPU")
+
+    def _rates(self, cfg: dict) -> tuple[dict, float]:
+        own = cfg.get("pricing") or {}
+        cat = prices.cached().get("colab") or {}
+        units = {**prices.raised(UNITS_PER_HOUR, cat.get("units_per_hour")), **(own.get("colab_units_per_hour") or {})}
+        return units, float(own.get("colab_usd_per_unit", prices.raised_value(USD_PER_UNIT, cat.get("usd_per_unit"))))
+
     def rate_per_minute(self, cfg: dict, hardware: dict) -> float:
-        prices = cfg.get("pricing") or {}
+        units, usd = self._rates(cfg)
         gpu, _ = split_gpu(hardware.get("gpu"))
-        units = {**UNITS_PER_HOUR, **(prices.get("colab_units_per_hour") or {})}
-        return units.get(gpu or "CPU", 0.0) * float(prices.get("colab_usd_per_unit", USD_PER_UNIT)) / 60
+        return units.get(gpu or "CPU", 0.0) * usd / 60
+
+    def prices(self, cfg: dict) -> list[str]:
+        units, usd = self._rates(cfg)
+        fetched = (prices.cached().get("colab") or {}).get("units_per_hour")
+        own = (cfg.get("pricing") or {}).get("colab_units_per_hour")
+        return [f"  {g:<6} {u:g} units/h  ${u * usd:.2f}/h  ({prices.source(g, UNITS_PER_HOUR, fetched, own)})"
+                for g, u in sorted(units.items(), key=lambda kv: kv[1])] + \
+            [f"  ${usd:.2f} per compute unit; approximate - `colab usage` shows your account's rates"]
 
     def plan_runner(self):
         return ColabBackend

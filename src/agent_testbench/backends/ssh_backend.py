@@ -367,6 +367,10 @@ class SSH(Backend):
     def rate_per_minute(self, cfg: dict, hardware: dict) -> float:
         return float(cfg["ssh"]["usd_per_hour"]) / 60
 
+    def prices(self, cfg: dict) -> list[str]:
+        return [f"  ${float(cfg['ssh']['usd_per_hour']):.2f}/h for {cfg['ssh'].get('host') or '(no ssh.host set)'} "
+                "(testbench.yaml ssh.usd_per_hour)"]
+
     def plan_runner(self):
         return SSHRunner
 

@@ -36,6 +36,9 @@ class Local(Backend):
             raise ConfigError(f"`{where}.gpu`: local uses whatever GPU this machine has; drop the GPU, or choose the "
                               f"{_gpu_backends()}")
 
+    def prices(self, cfg: dict) -> list[str]:
+        return ["  free (this machine)"]
+
     def plan_runner(self):
         return LocalBackend
 

@@ -90,6 +90,12 @@ Edit notebooks as cell files, not JSON: `testbench nb split nb.ipynb cells/`, ed
 plan or `--params` in a session. `testbench lint nb.ipynb` catches what breaks on Colab. The notebook must
 still work on Colab for a person.
 
+## Proof for a person
+
+A report names the commit it ran and hashes its evidence. Before you point someone at a run, `testbench verify
+<run>` should pass. For a person who wants to look rather than read, `testbench report <run> --format html` writes
+one page with the plots inline; `testbench history <plan>` shows how the checked numbers moved across runs.
+
 ## Reporting back
 
 Lead with the answer: does it work, which run proves it, what it cost (runs and sessions). Then what changed,

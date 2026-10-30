@@ -12,6 +12,9 @@
 - Backends: `backends/__init__.py` (the `Backend` interface and registry, plugins by entry point); each backend
   module (`backends/local.py`, `modal_backend.py`, `colab_backend.py`, `ssh_backend.py`) owns its GPUs, prices and
   plan runner.
+- Proof: `provenance.py` (source, environment, evidence hashes; `schema/report-v1.schema.json`), `report.py`
+  (md, html, junit, history), `ui.py` (static pages). Prices: `prices.py` and `pricing/catalog.json` (keep them equal
+  to the backends' built-in tables; a test checks).
 - Loops: `loop.py` (`testbench loop`: tries on a git branch, kept or reverted by a plan run's metric).
 - Sessions: `kernelkit/` (the launcher and client that run on the session's machine), `session_backends.py`
   (local, Modal Sandbox, Colab CLI), `sessions.py` (state, budget, supervisor).
