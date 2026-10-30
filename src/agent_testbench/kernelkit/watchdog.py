@@ -64,24 +64,36 @@ def _log(state_dir: Path, text: str) -> None:
         f.write(f"{time.strftime('%H:%M:%S')} {text}\n")
 
 
+def _commands():
+    """(pid, command line) of every process: from /proc on Linux (arguments end in NUL), else from ps (macOS, BSD;
+    arguments end in a space; ww: never cut to the terminal width)."""
+    proc = Path("/proc")
+    if proc.is_dir():
+        for d in proc.iterdir():
+            if d.name.isdigit():
+                try:
+                    yield int(d.name), (d / "cmdline").read_bytes()
+                except OSError:
+                    continue
+        return
+    try:
+        out = subprocess.run(["ps", "-axww", "-o", "pid=,command="], capture_output=True, timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    for line in out.splitlines():
+        pid, _, cmd = line.strip().partition(b" ")
+        if pid.isdigit():
+            yield int(pid), cmd + b" "
+
+
 def _ours(state_dir: Path) -> list[int]:
     """Processes of this session: its state folder is on their command line (the launcher's --state-dir, the
-    kernel's connection file, each client's --connection). Other sessions on the same machine are left alone."""
-    me, out = os.getpid(), []
-    mark = str(Path(state_dir).resolve()).encode()
-    proc = Path("/proc")
-    if not proc.is_dir():                           # not Linux: the launcher's process group is all there is
-        return out
-    for d in proc.iterdir():
-        if not d.name.isdigit() or int(d.name) == me:
-            continue
-        try:
-            cmd = (d / "cmdline").read_bytes()
-        except OSError:
-            continue
-        if b"agent_testbench.kernelkit.watchdog" not in cmd and (mark + b"/" in cmd or mark + b"\x00" in cmd):
-            out.append(int(d.name))
-    return out
+    kernel's connection file, each client's --connection). Other sessions on the same machine are left alone, and
+    so are watchdogs."""
+    me = os.getpid()
+    marks = {str(Path(state_dir)).encode(), str(Path(state_dir).resolve()).encode()}   # /tmp is /private/tmp on macOS
+    return [pid for pid, cmd in _commands() if pid != me and b"watchdog" not in cmd
+            and any(m + end in cmd for m in marks for end in (b"/", b"\x00", b" "))]
 
 
 def _signal(pid: int, sig) -> None:

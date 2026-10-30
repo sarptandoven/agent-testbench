@@ -143,3 +143,20 @@ def test_a_reused_pid_is_left_alone(tmp_path):
         (tmp_path / "interrupt.pid").write_text(f"{proc.pid} 1")
         assert watchdog._noted(tmp_path) is None
     proc.kill()
+
+
+def test_finds_the_sessions_processes_without_proc(tmp_path, monkeypatch):
+    """macOS and BSD have no /proc: the watchdog asks ps instead, and still leaves other sessions alone."""
+    ours, other = tmp_path / "k", tmp_path / "k2"
+    sleep = "import time; time.sleep(30)"
+    mine = subprocess.Popen([sys.executable, "-c", sleep, "--state-dir", str(ours)])
+    theirs = subprocess.Popen([sys.executable, "-c", sleep, "--state-dir", str(other)])
+    real = Path.is_dir
+    monkeypatch.setattr(Path, "is_dir", lambda self: False if str(self) == "/proc" else real(self))
+    try:
+        time.sleep(0.3)
+        found = watchdog._ours(ours)
+        assert mine.pid in found and theirs.pid not in found
+    finally:
+        mine.kill()
+        theirs.kill()
