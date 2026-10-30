@@ -114,8 +114,8 @@ async def _with_approval(ctx, project_dir: str, argv: list[str]) -> tuple[int, s
     return code, out + f"\nThe person was asked directly and {how}: do not launch this again without a new yes."
 
 
-async def _follow(ctx, project_dir: str, run: str, seconds: int, head: str = "") -> str:
-    """Follow a run with `testbench wait`, passing its progress lines on to the client as they come."""
+def _progress(ctx):
+    """A line handler that passes each line on to the client as MCP progress."""
     seen = 0
 
     async def progress(line: str):
@@ -126,8 +126,12 @@ async def _follow(ctx, project_dir: str, run: str, seconds: int, head: str = "")
                 await ctx.report_progress(seen, None, line[:300])
             except Exception:
                 pass
+    return progress
 
-    code, out = await _cli(project_dir, ["wait", run, "--timeout", str(max(0, seconds))], on_line=progress)
+
+async def _follow(ctx, project_dir: str, run: str, seconds: int, head: str = "") -> str:
+    """Follow a run with `testbench wait`, passing its progress lines on to the client as they come."""
+    code, out = await _cli(project_dir, ["wait", run, "--timeout", str(max(0, seconds))], on_line=_progress(ctx))
     return _text(code, (head + "\n" if head else "") + out)
 
 
@@ -275,6 +279,41 @@ async def session_list(project_dir: str = ".") -> str:
 async def session_stop(session: str = "", project_dir: str = ".", all_sessions: bool = False) -> str:
     argv = ["session", "stop", *([session] if session else []), *(["--all"] if all_sessions else [])]
     return _text(*await _cli(project_dir, argv))
+
+
+@server.tool(description="Start an improvement loop on a plan, on a git branch of its own: the baseline runs now. Then "
+                         "edit the code and call loop_try for each idea; testbench keeps a try only if the plan passes "
+                         "and metric (FILE:KEY of a number a json expectation of the plan checks, e.g. "
+                         "outputs/metrics.json:accuracy) beats the best so far, else reverts it. budget_usd bounds the "
+                         "whole loop. Above the approval threshold the person is asked directly when the client "
+                         "supports it; otherwise it needs approved_by_person=true, set only after the person agreed.")
+async def loop_start(plan: str, metric: str, budget_usd: float, goal: str = "max", max_hours: float = 8.0,
+                     min_delta: float = 0.0, project_dir: str = ".", approved_by_person: bool = False,
+                     ctx: Context = None) -> str:
+    argv = ["loop", "start", plan, "--metric", metric, "--budget-usd", str(budget_usd), "--goal", goal,
+            "--max-hours", str(max_hours), "--min-delta", str(min_delta)] + (["--approve"] if approved_by_person else [])
+    return _text(*await _with_approval(ctx, project_dir, argv))
+
+
+@server.tool(description="Try the edits made since the loop's best commit: commit them, run the plan (passing on "
+                         "progress), and keep the try (exit 0) or revert it (exit 1); describe what changed in a few "
+                         "words. wait_seconds=0 follows the run until it ends; if it is still running (exit 3), "
+                         "loop_status judges it later.")
+async def loop_try(description: str, wait_seconds: int = 0, project_dir: str = ".", ctx: Context = None) -> str:
+    argv = ["loop", "try", description] + (["--wait", str(wait_seconds)] if wait_seconds else [])
+    return _text(*await _cli(project_dir, argv, on_line=_progress(ctx)))
+
+
+@server.tool(description="The loop's tries: kept or reverted, the metric, the cost, the best so far and what is left.")
+async def loop_status(project_dir: str = ".") -> str:
+    return _text(*await _cli(project_dir, ["loop", "status"]))
+
+
+@server.tool(description="Stop the loop: write its report (each kept change and what it moved, each reverted try and "
+                         "why) and go back to the branch it started from; the kept changes stay on the loop's branch "
+                         "for the person to review and merge.")
+async def loop_stop(project_dir: str = ".") -> str:
+    return _text(*await _cli(project_dir, ["loop", "stop"]))
 
 
 def main(http: bool = False, host: str = "127.0.0.1", port: int = 8765):

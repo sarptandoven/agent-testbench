@@ -229,6 +229,31 @@ Recorded: HTTP status, title, page text, console errors, page errors, failed req
 screenshots. If something already answers on the URL before `serve` starts, the step stops instead of
 testing the wrong program.
 
+## Loops
+
+```
+testbench loop start PLAN --metric FILE:KEY --budget-usd N [--goal max|min] [--min-delta X] [--max-hours H] [--approve] [--wait S]
+testbench loop try "what changed" [--wait S]      # exit 0 kept, 1 reverted, 3 still running, 2 refused
+testbench loop status                             # judges a finished try; exit 3 while one is running
+testbench loop stop
+```
+
+- **Start** needs a git repository with no uncommitted changes. It creates the branch `testbench-loop/<id>`, then
+  runs the plan on the code as it is: the baseline. `--metric` names a number one of the plan's json expectations
+  checks (`FILE:KEY`, as in `expect: {json: {FILE: {KEY: ...}}}`), so it reads the same on every backend.
+- **A try** commits every change in the project folder (not `.testbench/`) and runs the plan in a scratch copy of
+  that commit. It is kept when the run passes and the metric beats the best by more than `--min-delta` (higher for
+  `--goal max`, lower for `min`). Otherwise the branch is reset to the best commit; edits made while the run went
+  are stashed and put back on top. A failing baseline is fine: then the first passing try that reports the metric
+  is kept.
+- **Money and time**: `--budget-usd` bounds all the loop's runs together (finished runs at their measured cost, a
+  running one at its worst case); a try with no room left is refused before anything is committed. Above
+  `ask_above_usd`, a person approves the total once with `--approve`. Each run is still checked against
+  `max_run_usd`, the day limits and this machine's limits. No new tries after `--max-hours`.
+- **Stop** writes `.testbench/loops/<id>/report.md` (each kept change with what it moved and its run, each reverted
+  try and why) and checks out the branch the loop started from. The kept commits stay on the loop's branch.
+- Every verdict also goes to the lab notebook, `.testbench/NOTES.md`.
+
 ## Run folder
 
 `.testbench/runs/<YYYYmmdd-HHMMSS-plan>/`:

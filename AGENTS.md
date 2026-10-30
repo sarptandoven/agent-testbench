@@ -11,6 +11,7 @@
   every remote run or session must have a hard stop on the remote side.
 - Backends: `backends/__init__.py` (the `Backend` interface and registry, plugins by entry point); each backend
   module (`backends/local.py`, `modal_backend.py`, `colab_backend.py`) owns its GPUs, prices and plan runner.
+- Loops: `loop.py` (`testbench loop`: tries on a git branch, kept or reverted by a plan run's metric).
 - Sessions: `kernelkit/` (the launcher and client that run on the session's machine), `session_backends.py`
   (local, Modal Sandbox, Colab CLI), `sessions.py` (state, budget, supervisor).
 - `claude plugin validate . && claude plugin validate .claude-plugin/plugin.json --strict` after plugin changes.

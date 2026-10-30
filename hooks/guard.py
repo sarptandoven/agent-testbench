@@ -11,7 +11,7 @@ Anywhere, it keeps the limits out of the agent's hands:
 Inside a project with a testbench.yaml, it also acts on:
   3. raw cloud launches (`modal run/deploy/serve/shell`, `colab new/run/ssh/exec`) are refused, because
      `testbench run` is what enforces the budget and keeps the evidence;
-  4. a run or session with --approve (or approved_by_person=true) becomes a question to the person;
+  4. a run, session or loop with --approve (or approved_by_person=true) becomes a question to the person;
   5. commands that would print secrets (.env files, printenv, echo $..._KEY) are refused;
   6. commands listed under `guard.ask` in testbench.yaml (default: git push, gh repo create, ...) ask first.
 Anything else gets no decision from this hook. If the hook itself fails, it stays out of the way. It is a safety
@@ -183,7 +183,12 @@ def main() -> None:
     root = find_root(cwd)
     if root is None:
         return
-    if tool.endswith("__run_plan") or tool.endswith("__session_start"):
+    if tool.endswith("__run_plan") or tool.endswith("__session_start") or tool.endswith("__loop_start"):
+        if inp.get("approved_by_person") and tool.endswith("__loop_start"):
+            decide("ask", f"agent-testbench: this loop on plan {inp.get('plan', '?')} may spend up to "
+                          f"${float(inp.get('budget_usd') or 0):.2f} in total, above the project's approval threshold."
+                   + estimate(root, inp.get("plan", "")).replace(" can cost up to", ": each run can cost up to")
+                   + " Approve only if you agreed to that total.")
         if inp.get("approved_by_person"):
             decide("ask", "agent-testbench: this run is over the project's approval threshold." + estimate(root, inp.get("plan", ""))
                    + " Approve only if you agreed to this cost.")
@@ -203,6 +208,9 @@ def main() -> None:
     if m:
         decide("ask", "agent-testbench: a run with --approve spends money above the approval threshold."
                + estimate(root, m.group(1)) + " Approve only if you agreed to this cost.")
+    if re.search(r"\b(?:testbench|agent-testbench|agent_testbench)\s+loop\s+start\b[^;&|]*--approve\b", cmd):
+        decide("ask", "agent-testbench: this loop's total budget is above the approval threshold (every run of the loop "
+                      "together, up to --budget-usd). Approve only if you agreed to that total.")
     if re.search(r"\b(?:testbench|agent-testbench|agent_testbench)\s+session\s+start\b[^;&|]*--approve\b", cmd):
         decide("ask", "agent-testbench: this live session is above the approval threshold (its worst case is its "
                       "--max-minutes on the chosen machine). Approve only if you agreed to this cost.")

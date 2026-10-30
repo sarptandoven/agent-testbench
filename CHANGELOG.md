@@ -20,6 +20,10 @@
   approval threshold asks the person directly through MCP elicitation where the client supports it;
   `testbench mcp --http` serves streamable HTTP. Launches take a machine-wide lock around the budget check, so
   launches at the same moment cannot overspend a day limit together.
+- `testbench loop start/try/status/stop` (and MCP `loop_start`, `loop_try`, `loop_status`, `loop_stop`): an improvement
+  loop the agent drives and testbench judges. Each try is committed on the loop's own branch and proved by a plan
+  run; it is kept only if the run passes and the metric beats the best, otherwise reverted. One budget bounds the
+  whole loop, approved once; the report lists each kept change, what it moved and the run that proves it.
 
 ## 0.1.2 - 2026-10-07
 

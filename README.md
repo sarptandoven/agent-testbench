@@ -110,7 +110,8 @@ project, so tell the assistant the project folder; each tool takes it as `projec
 
 Tools: `session_start`, `session_exec`, `session_files`, `session_sync`, `session_install`, `session_shell`,
 `session_list`, `session_stop`, `plans`, `run_plan`, `wait_run`, `get_report`, `list_runs`, `cancel_run`,
-`spend`, `lint_notebook`, `add_note`. In Claude Code: `claude mcp add agent-testbench -- testbench mcp`.
+`spend`, `lint_notebook`, `add_note`, `loop_start`, `loop_try`, `loop_status`, `loop_stop`. In Claude Code:
+`claude mcp add agent-testbench -- testbench mcp`.
 
 Tools run side by side, so the agent can stop a session or check a run while a long exec or run is still going.
 `session_exec` and `get_report` return plots and screenshots as images the client shows. A launch above the
@@ -219,6 +220,25 @@ what was found instead, then what changed since the previous run of the plan ("F
 Steps are `notebook:`, `run:` (a shell command) or `web:` (a page driven in headless Chromium: click, fill,
 press, wait for, screenshot). The full reference is in [docs/reference.md](https://github.com/sarptandoven/agent-testbench/blob/main/docs/reference.md).
 
+## Loops
+
+An improvement loop the agent drives and testbench judges - autoresearch, with proof and a budget:
+
+```bash
+testbench loop start smoke --metric outputs/metrics.json:accuracy --budget-usd 5 --max-hours 8
+# the agent edits the code, then:
+testbench loop try "lower the learning rate to 3e-4"   # commit, run the plan, keep it or revert it
+testbench loop status                                  # every try: kept or reverted, the metric, the cost
+testbench loop stop                                    # the report; back on your branch
+```
+
+The loop works on a branch of its own (`testbench-loop/<id>`). Each try commits the agent's edits and runs the plan
+on them (in a scratch copy). It is kept only when the run passes and the metric - a number one of the plan's json
+expectations checks - beats the best so far; otherwise the branch goes back to the best commit, keeping any edits
+made meanwhile. `--budget-usd` bounds every run of the loop together; above the approval threshold a person approves
+that total once (`--approve`), and each run is still checked against `max_run_usd` and the day limits. The report
+lists each kept change with what it moved and the run that proves it; merging the branch is yours to decide.
+
 ## Guardrails
 
 - **Budget**: worst case = hardware price x time limit (+ start-up). Over `max_run_usd` or the day's cap:
@@ -259,6 +279,7 @@ enforced in code either way.
 | `testbench plans` / `run` / `wait` / `report` / `runs` / `cancel` | plans |
 | `testbench estimate <plan>` / `spend [--modal]` | money |
 | `testbench lint` / `nb split/build/fields` | notebooks |
+| `testbench loop start/try/status/stop` | an improvement loop: tries kept or reverted by a plan's metric |
 | `testbench note "..."` | the project's lab notebook (`.testbench/NOTES.md`) |
 | `testbench init` / `doctor` / `mcp` | set up, check, serve MCP |
 

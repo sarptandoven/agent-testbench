@@ -98,6 +98,10 @@ from agent_testbench.session_backends import LocalSession
 
 
 class FakeRunner(LocalBackend):
+    def run(self):
+        rep, _ = super().run()
+        return rep, self.cost(rep)
+
     def cost(self, rep):
         return backend.rate_per_minute(self.cfg, self.plan) * rep.get("minutes", 0)
 

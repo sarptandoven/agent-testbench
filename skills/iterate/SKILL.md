@@ -72,6 +72,17 @@ state built up by hand can hide a bug that a clean run exposes.
 - **Honesty.** Report failures as findings. Never weaken an expectation to make a run pass; if one was wrong,
   say why you changed it. Never claim "done", "verified" or "perfect" without the run id that shows it.
 
+## Loops (many ideas, judged by a number)
+
+When the goal is a better number - accuracy, loss, latency, FID - and there are many ideas to try, use a loop
+instead of judging by eye: `testbench loop start <plan> --metric outputs/metrics.json:accuracy --budget-usd N`
+(the person sets N; above the approval threshold they approve that total). Then for each idea: edit, and
+`testbench loop try "what changed"`. testbench commits it, runs the plan, and keeps it only if the run passes and
+the metric improves; otherwise the code goes back to the best version. Try one idea at a time, describe it
+plainly, and read `testbench loop status` before the next. `testbench loop stop` when done or when the budget is
+spent, and report the kept changes and the run that proves the best one. Never edit the plan's expectations
+during a loop to make tries pass.
+
 ## Notebooks
 
 Edit notebooks as cell files, not JSON: `testbench nb split nb.ipynb cells/`, edit `cells/NN_*.py`,

@@ -410,6 +410,41 @@ def cmd_files(a):
     return 0
 
 
+def cmd_loop(a):
+    from . import loop as LP
+    root, cfg = _root_cfg()
+    try:
+        if a.loop_cmd == "start":
+            state = LP.start(root, cfg, a.plan, a.metric, a.budget_usd, goal=a.goal, max_hours=a.max_hours,
+                             min_delta=a.min_delta, approve=a.approve)
+            print(f"[testbench] loop {state['id']} started on branch {state['branch']}; running the baseline "
+                  f"(run {state['tries'][0]['run']})", flush=True)
+        elif a.loop_cmd == "try":
+            state = LP.try_change(root, cfg, " ".join(a.description))
+            t = state["tries"][state["pending"]]
+            print(f"[testbench] loop try {t['n']} committed as {t['commit'][:9]}; run {t['run']} started (loop spent "
+                  f"${LP.spent(state):.3f} of ${state['budget_usd']:.2f})", flush=True)
+        elif a.loop_cmd == "status":
+            state = LP.judge(root, cfg, LP._current(root))
+            print(LP.describe(state))
+            return 3 if state["pending"] is not None else 0
+        else:
+            state, report = LP.stop(root, cfg)
+            print(report.read_text() + f"\n(report: {report.relative_to(root)}; back on {state['original_branch']})")
+            return 0
+        state = LP.follow(root, cfg, state, a.wait)
+    except LP.LoopError as exc:
+        print(f"testbench: {exc}")
+        return 2
+    if state["pending"] is not None:
+        t = state["tries"][state["pending"]]
+        print(f"\n[testbench] try {t['n']} is still running; `testbench wait {t['run']}`, then `testbench loop status`.")
+        return 3
+    last = state["tries"][-1]
+    print("\n" + last["verdict"])
+    return 0 if last.get("kept") else 1
+
+
 def cmd_mcp(a):
     from .mcp_server import main as serve
     serve(http=a.http, host=a.host, port=a.port)
@@ -511,6 +546,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("paths", nargs="*")
     p.add_argument("-s", "--session")
     p.set_defaults(fn=cmd_files)
+    p = sub.add_parser("loop", help="an improvement loop: each try is committed, proved by a plan run, kept or reverted")
+    lsub = p.add_subparsers(dest="loop_cmd", required=True)
+    q = lsub.add_parser("start", help="start a loop on its own git branch and run the baseline")
+    q.add_argument("plan")
+    q.add_argument("--metric", required=True, help="FILE:KEY of a number a json expectation of the plan checks, "
+                                                    "e.g. outputs/metrics.json:accuracy")
+    q.add_argument("--budget-usd", type=float, required=True, help="what the whole loop may spend, every run together")
+    q.add_argument("--goal", choices=["max", "min"], default="max", help="max: higher is better (default); min: lower")
+    q.add_argument("--min-delta", type=float, default=0.0, help="keep a try only if it beats the best by more than this")
+    q.add_argument("--max-hours", type=float, default=8.0, help="no new tries after this long (default 8)")
+    q.add_argument("--approve", action="store_true", help="a person approved the loop's total budget (never set this yourself)")
+    q.add_argument("--wait", type=float, help="follow the baseline run at most this many seconds (default: until it ends)")
+    q = lsub.add_parser("try", help="commit the edits as a try, run the plan, keep it or revert it")
+    q.add_argument("description", nargs="+", help="what this try changed, in a few words")
+    q.add_argument("--wait", type=float, help="follow the run at most this many seconds (default: until it ends)")
+    lsub.add_parser("status", help="the loop's tries: kept or reverted, the metric, the cost")
+    lsub.add_parser("stop", help="write the loop's report and go back to the branch it started from")
+    p.set_defaults(fn=cmd_loop)
     sub.add_parser("doctor", help="check what this machine can run").set_defaults(fn=cmd_doctor)
     p = sub.add_parser("mcp", help="serve these commands as MCP tools (stdio, or --http)")
     p.add_argument("--http", action="store_true", help="streamable HTTP at http://HOST:PORT/mcp instead of stdio")
