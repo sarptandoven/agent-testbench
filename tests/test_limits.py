@@ -1,6 +1,7 @@
 """Limits the agent cannot raise: this machine's limits cap every project, the machine's ledger counts every
 project, and the guard asks before an edit raises a budget and refuses edits to ledgers."""
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -113,3 +114,18 @@ def test_guard_protects_machine_limits_and_ledgers(tmp_path, machine_limits):
     assert bash("HOME=/tmp testbench session start --backend modal") == "deny"
     assert bash("sed -i 's/50/500/' testbench.yaml") == "ask"
     assert bash("testbench plans") is None
+
+
+def test_launches_at_once_cannot_overspend_a_day(tmp_path, plugin):
+    root = tmp_path / "race"
+    root.mkdir()
+    write_config(root, {"project": "race", "budget": {"max_run_usd": 5, "ask_above_usd": 5, "max_day_usd": 0.9},
+                        "plans": {"on-fake": {"backend": "fake", "gpu": "FAKE1", "steps": [
+                            {"name": "nap", "run": "sleep 5", "max_minutes": 4}]}}})       # $0.50 each, room for one
+    env = {**os.environ, **plugin}
+    procs = [subprocess.Popen([sys.executable, "-m", "agent_testbench", "run", "on-fake", "--detach"], cwd=root, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) for _ in range(4)]
+    outs = [p.communicate(timeout=120)[0] for p in procs]
+    assert sum("started" in o for o in outs) == 1, outs
+    assert sum("max_day_usd" in o for o in outs) == 3
+    cli(root, "cancel", env=plugin)

@@ -73,23 +73,24 @@ def previous_report(root: Path, run_dir: Path, plan: str) -> dict | None:
 def launch(root: Path, cfg: dict, plan_name: str, approve: bool = False, foreground: bool = False) -> Path:
     if plan_name not in cfg["plans"]:
         raise LaunchRefused(f"No plan {plan_name!r}. Plans: {', '.join(cfg['plans'])}")
-    ok, message, est = budget.check_launch(cfg, plan_name, approve)
-    if not ok:
-        raise LaunchRefused(message)
     plan = cfg["plans"][plan_name]
-    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_dir = runs_dir(root) / f"{stamp}-{plan_name}"
-    n = 1
-    while run_dir.exists():
-        n += 1
-        run_dir = runs_dir(root) / f"{stamp}-{plan_name}-{n}"
-    run_dir.mkdir(parents=True)
-    (run_dir / "plan.json").write_text(json.dumps(plan, indent=1))
-    write_state(run_dir, run_id=run_dir.name, plan=plan_name, backend=plan["backend"], gpu=plan.get("gpu"),
-                status="queued", created=time.time(), worst_case_usd=est["worst_case_usd"],
-                usd_per_minute=est["usd_per_minute"], approved=bool(approve), budget_message=message)
-    budget.record(root, {"event": "launch", "run": run_dir.name, "plan": plan_name, "backend": plan["backend"],
-                         "worst_case_usd": est["worst_case_usd"]})
+    with budget.launching():
+        ok, message, est = budget.check_launch(cfg, plan_name, approve)
+        if not ok:
+            raise LaunchRefused(message)
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        run_dir = runs_dir(root) / f"{stamp}-{plan_name}"
+        n = 1
+        while run_dir.exists():
+            n += 1
+            run_dir = runs_dir(root) / f"{stamp}-{plan_name}-{n}"
+        run_dir.mkdir(parents=True)
+        (run_dir / "plan.json").write_text(json.dumps(plan, indent=1))
+        write_state(run_dir, run_id=run_dir.name, plan=plan_name, backend=plan["backend"], gpu=plan.get("gpu"),
+                    status="queued", created=time.time(), worst_case_usd=est["worst_case_usd"],
+                    usd_per_minute=est["usd_per_minute"], approved=bool(approve), budget_message=message)
+        budget.record(root, {"event": "launch", "run": run_dir.name, "plan": plan_name, "backend": plan["backend"],
+                             "worst_case_usd": est["worst_case_usd"]})
     _gitignore(root)
     if foreground:
         from . import driver

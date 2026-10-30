@@ -96,19 +96,20 @@ def start(root: Path, cfg: dict, name: str = "main", backend: str | None = None,
         archive = sessions_dir(root) / ".old" / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}"
         archive.parent.mkdir(parents=True, exist_ok=True)
         sdir.rename(archive)
-    ok, message, est = budget.check(cfg, budget.estimate(cfg, hw, longest, f"session {name}"), approve,
-                                    "Lower max_minutes")
-    if not ok:
-        raise SessionError(message)
-    (sdir / "outputs").mkdir(parents=True)
-    now = time.time()
-    state = write(sdir, name=name, backend=hw["backend"], gpu=hw["gpu"], cpu=hw["cpu"], memory_gb=hw["memory_gb"],
-                  status="starting", created=now, idle_minutes=idle, max_minutes=longest,
-                  usd_per_minute=est["usd_per_minute"], worst_case_usd=est["worst_case_usd"],
-                  secrets=list(secrets or cfg["sessions"].get("secrets") or []), exec_count=0, handles={},
-                  budget_message=message)
-    budget.record(root, {"event": "launch", "run": f"session:{name}:{int(now)}", "plan": f"session {name}",
-                         "backend": hw["backend"], "worst_case_usd": est["worst_case_usd"]})
+    with budget.launching():
+        ok, message, est = budget.check(cfg, budget.estimate(cfg, hw, longest, f"session {name}"), approve,
+                                        "Lower max_minutes")
+        if not ok:
+            raise SessionError(message)
+        (sdir / "outputs").mkdir(parents=True)
+        now = time.time()
+        state = write(sdir, name=name, backend=hw["backend"], gpu=hw["gpu"], cpu=hw["cpu"], memory_gb=hw["memory_gb"],
+                      status="starting", created=now, idle_minutes=idle, max_minutes=longest,
+                      usd_per_minute=est["usd_per_minute"], worst_case_usd=est["worst_case_usd"],
+                      secrets=list(secrets or cfg["sessions"].get("secrets") or []), exec_count=0, handles={},
+                      budget_message=message)
+        budget.record(root, {"event": "launch", "run": f"session:{name}:{int(now)}", "plan": f"session {name}",
+                             "backend": hw["backend"], "worst_case_usd": est["worst_case_usd"]})
     write(sdir, ledger_id=f"session:{name}:{int(now)}")
     be = B.get(hw["backend"]).session_class()(root, cfg, sdir, state)
     try:

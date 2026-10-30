@@ -50,6 +50,8 @@ def execute(connection_file: str, code: str, timeout: float = 600, out_dir: str 
     began = time.time()
     res = {"status": "ok", "stdout": "", "stderr": "", "result": None, "displays": [], "images": [], "error": None,
            "execution_count": None, "seconds": 0.0}
+    pid_file = Path(connection_file).with_name("kernel.pid")
+    kernel_pid = int(pid_file.read_text()) if pid_file.exists() and pid_file.read_text().strip().isdigit() else None
     mark_busy(state_dir, began + timeout + 120)
     try:
         kc.wait_for_ready(timeout=60)
@@ -67,8 +69,13 @@ def execute(connection_file: str, code: str, timeout: float = 600, out_dir: str 
             if left <= 0 and interrupted:
                 break
             try:
-                msg = kc.get_iopub_msg(timeout=min(max(left, 0.1), 5))
+                msg = kc.get_iopub_msg(timeout=min(max(left, 0.1), 2))
             except queue.Empty:
+                if kernel_pid and not _alive(kernel_pid):
+                    res["status"] = "error"
+                    res["error"] = {"ename": "KernelGone", "evalue": "the kernel stopped while this ran: the session "
+                                    "was stopped, or the kernel died (out of memory, a crash). Start a new session."}
+                    break
                 continue
             if msg.get("parent_header", {}).get("msg_id") != msg_id:
                 continue
@@ -106,6 +113,19 @@ def execute(connection_file: str, code: str, timeout: float = 600, out_dir: str 
     res["stdout"], res["stderr"] = _keep_tail(res["stdout"]), _keep_tail(res["stderr"])
     res["seconds"] = round(time.time() - began, 2)
     return res
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:                                              # exited but not yet collected by its parent
+        return Path(f"/proc/{pid}/stat").read_text().split(")")[-1].split()[0] != "Z"
+    except OSError:
+        return True
 
 
 def _interrupt(connection_file: str, kc) -> None:

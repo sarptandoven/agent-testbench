@@ -1,66 +1,11 @@
 """Backends as plugins: an installed package adds a backend through an entry point, and testbench prices it, runs
 plans and sessions on it, and reports a broken one instead of failing for everyone."""
-import textwrap
 from pathlib import Path
 
 import pytest
 
 from agent_testbench import backends, budget, config as C
 from conftest import cli, write_config
-
-PLUGIN = '''
-from agent_testbench.backends import Backend
-from agent_testbench.backends.local import LocalBackend
-from agent_testbench.session_backends import LocalSession
-
-
-class FakeRunner(LocalBackend):
-    def cost(self, rep):
-        return backend.rate_per_minute(self.cfg, self.plan) * rep.get("minutes", 0)
-
-
-class Fake(Backend):
-    """This machine, priced as if it were a rented GPU box."""
-    gpus = ("FAKE1", "FAKE2")
-    remote = False
-    startup_minutes = 1.0
-    config_defaults = {"fake": {"usd_per_hour": 6.0}}
-
-    def validate(self, cfg):
-        if cfg["fake"]["usd_per_hour"] <= 0:
-            raise ValueError("fake.usd_per_hour must be positive")
-
-    def rate_per_minute(self, cfg, hardware):
-        return cfg["fake"]["usd_per_hour"] / 60
-
-    def plan_runner(self):
-        return FakeRunner
-
-    def session_class(self):
-        return LocalSession
-
-    def doctor(self):
-        return [("fake box reachable", True, "yes")]
-
-
-backend = Fake()
-'''
-
-
-@pytest.fixture
-def plugin(tmp_path) -> dict:
-    """fakebench installed the way pip would: a module plus a dist-info with entry points, on PYTHONPATH."""
-    site = tmp_path / "site"
-    (site / "fakebench-0.1.dist-info").mkdir(parents=True)
-    (site / "fakebench.py").write_text(PLUGIN)
-    (site / "fakebench-0.1.dist-info" / "METADATA").write_text("Metadata-Version: 2.1\nName: fakebench\nVersion: 0.1\n")
-    (site / "fakebench-0.1.dist-info" / "entry_points.txt").write_text(textwrap.dedent("""\
-        [agent_testbench.backends]
-        fake = fakebench:backend
-        broken = fakebench:no_such_thing
-        """))
-    return {"PYTHONPATH": str(site)}
-
 
 def _project(tmp_path: Path) -> Path:
     root = tmp_path / "proj"

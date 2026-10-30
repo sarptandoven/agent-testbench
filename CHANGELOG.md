@@ -14,6 +14,12 @@
   Code hook now also watches file edits: it asks before an edit raises a budget or changes `pricing:`/`guard:` in
   testbench.yaml or touches limits.yaml, and refuses edits to ledgers. `testbench plans` and `spend` show the
   limits in force.
+- MCP server: each tool runs in its own process, so tools run side by side (stop a session or check a run while a
+  long exec or run is going; an exec ends at once when its session stops, instead of waiting out its timeout).
+  `session_exec` and `get_report` return images; `run_plan`/`wait_run` pass on progress; a launch above the
+  approval threshold asks the person directly through MCP elicitation where the client supports it;
+  `testbench mcp --http` serves streamable HTTP. Launches take a machine-wide lock around the budget check, so
+  launches at the same moment cannot overspend a day limit together.
 
 ## 0.1.2 - 2026-10-07
 

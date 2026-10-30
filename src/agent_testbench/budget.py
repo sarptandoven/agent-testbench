@@ -11,8 +11,10 @@ machine's day limit counts every project together.
 from __future__ import annotations
 
 import datetime as dt
+import fcntl
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 import yaml
@@ -102,6 +104,17 @@ def limits(cfg: dict) -> dict:
         else:
             out[key] = (own, f"budget.{key} ${own:.2f}")
     return out
+
+
+@contextmanager
+def launching():
+    """Held from a launch's check to its ledger entry, machine-wide: two launches at once (two agents, two MCP
+    calls) cannot both pass a day limit that only has room for one."""
+    d = user_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    with open(d / ".launch.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 def ledger_path(root: Path) -> Path:

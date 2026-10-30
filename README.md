@@ -112,6 +112,13 @@ Tools: `session_start`, `session_exec`, `session_files`, `session_sync`, `sessio
 `session_list`, `session_stop`, `plans`, `run_plan`, `wait_run`, `get_report`, `list_runs`, `cancel_run`,
 `spend`, `lint_notebook`, `add_note`. In Claude Code: `claude mcp add agent-testbench -- testbench mcp`.
 
+Tools run side by side, so the agent can stop a session or check a run while a long exec or run is still going.
+`session_exec` and `get_report` return plots and screenshots as images the client shows. A launch above the
+approval threshold asks the person directly in the client (MCP elicitation) when the client supports it, and runs
+only on their yes; otherwise it says what needs approval. For a client that connects to a URL:
+`testbench mcp --http` serves streamable HTTP at `http://127.0.0.1:8765/mcp` (this machine only; it has no
+authentication, so do not expose it without putting authentication in front).
+
 **Any other agent** reads the rules `testbench init` writes into `AGENTS.md`.
 
 ## Live sessions

@@ -412,7 +412,7 @@ def cmd_files(a):
 
 def cmd_mcp(a):
     from .mcp_server import main as serve
-    serve()
+    serve(http=a.http, host=a.host, port=a.port)
     return 0
 
 
@@ -512,7 +512,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-s", "--session")
     p.set_defaults(fn=cmd_files)
     sub.add_parser("doctor", help="check what this machine can run").set_defaults(fn=cmd_doctor)
-    sub.add_parser("mcp", help="serve these commands as MCP tools (stdio)").set_defaults(fn=cmd_mcp)
+    p = sub.add_parser("mcp", help="serve these commands as MCP tools (stdio, or --http)")
+    p.add_argument("--http", action="store_true", help="streamable HTTP at http://HOST:PORT/mcp instead of stdio")
+    p.add_argument("--host", default="127.0.0.1", help="with --http (default 127.0.0.1: this machine only)")
+    p.add_argument("--port", type=int, default=8765, help="with --http (default 8765)")
+    p.set_defaults(fn=cmd_mcp)
     return ap
 
 
