@@ -10,45 +10,20 @@ import datetime as dt
 import json
 from pathlib import Path
 
-from . import config as C
-
-# Modal, US dollars per second (modal.com/pricing, checked 2026-10). Override any of them under `pricing:`.
-MODAL_GPU_PER_S = {"B300": 0.001972, "B200": 0.001736, "H200": 0.001261, "H100": 0.001097, "RTX-PRO-6000": 0.000842,
-                   "A100-80GB": 0.000694, "A100-40GB": 0.000583, "A100": 0.000583, "L40S": 0.000542, "A10": 0.000306,
-                   "A10G": 0.000306, "L4": 0.000222, "T4": 0.000164}
-MODAL_CPU_CORE_PER_S = 0.0000131
-MODAL_MEM_GIB_PER_S = 0.00000222
-# Colab bills compute units. These per-hour rates are approximate and vary by account and region; `colab usage`
-# shows your actual rate - put it under `pricing: colab_units_per_hour:`. Pay-as-you-go is ~$10 per 100 units.
-COLAB_UNITS_PER_HOUR = {"CPU": 0.1, "T4": 1.8, "L4": 2.0, "G4": 4.0, "A100": 5.4, "H100": 9.0}
-COLAB_USD_PER_UNIT = 0.10
+from . import backends as B, config as C
 
 
-def rate_per_minute(cfg: dict, plan: dict) -> float:
-    """US dollars per minute for the plan's hardware; 0 for local plans."""
-    prices = cfg.get("pricing") or {}
-    backend = plan["backend"]
-    if backend == "local":
-        return 0.0
-    gpu = (plan.get("gpu") or "").split(":")[0].upper()
-    count = int(plan["gpu"].split(":")[1]) if plan.get("gpu") and ":" in plan["gpu"] else 1
-    if backend == "modal":
-        gpu_rates = {**MODAL_GPU_PER_S, **(prices.get("modal_gpu_per_s") or {})}
-        cpu = float(plan.get("cpu") or cfg["modal"]["cpu"])
-        mem = float(plan.get("memory_gb") or cfg["modal"]["memory_gb"])
-        per_s = (gpu_rates.get(gpu, 0.0) * count if gpu else 0.0) \
-            + cpu * float(prices.get("modal_cpu_core_per_s", MODAL_CPU_CORE_PER_S)) \
-            + mem * float(prices.get("modal_mem_gib_per_s", MODAL_MEM_GIB_PER_S))
-        return per_s * 60
-    units = {**COLAB_UNITS_PER_HOUR, **(prices.get("colab_units_per_hour") or {})}
-    return units.get(gpu or "CPU", 0.0) * float(prices.get("colab_usd_per_unit", COLAB_USD_PER_UNIT)) / 60
+def rate_per_minute(cfg: dict, hardware: dict) -> float:
+    """US dollars per minute for the hardware ({backend, gpu, cpu?, memory_gb?}) of a plan or session; each backend
+    prices its own (Modal's and Colab's published rates, overridable under `pricing:`), and local is free."""
+    return B.get(hardware["backend"]).rate_per_minute(cfg, hardware)
 
 
 def estimate(cfg: dict, hardware: dict, minutes: float, label: str) -> dict:
     """Worst case for `minutes` on `hardware` ({backend, gpu, cpu?, memory_gb?}); a remote machine also pays for
     starting up and installing, so a few minutes are added."""
     rate = rate_per_minute(cfg, hardware)
-    overhead = 0 if hardware["backend"] == "local" else 5
+    overhead = B.get(hardware["backend"]).startup_minutes
     return {"what": label, "backend": hardware["backend"], "gpu": hardware.get("gpu"), "usd_per_minute": rate,
             "max_minutes": float(minutes), "worst_case_usd": round(rate * (float(minutes) + overhead), 4)}
 

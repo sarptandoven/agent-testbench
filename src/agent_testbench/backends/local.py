@@ -4,7 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import executor
-from . import copy_project
+from ..config import ConfigError
+from . import Backend, _gpu_backends, copy_project
 
 
 class LocalBackend:
@@ -23,3 +24,24 @@ class LocalBackend:
 
     def cost(self, rep: dict) -> float:
         return 0.0
+
+
+class Local(Backend):
+    name = "local"
+    remote = False
+    startup_minutes = 0.0
+
+    def check_hardware(self, where: str, gpu) -> None:
+        if gpu:
+            raise ConfigError(f"`{where}.gpu`: local uses whatever GPU this machine has; drop the GPU, or choose the "
+                              f"{_gpu_backends()}")
+
+    def plan_runner(self):
+        return LocalBackend
+
+    def session_class(self):
+        from ..session_backends import LocalSession
+        return LocalSession
+
+
+backend = Local()

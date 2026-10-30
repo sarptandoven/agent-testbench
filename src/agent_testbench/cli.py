@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -269,16 +268,17 @@ def cmd_note(a):
 def cmd_doctor(a):
     import importlib.util as iu
     import shutil
+    from . import backends
     checks = [("python >= 3.10", sys.version_info >= (3, 10), sys.version.split()[0])]
-    for mod, why in (("nbclient", "notebook steps"), ("ipykernel", "notebook steps"), ("modal", "Modal plans"),
-                     ("playwright", "web steps"), ("mcp", "the MCP server")):
+    for mod, why in (("nbclient", "notebook steps"), ("ipykernel", "notebook steps"), ("playwright", "web steps"),
+                     ("mcp", "the MCP server")):
         checks.append((f"{mod} ({why})", iu.find_spec(mod) is not None, "installed" if iu.find_spec(mod) else "missing"))
     checks.append(("ffprobe (media checks)", bool(shutil.which("ffprobe")), shutil.which("ffprobe") or "missing"))
-    checks.append(("colab CLI (Colab plans)", bool(shutil.which("colab")), shutil.which("colab") or "uv tool install google-colab-cli"))
-    if iu.find_spec("modal"):
-        tok = Path.home() / ".modal.toml"
-        checks.append(("Modal login", tok.exists() or bool(os.environ.get("MODAL_TOKEN_ID")),
-                       "found" if tok.exists() or os.environ.get("MODAL_TOKEN_ID") else "run `modal setup`"))
+    checks.append(("backends", True, ", ".join(backends.names())))
+    for b in backends.registry().values():
+        checks += b.doctor()
+    for name, why in backends.broken().items():
+        checks.append((f"backend {name}", False, why))
     try:
         root = C.find_root()
         C.load(root)
@@ -461,7 +461,7 @@ def build_parser() -> argparse.ArgumentParser:
     ssub = p.add_subparsers(dest="sess_cmd", required=True)
     q = ssub.add_parser("start", help="start a session (inside the budget)")
     q.add_argument("name", nargs="?", default="main")
-    q.add_argument("--backend", choices=list(C.BACKENDS))
+    q.add_argument("--backend", help="local, modal, colab, or an installed backend (`testbench doctor` lists them)")
     q.add_argument("--gpu")
     q.add_argument("--idle-minutes", type=float, help="stop after this long without use (default from testbench.yaml)")
     q.add_argument("--max-minutes", type=float, help="stop after this long in any case; bounds the cost")

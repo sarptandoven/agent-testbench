@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Backends are plugins: each one (local, Modal, Colab, or a package with an `agent_testbench.backends` entry point)
+  owns its GPUs, prices, config section, remote cancel and `doctor` checks. `testbench doctor` lists the
+  backends and any that failed to load. No change for existing projects. See docs/reference.md, "Backends".
+
 ## 0.1.2 - 2026-10-07
 
 - Installs on Intel Macs: the `mcp`/`all` extras keep `cryptography` below 49 there (49+ ships no Intel-Mac wheels).

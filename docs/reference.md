@@ -33,6 +33,52 @@ to write instead.
 | `sessions.cpu`, `sessions.memory_gb` | from `modal:` | Modal sessions only |
 | `guard.ask` | `git push`, `gh repo create`, `gh pr merge`, `gh release create` | commands the Claude Code hook asks about first |
 
+## Backends
+
+A backend is where plans and sessions run. Built in: `local`, `modal`, `colab`; `testbench doctor` lists every
+backend this machine has and whether each is set up. Other backends come from installed packages: a package
+declares an entry point in the `agent_testbench.backends` group that names an instance of
+`agent_testbench.backends.Backend`, and its name can then be used as `backend:` in plans and sessions.
+
+```toml
+# pyproject.toml of the package that provides the backend
+[project.entry-points."agent_testbench.backends"]
+rack = "testbench_rack:backend"
+```
+
+```python
+# testbench_rack.py
+from agent_testbench.backends import Backend, split_gpu
+
+class Rack(Backend):
+    gpus = ("RTX4090",)                          # what `gpu:` may name (NAME or NAME:COUNT)
+    startup_minutes = 2                          # added to every worst case
+    config_defaults = {"rack": {"usd_per_hour": 0.6}}     # its section of testbench.yaml
+
+    def rate_per_minute(self, cfg, hardware):    # US dollars per minute, so budget.check can bound the cost
+        return cfg["rack"]["usd_per_hour"] / 60 * split_gpu(hardware.get("gpu"))[1]
+
+    def plan_runner(self):                       # cls(root=, cfg=, run_dir=, plan=, meta=): run() -> (report, usd),
+        return RackRunner                        #   cancel() -> str, cost(report) -> float
+
+    def session_class(self):                     # cls(root, cfg, sdir, state): start, alive, exec, ls, get, put,
+        return RackSession                       #   install, sync, shell, stop (see backends.Session)
+
+    def cancel_remote(self, state):              # stop remote work from a run's state.json when its driver is gone
+        return ""
+
+    def doctor(self):                            # (what, ok, detail) lines for `testbench doctor`
+        return []
+
+backend = Rack()
+```
+
+Optional: `validate(cfg)` checks the backend's own section (called only when a plan or the sessions use it),
+`max_session_minutes`, and `remote = False` for a backend on this machine (plans then run in the project folder
+and no start-up is priced in). Every remote run and session must have a hard stop on the remote side, so the
+worst case holds even if this machine goes offline. A backend that fails to load is listed by `testbench doctor`
+and only breaks the projects that use it.
+
 ## Live sessions
 
 A session is one IPython kernel kept running on a machine, so an agent can work the way a person works in a

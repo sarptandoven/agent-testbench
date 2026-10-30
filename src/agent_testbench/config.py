@@ -12,19 +12,13 @@ from pathlib import Path
 import yaml
 
 CONFIG_NAME = "testbench.yaml"
-BACKENDS = ("local", "modal", "colab")
 STEP_KINDS = ("notebook", "run", "web")
-MODAL_GPUS = ("T4", "L4", "A10", "A10G", "L40S", "A100-40GB", "A100-80GB", "A100", "H100", "H200", "B200", "B300",
-              "RTX-PRO-6000")
-COLAB_GPUS = ("T4", "L4", "G4", "A100", "H100")
 
 DEFAULTS = {
     "exclude": [".git", ".testbench", "__pycache__", "*.pyc", ".venv", "venv", "node_modules", ".ipynb_checkpoints",
                 ".DS_Store"],
     "budget": {"max_run_usd": 2.0, "ask_above_usd": 0.5, "max_day_usd": 10.0},
     "pricing": {},
-    "modal": {"python": "3.11", "pip": [], "requirements": None, "apt": [], "cpu": 2.0, "memory_gb": 8},
-    "colab": {"pip": [], "requirements": None},
     "guard": {"ask": ["git push", "gh repo create", "gh pr merge", "gh release create"]},
     "sessions": {"backend": "local", "gpu": None, "idle_minutes": 10, "max_minutes": 60, "secrets": []},
 }
@@ -65,7 +59,11 @@ def _merge(base: dict, over: dict) -> dict:
 def validate(raw: dict, root: Path) -> dict:
     if not isinstance(raw, dict):
         raise ConfigError(f"{CONFIG_NAME} must be a mapping with `project:` and `plans:`")
-    cfg = _merge(DEFAULTS, raw)
+    from . import backends as B
+    defaults = copy.deepcopy(DEFAULTS)
+    for b in B.registry().values():                     # each backend brings its own section (modal:, colab:, ...)
+        defaults = _merge(defaults, b.config_defaults)
+    cfg = _merge(defaults, raw)
     project = cfg.get("project")
     if not project or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,40}", str(project)):
         raise ConfigError("`project:` must be a short name of letters, digits, - or _ (it names the Modal app and volume)")
@@ -78,19 +76,17 @@ def validate(raw: dict, root: Path) -> dict:
     if not isinstance(plans, dict):
         raise ConfigError("`plans:` must map plan names to {backend, steps}; see `testbench init` for an example")
     cfg["plans"] = {name: _plan(name, plan, root) for name, plan in plans.items()}
+    for name in sorted({p["backend"] for p in cfg["plans"].values()} | {cfg["sessions"]["backend"]}):
+        B.get(name).validate(cfg)
     return cfg
 
 
 def check_hardware(where: str, backend: str, gpu) -> None:
-    if backend not in BACKENDS:
-        raise ConfigError(f"`{where}.backend` is {backend!r}; use one of {', '.join(BACKENDS)}")
-    if gpu:
-        if backend == "local":
-            raise ConfigError(f"`{where}.gpu`: local uses whatever GPU this machine has; drop the GPU, or choose the "
-                              "modal or colab backend")
-        allowed = MODAL_GPUS if backend == "modal" else COLAB_GPUS
-        if str(gpu).split(":")[0].upper() not in {g.upper() for g in allowed}:
-            raise ConfigError(f"`{where}.gpu` is {gpu!r}; {backend} offers {', '.join(allowed)}")
+    from . import backends as B
+    if backend not in B.names():
+        hint = f" ({B.broken()[backend]})" if backend in B.broken() else ", or install the package that provides it"
+        raise ConfigError(f"`{where}.backend` is {backend!r}; use one of {', '.join(B.names())}{hint}")
+    B.get(backend).check_hardware(where, gpu)
 
 
 def _sessions(s: dict) -> None:
@@ -108,7 +104,8 @@ def _plan(name: str, plan: dict, root: Path) -> dict:
         raise ConfigError(f"`{where}` must be a mapping with `backend:` and `steps:`")
     plan = {"backend": "local", "gpu": None, "workdir": None, "description": "", **plan}
     check_hardware(where, plan["backend"], plan.get("gpu"))
-    plan["workdir"] = plan["workdir"] or ("inplace" if plan["backend"] == "local" else "copy")
+    from . import backends as B
+    plan["workdir"] = plan["workdir"] or ("copy" if B.get(plan["backend"]).remote else "inplace")
     if plan["workdir"] not in ("inplace", "copy"):
         raise ConfigError(f"`{where}.workdir` must be inplace (run in the project folder) or copy (a scratch copy)")
     steps = plan.get("steps")

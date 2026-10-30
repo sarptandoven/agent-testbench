@@ -217,8 +217,8 @@ def cancel(run_dir: Path) -> str:
             time.sleep(1)
     s = read_state(run_dir)
     if s.get("status") not in DONE:                  # the driver is gone: cancel remote work from here
-        from .backends import cancel_remote
-        msg = cancel_remote(s)
+        from . import backends
+        msg = backends.get(s["backend"]).cancel_remote(s)
         write_state(run_dir, status="cancelled", error="cancelled by request" + (f"; {msg}" if msg else ""))
     return f"{run_dir.name} cancelled"
 

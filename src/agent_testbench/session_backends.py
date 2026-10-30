@@ -466,6 +466,3 @@ class ColabSession:
         except Exception:
             pass
 
-
-def backend_for(name: str):
-    return {"local": LocalSession, "modal": ModalSession, "colab": ColabSession}[name]

@@ -32,8 +32,8 @@ def drive(run_dir: Path) -> dict:
     cfg = C.load(root)
     meta = {"run_id": run_dir.name, "plan": state["plan"], "backend": state["backend"], "gpu": state.get("gpu")}
     runs.write_state(run_dir, status="running", started=time.time())
-    from .backends import get_backend
-    backend = get_backend(state["backend"])(root=root, cfg=cfg, run_dir=run_dir, plan=plan, meta=meta)
+    from . import backends
+    backend = backends.get(state["backend"]).plan_runner()(root=root, cfg=cfg, run_dir=run_dir, plan=plan, meta=meta)
     try:
         rep, cost = backend.run()
     except KeyboardInterrupt:

@@ -20,9 +20,12 @@ import tempfile
 import time
 from pathlib import Path
 
-from .. import budget
-from . import project_files
+from . import Backend, project_files, split_gpu, tool_check
 
+# Colab bills compute units. These per-hour rates are approximate and vary by account and region; `colab usage`
+# shows your actual rate - put it under `pricing: colab_units_per_hour:`. Pay-as-you-go is ~$10 per 100 units.
+UNITS_PER_HOUR = {"CPU": 0.1, "T4": 1.8, "L4": 2.0, "G4": 4.0, "A100": 5.4, "H100": 9.0}
+USD_PER_UNIT = 0.10
 CHUNK = 45 * 1024 * 1024
 PKG = Path(__file__).resolve().parents[1]          # the agent_testbench package, shipped with the project
 
@@ -154,4 +157,33 @@ class ColabBackend:
 
     def cost(self, rep: dict) -> float:
         minutes = (time.time() - self.started) / 60 if self.started else 0.0
-        return budget.rate_per_minute(self.cfg, self.plan) * minutes
+        return backend.rate_per_minute(self.cfg, self.plan) * minutes
+
+
+class Colab(Backend):
+    """Plans and sessions on a Colab VM through Google's Colab CLI; billed in your Colab compute units."""
+    name = "colab"
+    gpus = ("T4", "L4", "G4", "A100", "H100")
+    config_defaults = {"colab": {"pip": [], "requirements": None}}
+
+    def rate_per_minute(self, cfg: dict, hardware: dict) -> float:
+        prices = cfg.get("pricing") or {}
+        gpu, _ = split_gpu(hardware.get("gpu"))
+        units = {**UNITS_PER_HOUR, **(prices.get("colab_units_per_hour") or {})}
+        return units.get(gpu or "CPU", 0.0) * float(prices.get("colab_usd_per_unit", USD_PER_UNIT)) / 60
+
+    def plan_runner(self):
+        return ColabBackend
+
+    def session_class(self):
+        from ..session_backends import ColabSession
+        return ColabSession
+
+    def cancel_remote(self, state: dict) -> str:
+        return stop_session(state["colab_session"], state.get("colab_cli_args", [])) if state.get("colab_session") else ""
+
+    def doctor(self):
+        return [tool_check("colab CLI (Colab plans and sessions)", "colab", "uv tool install google-colab-cli")]
+
+
+backend = Colab()

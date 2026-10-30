@@ -20,8 +20,8 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import budget, config as C, notebook as NB
-from .session_backends import SessionError, backend_for
+from . import backends as B, budget, config as C, notebook as NB
+from .session_backends import SessionError
 
 ACTIVE = ("starting", "ready")
 
@@ -66,7 +66,7 @@ def resolve(root: Path, name: str | None) -> Path:
 
 def _backend(root: Path, cfg: dict, sdir: Path):
     state = read(sdir)
-    return backend_for(state["backend"])(root, cfg, sdir, state)
+    return B.get(state["backend"]).session_class()(root, cfg, sdir, state)
 
 
 def hardware(cfg: dict, backend: str | None, gpu: str | None) -> dict:
@@ -85,8 +85,9 @@ def start(root: Path, cfg: dict, name: str = "main", backend: str | None = None,
     hw = hardware(cfg, backend, gpu)
     idle = float(idle_minutes or cfg["sessions"]["idle_minutes"])
     longest = float(max_minutes or cfg["sessions"]["max_minutes"])
-    if hw["backend"] == "modal" and longest > 24 * 60:
-        raise SessionError("a Modal session can last at most 24 hours (max_minutes <= 1440)")
+    most = B.get(hw["backend"]).max_session_minutes
+    if most and longest > most:
+        raise SessionError(f"a {hw['backend']} session can last at most {most / 60:g} hours (max_minutes <= {most:g})")
     sdir = sessions_dir(root) / name
     if (sdir / "state.json").exists():
         old = read(sdir)
@@ -109,7 +110,7 @@ def start(root: Path, cfg: dict, name: str = "main", backend: str | None = None,
     budget.record(root, {"event": "launch", "run": f"session:{name}:{int(now)}", "plan": f"session {name}",
                          "backend": hw["backend"], "worst_case_usd": est["worst_case_usd"]})
     write(sdir, ledger_id=f"session:{name}:{int(now)}")
-    be = backend_for(hw["backend"])(root, cfg, sdir, state)
+    be = B.get(hw["backend"]).session_class()(root, cfg, sdir, state)
     try:
         handles = be.start()
     except BaseException as exc:
