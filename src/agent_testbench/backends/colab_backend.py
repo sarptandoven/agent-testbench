@@ -84,8 +84,8 @@ with tarfile.open("/content/.testbench_bundle.tar.gz") as t:
             m.name = m.name[len("pkg/"):]
             t.extract(m, "/content/.testbench_pkg", **safe)
 sys.path.insert(0, "/content/.testbench_pkg")
-os.makedirs("/tmp/testbench/plan", exist_ok=True)
-open("/tmp/testbench/plan/interrupt.pid", "w").write(str(os.getpid()))   # the VM's watchdog interrupts this at the limit
+from agent_testbench.kernelkit.watchdog import note_interrupt
+note_interrupt("/tmp/testbench/plan", os.getpid())                       # the VM's watchdog interrupts this at the limit
 os.environ["TESTBENCH_CACHE"] = "/content/.testbench_cache"
 os.makedirs("/content/.testbench_cache", exist_ok=True)
 from agent_testbench.executor import execute_plan

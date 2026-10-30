@@ -77,6 +77,8 @@ pip install "agent-testbench[all]"     # or: uv tool install "agent-testbench[al
 The latest from GitHub: `pip install "agent-testbench[all] @ git+https://github.com/sarptandoven/agent-testbench"`.
 
 - **Modal**: `modal setup` once (your account, your card; [pricing](https://modal.com/pricing)).
+- **Any machine over ssh**: `ssh HOST true` must work without a password (keys); put `ssh: {host: HOST, usd_per_hour: 0}`
+  in testbench.yaml (what the machine costs you per hour; it prices the worst case).
 - **Colab**: `uv tool install google-colab-cli`, then log in once (`colab new` opens the sign-in; or set
   `colab: {auth: adc}` if you use gcloud Application Default Credentials). Uses your Colab compute units.
 - **Web UI checks**: `playwright install chromium`.
@@ -145,6 +147,7 @@ testbench session stop                                      # or let it stop its
 | `local` | this machine, in the project folder | after `idle_minutes` unused or `max_minutes` |
 | `modal` | a Modal Sandbox with your GPU (T4 ... H100, B200), project in `/work/project` and `/content`, a persistent volume at `/testbench` | Modal enforces both limits itself (a running command counts as activity), so it stops even if your laptop is off |
 | `colab` | a Colab VM (CPU, T4, L4, A100, H100 by subscription), project in `/content` | after `idle_minutes` unused or `max_minutes`; a watchdog on the VM itself also stops it and releases the VM, so it stops even if your laptop is off (Colab may also reclaim VMs after an hour or two) |
+| `ssh` | any machine you reach with `ssh` (a GPU box, a university server, a rented instance), in a copy of the project and a virtualenv there | after `idle_minutes` unused or `max_minutes`; a watchdog on the machine itself also ends the work, so it stops even if your laptop is off |
 
 A call that runs past `--timeout` is interrupted; the kernel and its variables survive. One command runs at a
 time per session.

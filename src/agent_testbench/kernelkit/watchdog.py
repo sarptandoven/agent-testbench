@@ -102,18 +102,42 @@ def _alive(pid: int) -> bool:
         return False
 
 
+def started_at(pid: int) -> str | None:
+    """When a process started (Linux), to tell it from a later process that got the same pid."""
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        return None
+
+
+def note_interrupt(state_dir, pid: int) -> None:
+    """What a plan writes so the watchdog can interrupt it: its pid and, where the system says, when it started."""
+    Path(state_dir).mkdir(parents=True, exist_ok=True)
+    (Path(state_dir) / "interrupt.pid").write_text(f"{pid} {started_at(pid) or ''}".strip())
+
+
+def _noted(state_dir: Path) -> int | None:
+    """The pid in interrupt.pid - if it is still the process that wrote it, not a later one that reused the pid."""
+    try:
+        pid, *start = (state_dir / "interrupt.pid").read_text().split()
+        pid = int(pid)
+    except (OSError, ValueError):
+        return None
+    now = started_at(pid)
+    return None if start and now is not None and now != start[0] else pid
+
+
 def end_processes(state_dir: Path, kill_group: int | None, interrupt_pid: int | None) -> None:
-    written = state_dir / "interrupt.pid"
-    noted = written.read_text().strip() if written.exists() else ""
-    for pid in {interrupt_pid, int(noted) if noted.isdigit() else None}:
-        if pid:
-            try:
-                os.kill(pid, signal.SIGINT)         # a plan running in Colab's kernel stops and writes its report
-            except (ProcessLookupError, PermissionError):
-                pass
-    if interrupt_pid or written.exists():
-        time.sleep(5)
-    targets = ([kill_group] if kill_group else []) + _ours(state_dir)
+    interrupted = [p for p in {interrupt_pid, _noted(state_dir)} if p]
+    for pid in interrupted:
+        try:
+            os.kill(pid, signal.SIGINT)             # a running plan stops and writes its report
+        except (ProcessLookupError, PermissionError):
+            pass
+    end = time.time() + 30
+    while time.time() < end and any(_alive(p) for p in interrupted):
+        time.sleep(0.25)
+    targets = ([kill_group] if kill_group else []) + [p for p in interrupted if _alive(p)] + _ours(state_dir)
     for pid in targets:
         _signal(pid, signal.SIGTERM)                # the launcher shuts its kernel down on SIGTERM
     end = time.time() + 10

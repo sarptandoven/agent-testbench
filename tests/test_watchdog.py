@@ -133,3 +133,13 @@ def test_colab_starts_the_watchdog_before_anything_else(tmp_path):
     imports = [ln for ln in colab_backend.WATCHDOG.read_text().splitlines() if ln.startswith(("import ", "from "))]
     assert all(ln.split()[1].split(".")[0] in sys.stdlib_module_names for ln in imports), \
         f"the watchdog runs on the VM before the package is there, so standard library only: {imports}"
+
+
+def test_a_reused_pid_is_left_alone(tmp_path):
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    watchdog.note_interrupt(tmp_path, proc.pid)
+    assert watchdog._noted(tmp_path) == proc.pid
+    if watchdog.started_at(proc.pid) is not None:                 # Linux: a different start time is another process
+        (tmp_path / "interrupt.pid").write_text(f"{proc.pid} 1")
+        assert watchdog._noted(tmp_path) is None
+    proc.kill()

@@ -53,6 +53,27 @@ agent's edit raises a budget in testbench.yaml, changes its `pricing:` or `guard
 refuses edits to the ledgers and commands that point testbench at another limits folder. This keeps an agent from
 raising its own limits; it is not a sandbox against an agent set on getting around it.
 
+## The ssh backend
+
+```yaml
+ssh:
+  host: gpu-box                  # required: a Host from ~/.ssh/config, or user@host; `ssh HOST true` must work with keys
+  usd_per_hour: 0.0              # what the machine costs you per hour while it works (0: your own); prices the worst case
+  python: python3                # the machine's Python, 3.10 or newer
+  workdir: ~/.testbench-remote   # where projects, sessions and runs go there
+  setup: venv                    # venv: <workdir>/<project>/venv with testbench's basics and `pip:` (built once, kept);
+  pip: [torch==2.5.1]            #   none: use `python` as it is, with what it has
+  command: [ssh]                 # how to reach it: [ssh, -p, "2222"], [ssh, -J, bastion] ... (also a string)
+```
+
+Plans and sessions on `backend: ssh` run on that machine in a copy of the project (and of this package); a plan's
+`gpu:` is a label there, and the report shows the GPU actually used. Commands go over one reused ssh connection
+in BatchMode, so a host that asks for a password fails with a message instead of hanging. Secrets go over ssh's
+stdin, never onto a command line. The hard stop is on the machine: the watchdog starts first, with the machine's
+own Python, and ends everything the session or run started at its time limit (and a session after it sits idle),
+even if this machine is asleep. A finished or cancelled run's folder there is removed once its evidence is back.
+testbench bounds the work, not the machine: a rented instance that bills while it is on stays on.
+
 ## Backends
 
 A backend is where plans and sessions run. Built in: `local`, `modal`, `colab`; `testbench doctor` lists every
@@ -109,6 +130,7 @@ notebook: run code or cells, look at the values and plots, fix, run again, witho
 | `local` | this machine, this Python environment | the project folder itself | supervisor: idle / max minutes |
 | `modal` | a Modal Sandbox (what Modal Notebooks run on) with the GPU you pick; image from `modal:` | copied to `/work/project` (also `/content`); `/testbench` is the project's volume (`$TESTBENCH_CACHE` = `/testbench/cache`) | Modal itself (lifetime = max minutes, idle timeout = idle minutes; a running command counts as activity) and the supervisor |
 | `colab` | a Colab VM through Google's Colab CLI | copied to `/content` | the VM's own watchdog (max minutes + 10, idle minutes + 10; it releases the VM) and the supervisor (idle / max minutes) |
+| `ssh` | any machine `ssh` reaches (keys, no password) | copied to `<ssh.workdir>/<project>/sessions/NAME/project` | the machine's own watchdog (max minutes + 2, idle minutes + 10) and the supervisor (idle / max minutes) |
 
 ```
 testbench session start [NAME] [--backend B] [--gpu G] [--idle-minutes N] [--max-minutes N] [--secret NAME] [--approve]

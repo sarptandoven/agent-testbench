@@ -4,6 +4,8 @@
     TESTBENCH_TEST_COLAB=1 python -m pytest tests/test_live.py -k colab   # Colab: CPU runtimes for a few minutes
                                                                           # (needs the Colab CLI and a login; set
                                                                           # TESTBENCH_COLAB_AUTH=adc if you use ADC)
+    TESTBENCH_TEST_SSH_HOST=user@host python -m pytest tests/test_live.py -k ssh   # a real ssh host (free unless it is
+                                                                          # billed); TESTBENCH_TEST_SSH_COMMAND for flags
 """
 import json
 import os
@@ -114,3 +116,25 @@ def test_colab_live_session(example):
         (example / "testbench.yaml").write_text((example / "testbench.yaml").read_text()
                                                 + f"\ncolab:\n  auth: {os.environ['TESTBENCH_COLAB_AUTH']}\n")
     _session_roundtrip(example, "live", "colab")
+
+
+@pytest.mark.skipif(not os.environ.get("TESTBENCH_TEST_SSH_HOST"), reason="set TESTBENCH_TEST_SSH_HOST to run on a real ssh host")
+def test_ssh_plan_and_session(example):
+    """TESTBENCH_TEST_SSH_HOST=user@host (reached with keys); TESTBENCH_TEST_SSH_COMMAND='ssh -p 2222 -i key' if needed.
+    Free unless the host is billed; builds a virtualenv there the first time (a minute or two)."""
+    import yaml
+    cfg = yaml.safe_load((example / "testbench.yaml").read_text())
+    cfg["ssh"] = {"host": os.environ["TESTBENCH_TEST_SSH_HOST"], "command": os.environ.get("TESTBENCH_TEST_SSH_COMMAND", "ssh"),
+                  "pip": ["scikit-learn==1.5.2", "matplotlib==3.9.2"]}
+    cfg["plans"]["on-ssh"] = {"backend": "ssh", "steps": [{"name": "train", "notebook": "tiny_model.ipynb", "max_minutes": 10,
+                                                           "expect": {"json": {"outputs/metrics.json": {"accuracy": ">= 0.9"}}}}]}
+    (example / "testbench.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
+    r = cli(example, "run", "on-ssh", "--wait", "900", timeout=1000)
+    assert r.returncode == 0 and "PASS - plan `on-ssh` on ssh" in r.stdout, r.stdout + r.stderr
+    r = cli(example, "session", "start", "box", "--backend", "ssh", "--max-minutes", "10")
+    assert r.returncode == 0 and "ready on ssh" in r.stdout, r.stdout
+    try:
+        out = cli(example, "exec", "--cells", "tiny_model.ipynb:1-4").stdout
+        assert "accuracy" in out and "image:" in out
+    finally:
+        assert "stopped after" in cli(example, "session", "stop").stdout

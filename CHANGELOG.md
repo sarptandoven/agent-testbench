@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `backend: ssh`: plans and live sessions on any machine you reach with ssh (a GPU box, a university server, a
+  rented instance), in a copy of the project and a virtualenv there, priced by `ssh.usd_per_hour`, with the
+  watchdog as the hard stop on the machine itself. Secrets go over stdin. Checked against a real sshd.
+- The watchdog interrupts a plan, then ends it if it has not stopped 30 s later, and never signals a process that
+  only reused a plan's pid.
 - Backends are plugins: each one (local, Modal, Colab, or a package with an `agent_testbench.backends` entry point)
   owns its GPUs, prices, config section, remote cancel and `doctor` checks. `testbench doctor` lists the
   backends and any that failed to load. No change for existing projects. See docs/reference.md, "Backends".
