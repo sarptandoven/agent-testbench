@@ -12,6 +12,11 @@ import yaml
 
 from conftest import REPO, cli, write_config
 
+# Python code keeps running until interrupted; a C call such as time.sleep is not woken by an interrupt on
+# Windows (CPython), so tests interrupt this instead
+BUSY = "import time\nend = time.time() + 60\nwhile time.time() < end:\n    pass"
+
+
 
 def state(root, name="main"):
     return json.loads((root / ".testbench" / "sessions" / name / "state.json").read_text())
@@ -30,9 +35,9 @@ def test_state_persists_like_notebook_cells(started):
     assert cli(root, "exec", "total = 40").returncode == 0
     r = cli(root, "exec", "total += 2\nprint('total is', total)\ntotal * 10")
     assert r.returncode == 0 and "total is 42" in r.stdout and "=> 420" in r.stdout
-    r = cli(root, "exec", "--json", "import os\nos.getcwd()")
+    r = cli(root, "exec", "--json", "import os\nprint(os.getcwd())")
     res = json.loads(r.stdout)[0]
-    assert res["status"] == "ok" and str(root) in res["result"], "a local session runs in the project folder"
+    assert res["status"] == "ok" and str(root) in res["stdout"], "a local session runs in the project folder"
 
 
 def test_errors_name_the_line_and_keep_the_kernel(started):
@@ -48,7 +53,7 @@ def test_timeout_interrupts_and_keeps_state(started):
     root = started
     cli(root, "exec", "before = 7")
     began = time.time()
-    r = cli(root, "exec", "--timeout", "2", "import time\ntime.sleep(60)")
+    r = cli(root, "exec", "--timeout", "2", BUSY) 
     assert r.returncode == 3 and "TIMEOUT" in r.stdout and time.time() - began < 30
     assert "=> 7" in cli(root, "exec", "before").stdout
 
@@ -88,8 +93,8 @@ def test_stop_ends_the_kernel_and_records_cost(plain):
     s = state(plain, "work")
     assert s["status"] == "stopped" and s["cost_usd"] == 0
     time.sleep(1)
-    with pytest.raises(ProcessLookupError):
-        os.kill(pid, 0)
+    from agent_testbench.procs import alive
+    assert not alive(pid), "the launcher (and with it the kernel) is gone"
     r = cli(plain, "exec", "-s", "work", "1")
     assert r.returncode == 2 and "is stopped" in r.stdout
     ledger = [json.loads(x) for x in (plain / ".testbench" / "ledger.jsonl").read_text().splitlines()]

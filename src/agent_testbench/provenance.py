@@ -69,7 +69,8 @@ def evidence(run_dir: Path) -> tuple[list[dict], str]:
     """Every file a run kept under steps/, with sizes and hashes, and one hash over all of them."""
     run_dir = Path(run_dir)
     files = sorted(p for p in (run_dir / "steps").rglob("*") if p.is_file()) if (run_dir / "steps").exists() else []
-    out = [{"path": str(p.relative_to(run_dir)), "bytes": p.stat().st_size, "sha256": _sha256_file(p)} for p in files]
+    out = [{"path": p.relative_to(run_dir).as_posix(), "bytes": p.stat().st_size, "sha256": _sha256_file(p)}
+           for p in files]                                   # / on every system, so a report checks out anywhere
     total = hashlib.sha256("".join(f"{e['path']}\0{e['sha256']}\n" for e in out).encode()).hexdigest()
     return out, total
 

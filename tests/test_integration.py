@@ -60,8 +60,9 @@ def test_params_are_overridden_per_plan(plain):
 def test_cancel_stops_the_work(tmp_path):
     root = tmp_path / "slow"
     root.mkdir()
+    nap = f"sleep 120.{os.getpid()}"                    # this test's own sleep, not another run's on the machine
     write_config(root, {"project": "slow", "plans": {"long": {"steps": [
-        {"name": "sleep", "run": "echo started; sleep 120; echo never", "max_minutes": 5}]}}})
+        {"name": "sleep", "run": f"echo started; {nap}; echo never", "max_minutes": 5}]}}})
     r = cli(root, "run", "long", "--detach")
     assert r.returncode == 3
     run = latest_run(root)
@@ -74,7 +75,7 @@ def test_cancel_stops_the_work(tmp_path):
     assert "cancelled" in r.stdout and time.time() - began < 30
     state = json.loads((run / "state.json").read_text())
     assert state["status"] == "cancelled"
-    out = subprocess.run(["pgrep", "-f", "sleep 120"], capture_output=True, text=True).stdout.strip()
+    out = subprocess.run(["pgrep", "-f", nap], capture_output=True, text=True).stdout.strip()
     assert not out, "the step's process must be gone after cancel"
     assert "CANCELLED" in (run / "report.md").read_text()
 

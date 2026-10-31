@@ -8,6 +8,10 @@ import time
 from agent_testbench import procs
 from agent_testbench.kernelkit.client import execute
 
+# Python code keeps running until interrupted; a C call such as time.sleep is not woken by an interrupt on
+# Windows (CPython), so tests interrupt this instead
+BUSY = "import time\nend = time.time() + 60\nwhile time.time() < end:\n    pass"
+
 
 def test_alive_and_stop_group(tmp_path):
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], **procs.group_kwargs())
@@ -30,22 +34,24 @@ def test_exclusive_serializes_processes(tmp_path):
 
 def test_the_launcher_interrupts_its_kernel_on_request(tmp_path):
     state = tmp_path / "k"
+    log = open(tmp_path / "launcher.log", "w")
     launcher = subprocess.Popen([sys.executable, "-m", "agent_testbench.kernelkit.launcher", "--workdir", str(tmp_path),
-                                 "--state-dir", str(state)], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
-                                **procs.group_kwargs())
+                                 "--state-dir", str(state)], stdout=log, stderr=subprocess.STDOUT, **procs.group_kwargs())
     try:
         for _ in range(240):
             if (state / "ready").exists():
                 break
             time.sleep(0.25)
         out = {}
-        t = threading.Thread(target=lambda: out.update(execute(str(state / "kernel.json"), "import time; time.sleep(60)",
+        t = threading.Thread(target=lambda: out.update(execute(str(state / "kernel.json"), BUSY,
                                                                timeout=120, out_dir=str(tmp_path))))
         t.start()
         time.sleep(3)
         (state / "interrupt").write_text("now")
         t.join(timeout=30)
-        assert out.get("error", {}).get("ename") == "KeyboardInterrupt", out
+        why = (f"result {out}; the launcher {'took' if not (state / 'interrupt').exists() else 'never took'} the "
+               f"request; its log: {(tmp_path / 'launcher.log').read_text()[-1500:]}")
+        assert out.get("error", {}).get("ename") == "KeyboardInterrupt", why
         after = execute(str(state / "kernel.json"), "1 + 1", timeout=30, out_dir=str(tmp_path))
         assert after["result"] == "2", "the kernel survives the interrupt"
     finally:
