@@ -38,7 +38,7 @@ def test_a_plugin_backend_runs_plans_and_sessions(tmp_path, plugin):
 def test_a_broken_plugin_is_reported_not_fatal(tmp_path, plugin):
     root = _project(tmp_path)
     r = cli(root, "doctor", env=plugin)
-    assert "backends: local, modal, colab, ssh, fake" in r.stdout and "fake box reachable" in r.stdout
+    assert "backends: local, modal, colab, ssh, docker, fake" in r.stdout and "fake box reachable" in r.stdout
     assert "backend broken: fakebench:no_such_thing did not load" in r.stdout
     write_config(root, {"project": "proj", "plans": {"p": {"backend": "broken", "steps": [{"name": "a", "run": "true"}]}}})
     r = cli(root, "plans", env=plugin)
