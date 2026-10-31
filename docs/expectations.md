@@ -127,6 +127,10 @@ json:
 - expected outputs/metrics.json: accuracy: file missing
 ```
 
+The file can be a pattern when its folder is not known in advance - `"**/metrics.json"` - as long as it matches
+exactly one file; otherwise the check fails and says how many matched (`testbench init` writes its suggestions this
+way). `testbench loop --metric "**/metrics.json:accuracy"` reads it the same way.
+
 ## text
 
 Text that must appear in the step's output (`stdout`: everything it printed, stdout and stderr) or in a file.

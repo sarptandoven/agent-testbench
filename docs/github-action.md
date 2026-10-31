@@ -181,7 +181,8 @@ Paths are absolute. How `testbench run` ends decides the status and the step:
 
 ## Notes
 
-- Linux and macOS runners. agent-testbench does not run on Windows.
+- Linux and macOS runners are what the action's own tests run on. agent-testbench itself runs on Windows too,
+  and the action's steps are bash (Git Bash on Windows runners), but they have not been run on a Windows runner yet.
 - A fresh runner has no earlier runs, so the report's "compared with the previous run" section appears only for
   a plan run twice in one job.
 - The artifact holds the run's logs as they were written. GitHub masks secrets in the job log, not in uploaded

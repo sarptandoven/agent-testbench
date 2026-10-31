@@ -173,6 +173,15 @@ def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
         add(f"file {pattern}", hits, f"{len(hits)} found" if hits else "missing")
     for path, rules in (expect.get("json") or {}).items():
         f = workdir / path
+        if any(c in str(path) for c in "*?["):           # a pattern, e.g. **/metrics.json: it must name one file
+            hits = sorted(glob.glob(str(workdir / path), recursive=True))
+            if len(hits) != 1:
+                found = ", ".join(str(Path(h).relative_to(workdir)) for h in hits[:5])
+                for key in rules:
+                    add(f"{path}: {key}", False, f"{len(hits)} files match ({found}); the pattern must match exactly one"
+                        if hits else "file missing (nothing matches)")
+                continue
+            f = Path(hits[0])
         try:
             data = json.loads(f.read_text())
         except FileNotFoundError:

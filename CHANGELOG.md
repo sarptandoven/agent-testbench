@@ -21,6 +21,11 @@
 - `testbench init` looks at the project and writes plans that already check something: notebooks (lint, run, the
   files they write), a pytest suite, training scripts and web apps, with a FILL IN line for the number only you know.
 - The watchdog finds a session's processes with `ps` where there is no /proc (macOS, BSD).
+- Documentation site (MkDocs Material) built from README.md and docs/, deployed to GitHub Pages by
+  .github/workflows/docs.yml; server.json for the official MCP Registry; a Cursor plugin manifest; the skills'
+  frontmatter fits the Agent Skills spec; docs/publishing.md lists how each channel is published.
+- A `json:` expectation's file can be a pattern (`"**/metrics.json"`) that must match exactly one file; the json line
+  `testbench init` suggests uses one, so it works when uncommented.
 - docs/demo-loop.md: a real Claude Code run with only this plugin took a model from 0.86 to 0.9756 accuracy with
   `testbench loop` in 6 tries.
 - docs/demo-sandbox.md: a real Claude Code run fixed a failing test suite proved in a Docker sandbox with no

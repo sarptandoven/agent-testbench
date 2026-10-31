@@ -50,3 +50,35 @@ def test_demo_copies_a_working_project_and_runs_it(tmp_path):
     assert r.returncode == 0 and "# PASS - plan `smoke` on local" in r.stdout and "testbench loop start" in r.stdout, r.stdout
     assert (target / ".git").is_dir() and (target / "testbench.yaml").is_file()
     assert cli(tmp_path, "demo", str(target)).returncode == 2, "never into a folder that is not empty"
+
+
+def test_the_fill_in_line_works_when_uncommented(tmp_path):
+    """init only sees `metrics.json` in the code, not the folder it goes to: its json line uses a one-file pattern."""
+    import shutil
+    import pytest
+    from conftest import EXAMPLES, has_sklearn
+    if not has_sklearn():
+        pytest.skip("the example trains a model with scikit-learn")
+    root = tmp_path / "nb"
+    shutil.copytree(EXAMPLES / "tiny-model", root, ignore=shutil.ignore_patterns(".testbench", "outputs", "testbench.yaml"))
+    assert cli(root, "init").returncode == 0
+    yml = root / "testbench.yaml"
+    text = yml.read_text()
+    assert '# json: {"**/metrics.json": {accuracy: ">= 0.9"}}' in text
+    yml.write_text(text.replace('# json: {"**/metrics.json"', 'json: {"**/metrics.json"'))
+    r = cli(root, "run", "tiny-model-local", "--wait", "300")
+    assert r.returncode == 0 and "**/metrics.json: accuracy >= 0.9" in r.stdout, r.stdout
+
+
+def test_a_json_pattern_must_name_one_file(tmp_path):
+    from agent_testbench import expect
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "m.json").write_text('{"x": 1}')
+    one = expect.check({"json": {"**/m.json": {"x": "== 1"}}}, workdir=tmp_path, result={"kind": "run", "exit_code": 0})
+    assert [c["ok"] for c in one if "m.json" in c["check"]] == [True]
+    (tmp_path / "b").mkdir()
+    (tmp_path / "b" / "m.json").write_text('{"x": 1}')
+    two = expect.check({"json": {"**/m.json": {"x": "== 1"}}}, workdir=tmp_path, result={"kind": "run", "exit_code": 0})
+    assert "2 files match (a/m.json, b/m.json); the pattern must match exactly one" in [c["detail"] for c in two][-1]
+    none = expect.check({"json": {"**/z.json": {"x": "== 1"}}}, workdir=tmp_path, result={"kind": "run", "exit_code": 0})
+    assert "nothing matches" in none[-1]["detail"]

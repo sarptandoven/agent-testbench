@@ -56,8 +56,8 @@ def _notebook(root: Path, nb: Path) -> tuple[str, str, str]:
     if made:
         lines.append("          files: [" + ", ".join(_q(f"**/{Path(m).name}") for m in made[:6]) + "]   # what it writes")
     metrics = [m for m in made if m.endswith(".json")]
-    lines.append(f"          # json: {{{metrics[0] if metrics else 'outputs/metrics.json'}: {{accuracy: \">= 0.9\"}}}}"
-                 "   # FILL IN: the number that means it works")
+    where = _q(f"**/{Path(metrics[0]).name}") if metrics else "outputs/metrics.json"
+    lines.append(f"          # json: {{{where}: {{accuracy: \">= 0.9\"}}}}   # FILL IN: the number that means it works")
     found = f"notebook {rel}" + (f" ({len(fields)} form field(s)" if fields else "") + \
         (f"{', ' if fields else ' ('}writes {', '.join(Path(m).name for m in made[:3])})" if made else (")" if fields else ""))
     return name, "\n".join(lines) + "\n", found
