@@ -36,20 +36,6 @@ sessions:                # where `testbench session start` puts its kernel by de
 plans:
 {plans}"""
 
-PLAN_TEMPLATE = """\
-  {name}:
-    backend: local
-    description: run {nb} top to bottom on this machine
-    steps:
-      - name: {nb_stem}
-        notebook: {nb}
-        max_minutes: 20
-        # params: {{EPOCHS: 1}}          # Colab form fields (NAME = value  #@param) to override
-        # expect:
-        #   files: [outputs/metrics.json]
-        #   json: {{outputs/metrics.json: {{accuracy: ">= 0.9"}}}}
-"""
-
 EMPTY_PLAN = """\
   tests:
     backend: local
@@ -96,10 +82,9 @@ def cmd_init(a):
     if target.exists() and not a.force:
         print(f"{target} already exists (use --force to replace it)")
         return 2
-    nbs = [p for p in sorted(root.rglob("*.ipynb")) if ".ipynb_checkpoints" not in p.parts and ".testbench" not in p.parts
-           and ".venv" not in p.parts][:5]
-    plans = "".join(PLAN_TEMPLATE.format(name=f"{p.stem[:30].replace(' ', '-').replace('.', '-')}-local",
-                                         nb=p.relative_to(root).as_posix(), nb_stem=p.stem) for p in nbs) or EMPTY_PLAN
+    from .scaffold import detect
+    found = detect(root)
+    plans = "".join(text for _, text, _ in found) or EMPTY_PLAN
     project = "".join(c if c.isalnum() or c in "-_" else "-" for c in root.name)[:40].strip("-") or "project"
     target.write_text(INIT_TEMPLATE.format(project=project, plans=plans))
     for name in ("AGENTS.md", "CLAUDE.md"):
@@ -110,11 +95,16 @@ def cmd_init(a):
             f.write_text((text.rstrip() + "\n\n" if text.strip() else "") + body)
     first = next(iter(C.load(root)["plans"]))
     machine = budget.write_limits_if_missing()
-    print(f"Wrote {target.name}" + (f" with a plan for each of {len(nbs)} notebook(s)" if nbs else "")
-          + ", and the working rules in AGENTS.md (CLAUDE.md points to it).\n"
-          + (f"Wrote {machine}: limits for every project on this machine, which a project's budget can lower but "
-             "never raise (edit it yourself to raise them).\n" if machine else "")
-          + f"Next: fill in the plans' expect: blocks, then `testbench run {first}`.")
+    print(f"Wrote {target.name}" + (":" if found else " with a starter plan (no notebooks, tests, app or training "
+                                                         "script found):"))
+    for name, _, what in found:
+        print(f"  plan {name}: {what}")
+    print("and the working rules in AGENTS.md (CLAUDE.md points to it).")
+    if machine:
+        print(f"Wrote {machine}: limits for every project on this machine, which a project's budget can lower but never "
+              "raise (edit it yourself to raise them).")
+    print(f"Next: fill in the lines marked FILL IN in {target.name} - the numbers that mean \"working\" - then "
+          f"`testbench run {first}`.")
     return 0
 
 
