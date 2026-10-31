@@ -1,7 +1,26 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - not yet released
 
+- `backend: docker`: plans and live sessions in a fresh container on this machine. The project is copied in, nothing
+  is mounted, and evidence comes back owned by you; `network: none` gives a sandbox with no network, `gpus:` passes
+  NVIDIA GPUs through. The hard stop is kernelkit's watchdog inside the container. See docs/docker.md.
+- Expectations for real projects: `junit:` reads a test suite's JUnit XML (pytest, jest, go, ...) and names the
+  failing tests; `metrics:` checks numbers printed to the log or a file; `gpu:` fails a step that left the GPU idle;
+  `image:` compares a plot with a known-good one; `duration:` bounds a step's run time. Any rule can be a tolerance
+  (`"~= 0.93 +- 0.01"`, `"+- 5%"`) or a range (`"between 0.8 and 0.95"`). Malformed expectations fail when
+  testbench.yaml loads. `testbench loop --metric check:SUBSTRING` uses any check's number. See docs/expectations.md.
+- GitHub Action (`uses: sarptandoven/agent-testbench@v1`): runs a plan in CI and shows its report as the job summary,
+  plus junit.xml, the evidence as an artifact and a pass/fail check; a refused run fails with the reason. Budgets
+  apply; `approve: true` is a standing yes. See docs/github-action.md.
+- Windows: the CLI, local plans and sessions, loops, reports and the MCP server run on Windows (CI covers it). One
+  module (procs.py) starts, checks and stops background work on every system; the kernel launcher interrupts its
+  kernel on request, which works on Windows too; the CLI runs in Python's UTF-8 mode there.
+- `testbench init` looks at the project and writes plans that already check something: notebooks (lint, run, the
+  files they write), a pytest suite, training scripts and web apps, with a FILL IN line for the number only you know.
+- The watchdog finds a session's processes with `ps` where there is no /proc (macOS, BSD).
+- docs/demo-loop.md: a real Claude Code run with only this plugin took a model from 0.86 to 0.9756 accuracy with
+  `testbench loop` in 6 tries.
 - Proof records: each report.json now names the git commit it ran (and a hash of uncommitted changes), the
   machine and packages where it ran, and the sha256 of every evidence file; it follows a published JSON Schema
   (schema/report-v1.schema.json). `testbench verify` checks the evidence still matches.

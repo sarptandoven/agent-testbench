@@ -131,6 +131,7 @@ notebook: run code or cells, look at the values and plots, fix, run again, witho
 | `modal` | a Modal Sandbox (what Modal Notebooks run on) with the GPU you pick; image from `modal:` | copied to `/work/project` (also `/content`); `/testbench` is the project's volume (`$TESTBENCH_CACHE` = `/testbench/cache`) | Modal itself (lifetime = max minutes, idle timeout = idle minutes; a running command counts as activity) and the supervisor |
 | `colab` | a Colab VM through Google's Colab CLI | copied to `/content` | the VM's own watchdog (max minutes + 10, idle minutes + 10; it releases the VM) and the supervisor (idle / max minutes) |
 | `ssh` | any machine `ssh` reaches (keys, no password) | copied to `<ssh.workdir>/<project>/sessions/NAME/project` | the machine's own watchdog (max minutes + 2, idle minutes + 10) and the supervisor (idle / max minutes) |
+| `docker` | a fresh container on this machine ([docker.md](docker.md)) | copied in with `docker cp` | a watchdog inside the container (max minutes + 2, idle minutes + 10) and the supervisor |
 
 ```
 testbench session start [NAME] [--backend B] [--gpu G] [--idle-minutes N] [--max-minutes N] [--secret NAME] [--approve]
@@ -205,6 +206,10 @@ between runs (put downloaded weights there); `python` and `testbench` are the en
 `MPLBACKEND=Agg` for child processes.
 
 ## Expectations
+
+The common ones are below; every expectation - `junit:`, `metrics:`, `gpu:`, `image:`, `duration:`, tolerances
+(`"~= 0.93 +- 0.01"`) and ranges (`"between 0.8 and 0.95"`) - with what its failure looks like is in
+[expectations.md](expectations.md).
 
 ```yaml
 expect:
