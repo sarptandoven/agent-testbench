@@ -654,7 +654,8 @@ def build_parser() -> argparse.ArgumentParser:
     q = lsub.add_parser("start", help="start a loop on its own git branch and run the baseline")
     q.add_argument("plan")
     q.add_argument("--metric", required=True, help="FILE:KEY of a number a json expectation of the plan checks, "
-                                                    "e.g. outputs/metrics.json:accuracy")
+                                                    "e.g. outputs/metrics.json:accuracy; or check:SUBSTRING, the "
+                                                    "number of the check whose name contains it, e.g. check:val_loss")
     q.add_argument("--budget-usd", type=float, required=True, help="what the whole loop may spend, every run together")
     q.add_argument("--goal", choices=["max", "min"], default="max", help="max: higher is better (default); min: lower")
     q.add_argument("--min-delta", type=float, default=0.0, help="keep a try only if it beats the best by more than this")

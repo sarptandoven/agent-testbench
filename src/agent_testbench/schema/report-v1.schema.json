@@ -113,7 +113,8 @@
           "gpu": {
             "type": ["object", "null"],
             "properties": {"gpu": {"type": ["string", "null"]}, "busy_pct": {"type": "number"},
-                           "mean_util_pct": {"type": "number"}, "max_mem_mib": {"type": "number"}}
+                           "mean_util_pct": {"type": "number"}, "max_mem_mib": {"type": "number"},
+                           "readings": {"type": "integer", "description": "nvidia-smi samples in the step's window"}}
           }
         }
       }
