@@ -1,0 +1,34 @@
+{
+  "name": "agent-testbench",
+  "displayName": "Agent Testbench",
+  "version": "0.2.0",
+  "description": "A test bench your coding agent operates: live kernels on this machine, in Docker, over ssh, on a Modal GPU or a Colab VM to run code and notebook cells, inspect, fix and rerun; plan runs that prove the result with evidence; all inside a budget. The agent-testbench MCP server (run with uvx) and skills for the loop and setup.",
+  "author": {
+    "name": "Sarp Tandoven"
+  },
+  "homepage": "https://github.com/sarptandoven/agent-testbench",
+  "repository": "https://github.com/sarptandoven/agent-testbench",
+  "license": "MIT",
+  "keywords": [
+    "testbench",
+    "notebooks",
+    "colab",
+    "modal",
+    "docker",
+    "gpu",
+    "testing",
+    "agents",
+    "budget",
+    "mcp"
+  ],
+  "category": "developer-tools",
+  "tags": [
+    "notebooks",
+    "gpu",
+    "testing",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.cursor-plugin/mcp.json",
+  "hooks": "./.cursor-plugin/hooks.json"
+}

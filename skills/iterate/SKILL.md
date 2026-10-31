@@ -1,7 +1,6 @@
 ---
 name: iterate
 description: Operate agent-testbench to get notebooks, models, data or video pipelines, and web UIs working - work live in a kernel on this machine, a Modal GPU or a Colab VM (run code and notebook cells, inspect variables, fix, rerun, move files), then prove the result with a plan run inside the budget. Use whenever asked to build, debug, train, test, verify, or "make sure it works", in a project with a testbench.yaml.
-argument-hint: "[what to get working]"
 ---
 
 # Operating the test bench
