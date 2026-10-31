@@ -1,7 +1,6 @@
 ---
 name: setup
 description: Set up agent-testbench in a project - install it, write testbench.yaml with the budget, session defaults (backend, GPU, idle and max minutes) and a ladder of plans (local, short remote check, full run) with real expectations, add strict mocks for paid APIs, and turn notebooks into editable cell files. Use when a project has no testbench.yaml yet, or when adding a plan, backend, mock or check.
-argument-hint: "[project folder]"
 ---
 
 # Setting up agent-testbench

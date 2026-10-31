@@ -257,3 +257,5 @@ The demos in `docs/` are real agent runs.
 ## License
 
 MIT
+
+<!-- mcp-name: io.github.sarptandoven/agent-testbench -->

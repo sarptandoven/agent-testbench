@@ -1,0 +1,38 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.sarptandoven/agent-testbench",
+  "title": "Agent Testbench",
+  "description": "A test bench your coding agent operates: live kernels and proved runs, inside a budget.",
+  "websiteUrl": "https://sarptandoven.github.io/agent-testbench/",
+  "repository": {
+    "url": "https://github.com/sarptandoven/agent-testbench",
+    "source": "github"
+  },
+  "version": "0.2.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "agent-testbench",
+      "version": "0.2.0",
+      "runtimeHint": "uvx",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--with",
+          "value": "agent-testbench[all]==0.2.0",
+          "description": "The MCP server, Modal and web steps are the package's `all` extra; this puts them in the uvx environment."
+        }
+      ],
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "description": "Serve MCP over stdio."
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
