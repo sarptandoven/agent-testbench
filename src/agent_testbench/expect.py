@@ -176,7 +176,7 @@ def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
         if any(c in str(path) for c in "*?["):           # a pattern, e.g. **/metrics.json: it must name one file
             hits = sorted(glob.glob(str(workdir / path), recursive=True))
             if len(hits) != 1:
-                found = ", ".join(str(Path(h).relative_to(workdir)) for h in hits[:5])
+                found = ", ".join(Path(h).relative_to(workdir).as_posix() for h in hits[:5])
                 for key in rules:
                     add(f"{path}: {key}", False, f"{len(hits)} files match ({found}); the pattern must match exactly one"
                         if hits else "file missing (nothing matches)")
