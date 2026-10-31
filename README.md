@@ -222,7 +222,8 @@ plugin, which adds the `iterate` and `setup` skills.
 - [docs/expectations.md](docs/expectations.md) - every expectation, with what its failure looks like
 - [docs/docker.md](docs/docker.md) - the docker backend: sandboxes, GPUs, the hard stop
 - [docs/github-action.md](docs/github-action.md) - the GitHub Action: inputs, outputs, what reviewers see
-- [docs/demo-loop.md](docs/demo-loop.md) and [docs/demo.md](docs/demo.md) - real agent runs, with what they did
+- [docs/demo-loop.md](docs/demo-loop.md), [docs/demo-sandbox.md](docs/demo-sandbox.md) and
+  [docs/demo.md](docs/demo.md) - real agent runs, with what they did
 - [examples/](examples) - a Colab-style notebook with plans for every backend, and a web UI check
 
 ## Install notes

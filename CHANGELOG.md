@@ -21,6 +21,8 @@
 - The watchdog finds a session's processes with `ps` where there is no /proc (macOS, BSD).
 - docs/demo-loop.md: a real Claude Code run with only this plugin took a model from 0.86 to 0.9756 accuracy with
   `testbench loop` in 6 tries.
+- docs/demo-sandbox.md: a real Claude Code run fixed a failing test suite proved in a Docker sandbox with no
+  network, judged by the suite's JUnit report (32 s, $0.10 in tokens).
 - Proof records: each report.json now names the git commit it ran (and a hash of uncommitted changes), the
   machine and packages where it ran, and the sha256 of every evidence file; it follows a published JSON Schema
   (schema/report-v1.schema.json). `testbench verify` checks the evidence still matches.
