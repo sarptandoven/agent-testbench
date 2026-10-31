@@ -64,7 +64,13 @@ class GpuSampler:
         if not s:
             return None
         return {"gpu": self.name, "busy_pct": round(100 * sum(1 for u, _ in s if u > 10) / len(s)),
-                "mean_util_pct": round(sum(u for u, _ in s) / len(s)), "max_mem_mib": max(m for _, m in s)}
+                "mean_util_pct": round(sum(u for u, _ in s) / len(s)), "max_mem_mib": max(m for _, m in s),
+                "readings": len(s)}
+
+    def reading(self, start: int) -> dict | None:
+        """The window since `start`, sampled once more first, so short steps still get one reading."""
+        self.sample()
+        return self.window(start)
 
     def stop(self):
         self._stop.set()
@@ -107,7 +113,9 @@ def _run_command(cmd: str, *, workdir: Path, env: dict, deadline: float, log_pat
             return {"exit_code": None, "timed_out": True}
 
 
-def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_env: dict) -> dict:
+def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_env: dict, gpu=None,
+             run_started: float | None = None) -> dict:
+    """gpu: called once the step's work is done, returns its GPU window (gpu: expectations check it)."""
     step_dir.mkdir(parents=True, exist_ok=True)
     log_path = step_dir / "log.txt"
     log_path.touch()
@@ -162,9 +170,11 @@ def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_e
             result.update(status="error", error={"ename": type(exc).__name__, "evalue": str(exc)[:2000]})
     text = log_path.read_text(errors="replace")
     result["stdout_tail"] = notebook._tail(text, 40, 5000)
+    result["gpu"] = gpu() if gpu else None
     if result["status"] in ("passed", "failed") or step["kind"] == "run":
-        checks = expect.check(step["expect"], workdir=workdir,
-                              result={**result, "stdout": text, "web": result.pop("_web_full", None) or result.get("web")})
+        seen = {**result, "stdout": text, "web": result.pop("_web_full", None) or result.get("web"),
+                "seconds": time.time() - began, "run_started": run_started}
+        checks = expect.check(step["expect"], workdir=workdir, result=seen)
         result["expectations"] = checks
         if result["status"] == "passed" and not all(c["ok"] for c in checks):
             result["status"] = "failed"
@@ -204,9 +214,7 @@ def execute_plan(plan: dict, *, project_dir: str | Path, run_dir: str | Path, wo
             save()
             mark = len(sampler.samples)
             result = run_step(step, project=project, workdir=workdir, step_dir=run_dir / "steps" / f"{i:02d}-{slug(step['name'])}",
-                              base_env=base_env)
-            sampler.sample()                                       # short steps still get one reading
-            result["gpu"] = sampler.window(mark)
+                              base_env=base_env, gpu=lambda: sampler.reading(mark), run_started=report["started"])
             result["dir"] = f"steps/{i:02d}-{slug(step['name'])}"
             report["steps"].append(result)
             _event(run_dir, event="step_end", step=step["name"], index=i, status=result["status"], minutes=result["minutes"])

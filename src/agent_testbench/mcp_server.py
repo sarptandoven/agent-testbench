@@ -284,7 +284,8 @@ async def session_stop(session: str = "", project_dir: str = ".", all_sessions: 
 @server.tool(description="Start an improvement loop on a plan, on a git branch of its own: the baseline runs now. Then "
                          "edit the code and call loop_try for each idea; testbench keeps a try only if the plan passes "
                          "and metric (FILE:KEY of a number a json expectation of the plan checks, e.g. "
-                         "outputs/metrics.json:accuracy) beats the best so far, else reverts it. budget_usd bounds the "
+                         "outputs/metrics.json:accuracy, or check:SUBSTRING for the number of the check whose name "
+                         "contains it, e.g. check:val_loss) beats the best so far, else reverts it. budget_usd bounds the "
                          "whole loop. Above the approval threshold the person is asked directly when the client "
                          "supports it; otherwise it needs approved_by_person=true, set only after the person agreed.")
 async def loop_start(plan: str, metric: str, budget_usd: float, goal: str = "max", max_hours: float = 8.0,

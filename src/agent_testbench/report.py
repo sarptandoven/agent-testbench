@@ -19,17 +19,22 @@ def load(run_dir: Path) -> dict | None:
     return json.loads(p.read_text()) if p.exists() else None
 
 
+def check_number(c: dict) -> float | None:
+    """The number a check found, or None: a measuring check's detail starts with it ("0.93 (wanted >= 0.9)")."""
+    head = str(c.get("detail", "")).split(" (wanted")[0].strip().strip("'\"")
+    try:
+        return float(head)
+    except ValueError:
+        return None
+
+
 def _metrics(report: dict) -> dict:
     """Numbers checked by expectations, keyed by step and check: what a change moved."""
     out = {}
     for s in report.get("steps", []):
         for c in s.get("expectations", []) or []:
-            detail = str(c.get("detail", ""))
-            head = detail.split(" (wanted")[0].strip().strip("'")
-            try:
-                out[f"{s['name']} | {c['check']}"] = float(head)
-            except ValueError:
-                pass
+            if (n := check_number(c)) is not None:
+                out[f"{s['name']} | {c['check']}"] = n
     return out
 
 

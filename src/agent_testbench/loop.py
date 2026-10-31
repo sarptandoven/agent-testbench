@@ -10,8 +10,10 @@ The agent proposes, testbench judges. The loop works on a branch of its own. Eac
 the project folder and runs the plan on them, in a scratch copy so runs leave the folder alone. A try is kept when
 its run passes and the metric beats the best so far by more than min_delta; otherwise the branch goes back to the
 best commit (edits made meanwhile are put back on top). The metric is a number one of the plan's expectations
-checks, so it reads the same on every backend. The person approves the loop's total budget once; each run is
-still checked against max_run_usd and the day limits, and the loop refuses a try its budget has no room for.
+checks, so it reads the same on every backend: FILE:KEY of a json expectation, or check:SUBSTRING for any check whose
+name contains SUBSTRING (a junit count, a number printed to the log). The person approves the loop's total budget
+once; each run is still checked against max_run_usd and the day limits, and the loop refuses a try its budget has no
+room for.
 """
 from __future__ import annotations
 
@@ -27,6 +29,7 @@ from . import budget, config as C, report as R, runs
 
 ACTIVE = "running"
 OWN = ":(exclude).testbench"       # testbench's own folder (runs, notes, this loop) is never tried or reverted
+CHECK = "check"                    # --metric check:SUBSTRING
 
 
 class LoopError(RuntimeError):
@@ -92,25 +95,42 @@ def _changes(root: Path, where: str = ".") -> list[str]:
 
 
 def parse_metric(spec: str) -> tuple[str, str]:
-    path, sep, key = str(spec).rpartition(":")
+    """FILE:KEY (a json expectation), or check:SUBSTRING (path CHECK: any check whose name contains SUBSTRING)."""
+    spec = str(spec)
+    if spec.startswith(CHECK + ":") and spec[len(CHECK) + 1:].strip():
+        return CHECK, spec[len(CHECK) + 1:].strip()
+    path, sep, key = spec.rpartition(":")
     if not sep or not path or not key:
         raise LoopError(f"--metric is FILE:KEY, the file and key one of the plan's json expectations checks (e.g. "
-                        f"outputs/metrics.json:accuracy); got {spec!r}")
+                        f"outputs/metrics.json:accuracy), or check:SUBSTRING for the number of the check whose name "
+                        f"contains SUBSTRING (e.g. check:val_loss); got {spec!r}")
     return path.strip(), key.strip()
 
 
 def metric_value(report: dict, path: str, key: str) -> float | None:
-    """The number the report's last check of `path: key` found (a json expectation)."""
+    """The number the report's last check of `path: key` found (a json expectation); with path CHECK, the number the
+    last check whose name contains `key` found."""
     value = None
     for s in report.get("steps", []):
         for c in s.get("expectations") or []:
-            if c["check"].startswith(f"{path}: {key} "):
-                head = str(c.get("detail", "")).split(" (wanted")[0].strip().strip("'\"")
-                try:
-                    value = float(head)
-                except ValueError:
-                    pass
+            if (key in c["check"]) if path == CHECK else c["check"].startswith(f"{path}: {key} "):
+                n = R.check_number(c)
+                value = value if n is None else n
     return value
+
+
+def _what(state: dict) -> str:
+    return f"check containing {state['key']!r}" if state["path"] == CHECK else f"{state['key']} in {state['path']}"
+
+
+def _missing(state: dict, rep: dict) -> str:
+    """Why a passing run gave no metric; with check:SUBSTRING, which checks did find numbers."""
+    if state["path"] != CHECK:
+        return f"reported no {state['key']} in {state['path']}"
+    found = [c["check"] for s in rep.get("steps", []) for c in s.get("expectations") or []
+             if R.check_number(c) is not None]
+    return f"no check whose name contains {state['key']!r} found a number" \
+        + (f" (checks that did: {'; '.join(found[:8])})" if found else "")
 
 
 def _better(state: dict, value: float | None) -> bool:
@@ -145,7 +165,8 @@ def start(root: Path, cfg: dict, plan: str, metric: str, budget_usd: float, goal
     if goal not in ("max", "min"):
         raise LoopError("--goal is max (a higher metric is better) or min (lower is better)")
     path, key = parse_metric(metric)
-    if not any(key in ((s["expect"].get("json") or {}).get(path) or {}) for s in cfg["plans"][plan]["steps"]):
+    checked = any(key in ((s["expect"].get("json") or {}).get(path) or {}) for s in cfg["plans"][plan]["steps"])
+    if path != CHECK and not checked:
         raise LoopError(f"plan {plan} checks no {key!r} in {path}, so its runs would not report the metric. Give a "
                         f"step an expectation such as `expect: {{json: {{{path}: {{{key}: \">= 0\"}}}}}}`.")
     if active(root):
@@ -269,16 +290,20 @@ def judge(root: Path, cfg: dict, state: dict) -> dict:
     if run_state["status"] == "passed" and (baseline or _better(state, value)):
         t["kept"] = True
         state["best"] = {"commit": t["commit"], "value": value, "try": t["n"]}
-        t["verdict"] = (f"BASELINE: {state['key']} {_fmt(value)}, run {t['run']} passed." if baseline else
-                        f"KEPT try {t['n']}: {state['key']} {_fmt(value)} (best was {_fmt(best)}"
-                        + (f", {value - best:+.4g}" if best is not None else "") + f"). Run {t['run']} passed. Best is "
-                        f"now {t['commit'][:9]}.")
+        if baseline:
+            t["verdict"] = f"BASELINE: {state['key']} {_fmt(value)}, run {t['run']} passed" + (
+                f", but {_missing(state, rep)}; any passing try that reports {state['key']} will be kept."
+                if value is None else ".")
+        else:
+            t["verdict"] = (f"KEPT try {t['n']}: {state['key']} {_fmt(value)} (best was {_fmt(best)}"
+                            + (f", {value - best:+.4g}" if best is not None else "") + f"). Run {t['run']} passed. "
+                            f"Best is now {t['commit'][:9]}.")
     else:
         t["kept"] = False
         if run_state["status"] != "passed":
             why = f"the run {run_state['status']} (`testbench report {t['run']}` says why)"
         elif value is None:
-            why = f"the run passed but reported no {state['key']} in {state['path']}"
+            why = f"the run passed but {_missing(state, rep)}"
         else:
             why = f"{state['key']} {_fmt(value)} is not better than the best {_fmt(best)}" \
                 + (f" by more than {state['min_delta']:g}" if state["min_delta"] else "")
@@ -308,8 +333,8 @@ def follow(root: Path, cfg: dict, state: dict, timeout: float | None, on_line=pr
 def describe(state: dict) -> str:
     used, kept = spent(state), [t for t in state["tries"] if t.get("kept") and t["n"] > 0]
     left = (state["deadline"] - time.time()) / 3600
-    lines = [f"loop {state['id']} ({state['status']}) on plan {state['plan']}: {state['goal']} {state['key']} in "
-             f"{state['path']}; best {_fmt(state['best']['value'])} at {state['best']['commit'][:9]}; "
+    lines = [f"loop {state['id']} ({state['status']}) on plan {state['plan']}: {state['goal']} {_what(state)}; "
+             f"best {_fmt(state['best']['value'])} at {state['best']['commit'][:9]}; "
              f"{len(state['tries']) - 1 if state['tries'] else 0} tries, {len(kept)} kept; ${used:.3f} of "
              f"${state['budget_usd']:.2f} spent" + (f"; {left:.1f} h left" if state["status"] == ACTIVE else ""),
              f"branch {state['branch']} (from {state['original_branch']} at {state['base'][:9]})"]
