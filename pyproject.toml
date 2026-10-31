@@ -46,8 +46,11 @@ Issues = "https://github.com/sarptandoven/agent-testbench/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_testbench"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"examples/tiny-model" = "agent_testbench/examples/tiny-model"      # for `testbench demo`
+
 [tool.hatch.build.targets.sdist]
-include = ["src/agent_testbench", "README.md", "LICENSE"]
+include = ["src/agent_testbench", "examples/tiny-model", "README.md", "LICENSE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

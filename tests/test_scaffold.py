@@ -38,3 +38,15 @@ def test_a_static_page_gets_a_browser_check(tmp_path):
     assert "plan ui: a static page (public/index.html)" in cli(tmp_path, "init").stdout
     step = yaml.safe_load((tmp_path / "testbench.yaml").read_text())["plans"]["ui"]["steps"][0]
     assert step["web"]["serve"].endswith("-d public") and step["expect"]["web"]["no_console_errors"] is True
+
+
+def test_demo_copies_a_working_project_and_runs_it(tmp_path):
+    import pytest
+    from conftest import has_sklearn
+    if not has_sklearn():
+        pytest.skip("the demo trains a model with scikit-learn and matplotlib")
+    target = tmp_path / "try-it"
+    r = cli(tmp_path, "demo", str(target))
+    assert r.returncode == 0 and "# PASS - plan `smoke` on local" in r.stdout and "testbench loop start" in r.stdout, r.stdout
+    assert (target / ".git").is_dir() and (target / "testbench.yaml").is_file()
+    assert cli(tmp_path, "demo", str(target)).returncode == 2, "never into a folder that is not empty"

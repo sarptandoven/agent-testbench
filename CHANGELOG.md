@@ -16,6 +16,8 @@
 - Windows: the CLI, local plans and sessions, loops, reports and the MCP server run on Windows (CI covers it). One
   module (procs.py) starts, checks and stops background work on every system; the kernel launcher interrupts its
   kernel on request, which works on Windows too; the CLI runs in Python's UTF-8 mode there.
+- `testbench demo [DIR]`: copies the tiny-model example (now in the wheel) to a new git repository, runs its free
+  plan, and shows what to try next; it says which packages to install if scikit-learn or matplotlib are missing.
 - `testbench init` looks at the project and writes plans that already check something: notebooks (lint, run, the
   files they write), a pytest suite, training scripts and web apps, with a FILL IN line for the number only you know.
 - The watchdog finds a session's processes with `ps` where there is no /proc (macOS, BSD).

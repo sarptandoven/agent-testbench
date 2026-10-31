@@ -522,6 +522,53 @@ def cmd_loop(a):
     return 0 if last.get("kept") else 1
 
 
+DEMO_NEEDS = {"sklearn": "scikit-learn==1.5.2", "matplotlib": "matplotlib==3.9.2"}
+
+
+def _example(name: str) -> Path:
+    """An example shipped in the wheel, or the repository's when running from a checkout."""
+    for d in (Path(__file__).parent / "examples" / name, Path(__file__).resolve().parents[2] / "examples" / name):
+        if (d / C.CONFIG_NAME).is_file():
+            return d
+    raise FileNotFoundError(f"the {name} example is not in this installation; reinstall agent-testbench")
+
+
+def cmd_demo(a):
+    import importlib.util as iu
+    import shutil
+    target = Path(a.dir).resolve()
+    if target.exists() and any(target.iterdir()):
+        print(f"{target} is not empty; give `testbench demo` a new folder")
+        return 2
+    missing = [pkg for mod, pkg in DEMO_NEEDS.items() if iu.find_spec(mod) is None]
+    if missing:
+        print(f"The demo trains a small model, which needs {' and '.join(missing)}: "
+              f"pip install {' '.join(missing)} - then run `testbench demo {a.dir}` again.")
+        return 2
+    shutil.copytree(_example("tiny-model"), target, ignore=shutil.ignore_patterns(".testbench", "outputs", "__pycache__"))
+    (target / ".gitignore").write_text("outputs/\n__pycache__/\n")
+    if shutil.which("git"):                          # a repository, so `testbench loop` works there too
+        for cmd in (["init", "-q"], ["add", "-A"], ["-c", "user.name=testbench demo", "-c", "user.email=demo@localhost",
+                                                    "commit", "-qm", "tiny-model demo"]):
+            subprocess.run(["git", *cmd], cwd=target, capture_output=True)
+    print(f"Copied the tiny-model example to {target}: a Colab-style notebook that trains a small network, and plans "
+          "for this machine, Modal and Colab.\n")
+    if a.no_run:
+        code = 0
+    else:
+        print("Running its free plan, `smoke` (lint, then a quick train on this machine):\n", flush=True)
+        code = subprocess.call([sys.executable, "-m", "agent_testbench", "run", "smoke", "--wait", "300"], cwd=target)
+    print(f"""
+Next, in {target}:
+  testbench session start && testbench exec --cells tiny_model.ipynb:1-3      # work live in a kernel
+  testbench exec "model.score(X_test, y_test)" && testbench session stop
+  testbench loop start smoke --metric outputs/metrics.json:accuracy --budget-usd 0   # then edit cells/02_settings.py,
+  testbench nb build cells tiny_model.ipynb && testbench loop try "what changed"      # rebuild, and try it
+  testbench ui                                                                       # every run as a page
+Or open it in Claude Code with the plugin and ask: "use testbench loop to raise the smoke plan's accuracy".""")
+    return code
+
+
 def cmd_mcp(a):
     from .mcp_server import main as serve
     serve(http=a.http, host=a.host, port=a.port)
@@ -660,6 +707,10 @@ def build_parser() -> argparse.ArgumentParser:
     lsub.add_parser("stop", help="write the loop's report and go back to the branch it started from")
     p.set_defaults(fn=cmd_loop)
     sub.add_parser("doctor", help="check what this machine can run").set_defaults(fn=cmd_doctor)
+    p = sub.add_parser("demo", help="copy a small example project to DIR, run its free plan, and show what to try next")
+    p.add_argument("dir", nargs="?", default="testbench-demo")
+    p.add_argument("--no-run", action="store_true", help="only copy it")
+    p.set_defaults(fn=cmd_demo)
     p = sub.add_parser("mcp", help="serve these commands as MCP tools (stdio, or --http)")
     p.add_argument("--http", action="store_true", help="streamable HTTP at http://HOST:PORT/mcp instead of stdio")
     p.add_argument("--host", default="127.0.0.1", help="with --http (default 127.0.0.1: this machine only)")

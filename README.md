@@ -28,6 +28,7 @@ four kept and two reverted by testbench, in 78 seconds - [docs/demo-loop.md](doc
 
 ```bash
 pip install "agent-testbench[all]"         # or: uv tool install "agent-testbench[all]"
+testbench demo                             # a small project, run for free here - see it work in a minute
 cd your-project && testbench init          # looks at the project and writes plans that already check something
 testbench run <plan>                       # the report: what passed, what failed and why, what it cost
 ```
@@ -207,7 +208,7 @@ plugin, which adds the `iterate` and `setup` skills.
 
 | | |
 |---|---|
-| `testbench init` / `doctor` / `mcp [--http]` | set up, check this machine, serve MCP |
+| `testbench demo` / `init` / `doctor` / `mcp [--http]` | try it, set up, check this machine, serve MCP |
 | `testbench session start/list/stop/sync/install/shell`, `exec`, `files` | live kernels |
 | `testbench plans` / `run` / `wait` / `runs` / `cancel` | plans |
 | `testbench report [--format html\|junit]` / `verify` / `history` / `ui` | proof |
