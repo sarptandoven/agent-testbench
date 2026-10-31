@@ -37,6 +37,7 @@ nav:
   - Reference: reference.md
   - Demos:
       - An agent improves a model: demo-loop.md
+      - A failing suite fixed in a Docker sandbox: demo-sandbox.md
       - An agent fixes a planted bug: demo.md
   - Project:
       - Changelog: changelog.md
