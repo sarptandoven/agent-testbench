@@ -14,7 +14,6 @@ import json
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import threading
@@ -95,20 +94,14 @@ def _copy_artifacts(patterns: list[str], workdir: Path, dest: Path) -> list[str]
 
 
 def _run_command(cmd: str, *, workdir: Path, env: dict, deadline: float, log_path: Path) -> dict:
+    from .procs import group_kwargs, shell, stop_and_wait
     with log_path.open("a") as log:
-        proc = subprocess.Popen(cmd, shell=True, cwd=workdir, env=env, stdout=log, stderr=subprocess.STDOUT,
-                                start_new_session=True, executable="/bin/bash" if Path("/bin/bash").exists() else None)
+        proc = subprocess.Popen(cwd=workdir, env=env, stdout=log, stderr=subprocess.STDOUT, **shell(cmd), **group_kwargs())
         try:
             code = proc.wait(timeout=max(1, deadline - time.time()))
             return {"exit_code": code, "timed_out": False}
         except BaseException as exc:                              # timeout, or the run was cancelled
-            for sig in (signal.SIGTERM, signal.SIGKILL):
-                try:
-                    os.killpg(proc.pid, sig)
-                    proc.wait(timeout=10)
-                    break
-                except Exception:
-                    continue
+            stop_and_wait(proc.pid, grace=10)
             if not isinstance(exc, subprocess.TimeoutExpired):
                 raise
             return {"exit_code": None, "timed_out": True}

@@ -8,14 +8,12 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import os
-import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from . import budget, config as C, provenance, report as R
+from . import budget, config as C, procs, provenance, report as R
 
 DONE = ("passed", "failed", "cancelled", "error")
 
@@ -109,34 +107,11 @@ def _gitignore(root: Path) -> None:
         gi.write_text("# runs, ledger and generated files are local evidence; NOTES.md is worth committing\n*\n!.gitignore\n!NOTES.md\n")
 
 
-def spawn(argv: list[str], *, cwd, log_path: Path, env: dict | None = None) -> subprocess.Popen:
-    """Start a background process in its own session. A thread waits on it, so a long-lived caller (the MCP server)
-    collects it when it exits instead of keeping a zombie that still looks alive."""
-    import threading
-    log = open(log_path, "a")
-    proc = subprocess.Popen(argv, cwd=cwd, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                            start_new_session=True, env=env)
-    threading.Thread(target=proc.wait, daemon=True).start()
-    return proc
+spawn, alive = procs.spawn, procs.alive          # background processes, the same on Linux, macOS and Windows
 
 
-def kill_group(pid: int | None, sig=signal.SIGTERM) -> None:
-    if not pid:
-        return
-    try:
-        os.killpg(pid, sig)
-    except (ProcessLookupError, PermissionError):          # already gone (EPERM: an exited group on macOS)
-        pass
-
-
-def alive(pid: int | None) -> bool:
-    if not pid:
-        return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except (ProcessLookupError, PermissionError):
-        return False
+def kill_group(pid: int | None, hard: bool = False) -> None:
+    procs.stop_group(pid, hard=hard)
 
 
 def status_line(run_dir: Path) -> str:

@@ -116,12 +116,9 @@ def execute(connection_file: str, code: str, timeout: float = 600, out_dir: str 
 
 
 def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+    from ..procs import alive
+    if not alive(pid):
         return False
-    except PermissionError:
-        return True
     try:                                              # exited but not yet collected by its parent
         return Path(f"/proc/{pid}/stat").read_text().split(")")[-1].split()[0] != "Z"
     except OSError:
@@ -131,6 +128,9 @@ def _alive(pid: int) -> bool:
 def _interrupt(connection_file: str, kc) -> None:
     pid_file = Path(connection_file).with_name("kernel.pid")
     pid = pid_file.read_text().strip() if pid_file.exists() else ""
+    if os.name == "nt":                               # a signal would end the kernel there: the launcher interrupts it
+        Path(connection_file).with_name("interrupt").write_text(str(time.time()))
+        return
     if pid.isdigit():
         try:
             os.kill(int(pid), signal.SIGINT)

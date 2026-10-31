@@ -41,6 +41,20 @@ def cli(root: Path, *args, timeout=600, env=None) -> subprocess.CompletedProcess
                           timeout=timeout, env={**os.environ, **(env or {})})
 
 
+POSIX_ONLY = {"test_ssh.py": "the ssh backend's scripts run on the Linux or macOS machine it reaches",
+              "test_watchdog.py": "the watchdog runs on remote Linux and macOS machines (Colab, ssh, containers)",
+              "test_docker.py": "the docker backend runs Linux containers"}
+
+
+def pytest_collection_modifyitems(config, items):
+    if os.name != "nt":
+        return
+    for item in items:
+        why = POSIX_ONLY.get(item.path.name)
+        if why or item.get_closest_marker("posix"):
+            item.add_marker(pytest.mark.skip(reason=f"not on Windows: {why or 'uses POSIX tools'}"))
+
+
 @pytest.fixture(autouse=True)
 def machine_limits(tmp_path, monkeypatch) -> Path:
     """Every test gets its own ~/.testbench (limits for all projects, the machine's ledger), never the real one."""

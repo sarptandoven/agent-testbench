@@ -7,7 +7,6 @@ SIGTERM (from `testbench cancel`) stops the work, cancels anything remote, and s
 from __future__ import annotations
 
 import json
-import signal
 import sys
 import time
 import traceback
@@ -63,7 +62,8 @@ def _partial(run_dir: Path, meta: dict, status: str, why: str) -> dict:
 
 
 def main():
-    signal.signal(signal.SIGTERM, _on_term)
+    from .procs import on_stop
+    on_stop(_on_term)
     rep = drive(Path(sys.argv[1]))
     print(f"[testbench] run finished: {rep['status']}", flush=True)
 

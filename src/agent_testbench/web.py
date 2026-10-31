@@ -15,14 +15,14 @@ Needs `pip install "agent-testbench[web]"` and `playwright install chromium`.
 """
 from __future__ import annotations
 
-import os
 import shlex
-import signal
 import subprocess
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from . import procs
 
 
 def _wait_up(url: str, seconds: float, proc) -> int | None:
@@ -58,7 +58,7 @@ def run(spec: dict, *, workdir: Path, out_dir: Path, env: dict, deadline: float,
                                          "step would test the wrong program. Stop it or use another port.")
                 return result
             proc = subprocess.Popen(shlex.split(spec["serve"]) if isinstance(spec["serve"], str) else spec["serve"],
-                                    cwd=workdir, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+                                    cwd=workdir, env=env, stdout=log, stderr=subprocess.STDOUT, **procs.group_kwargs())
         status = _wait_up(spec["url"], min(float(spec.get("ready_timeout", 30)), max(1, deadline - time.time())), proc)
         if proc is not None and proc.poll() is not None:
             status = None                     # the app's own server died; whatever answered is not the app
@@ -96,11 +96,7 @@ def run(spec: dict, *, workdir: Path, out_dir: Path, env: dict, deadline: float,
             browser.close()
     finally:
         if proc and proc.poll() is None:
-            try:
-                os.killpg(proc.pid, signal.SIGTERM)
-                proc.wait(timeout=10)
-            except Exception:
-                os.killpg(proc.pid, signal.SIGKILL)
+            procs.stop_and_wait(proc.pid, grace=10)
         log.close()
     return result
 

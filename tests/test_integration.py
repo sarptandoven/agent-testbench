@@ -56,6 +56,7 @@ def test_params_are_overridden_per_plan(plain):
     assert r.returncode == 1 and "ParamError" in r.stdout and "N, NAME" in r.stdout, "a typo in params must fail loudly"
 
 
+@pytest.mark.posix
 def test_cancel_stops_the_work(tmp_path):
     root = tmp_path / "slow"
     root.mkdir()

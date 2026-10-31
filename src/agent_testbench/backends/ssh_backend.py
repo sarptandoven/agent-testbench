@@ -38,7 +38,10 @@ IDLE_SLACK = 10           # the machine's watchdog waits this much longer than t
 
 
 def _control() -> list[str]:
-    """Reuse one ssh connection for the many short commands a session makes (a private folder: socket paths are short)."""
+    """Reuse one ssh connection for the many short commands a session makes (a private folder: socket paths are
+    short). Windows' OpenSSH has no connection sharing, so there each command connects on its own."""
+    if os.name == "nt":
+        return []
     d = Path(tempfile.gettempdir()) / f"testbench-ssh-{os.getuid()}"
     d.mkdir(mode=0o700, exist_ok=True)
     return ["-o", "ControlMaster=auto", "-o", f"ControlPath={d}/%C", "-o", "ControlPersist=120"]

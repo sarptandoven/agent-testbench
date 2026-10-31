@@ -55,4 +55,5 @@ markers = [
     "web: needs Playwright and a Chromium download",
     "modal: runs on Modal and costs money (opt in with TESTBENCH_TEST_MODAL=1)",
     "colab: runs on Colab and uses compute units (opt in with TESTBENCH_TEST_COLAB=1)",
+    "posix: uses POSIX tools the test itself needs (skipped on Windows)",
 ]

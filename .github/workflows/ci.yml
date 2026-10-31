@@ -8,6 +8,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python: ["3.10", "3.12"]
+        include:
+          - os: windows-latest
+            python: "3.12"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,3 +29,5 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: tests
         run: python -m pytest -q -p no:warnings
+        env:
+          PYTHONUTF8: "1"           # Windows: in-process tests too (the CLI switches itself)

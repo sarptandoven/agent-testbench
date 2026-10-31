@@ -9,18 +9,16 @@ idle timeout). Stopping records what it cost.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
-import signal
 import subprocess
 import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import backends as B, budget, config as C, notebook as NB
+from . import backends as B, budget, config as C, notebook as NB, procs
 from .session_backends import SessionError
 
 ACTIVE = ("starting", "ready")
@@ -158,8 +156,7 @@ def stop(root: Path, cfg: dict, sdir: Path, reason: str = "stopped by request") 
 @contextmanager
 def _in_use(sdir: Path, timeout: float):
     """One command at a time per session; the supervisor sees the session as busy until it ends."""
-    with open(sdir / ".lock", "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with procs.exclusive(sdir / ".lock"):
         write(sdir, busy_until=time.time() + timeout + 300, last_used=time.time())
         try:
             yield
@@ -296,5 +293,5 @@ def supervise(sdir: Path) -> None:
 
 
 if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "supervise":
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    procs.on_stop(lambda *_: sys.exit(0))
     supervise(Path(sys.argv[2]))

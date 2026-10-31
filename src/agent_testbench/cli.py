@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -676,7 +677,16 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _utf8_on_windows(argv) -> None:
+    """Windows Python reads and writes text in the legacy code page unless in UTF-8 mode, and reports and logs carry
+    whatever programs print. Run once more in UTF-8 mode; everything started from there inherits it."""
+    if os.name == "nt" and argv is None and not sys.flags.utf8_mode:
+        os.environ["PYTHONUTF8"] = "1"
+        sys.exit(subprocess.call([sys.executable, "-X", "utf8", "-m", "agent_testbench", *sys.argv[1:]]))
+
+
 def main(argv=None):
+    _utf8_on_windows(argv)
     a = build_parser().parse_args(argv)
     try:
         sys.exit(a.fn(a))

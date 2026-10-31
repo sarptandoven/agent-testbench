@@ -13,7 +13,6 @@ import io
 import json
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import tarfile
@@ -112,16 +111,8 @@ class LocalSession:
         return (p.stdout + p.stderr)[-20000:]
 
     def stop(self) -> None:
-        from .runs import alive, kill_group
-        pid = self.state.get("handles", {}).get("launcher_pid")
-        if not pid:
-            return
-        kill_group(pid)                                  # the launcher shuts its kernel down on SIGTERM
-        for _ in range(40):
-            if not alive(pid):
-                return
-            time.sleep(0.25)
-        kill_group(pid, signal.SIGKILL)
+        from .procs import stop_and_wait
+        stop_and_wait(self.state.get("handles", {}).get("launcher_pid"))   # the launcher shuts its kernel down
 
 
 # ---- Modal Sandbox -------------------------------------------------------------------------------------------
