@@ -53,9 +53,9 @@ def install_command(deps: bool = False) -> str:
 
 def explain_launch_error(error: str) -> str:
     """What a Chromium that did not launch lacks, in plain words, and the command that fixes it."""
-    missing = re.search(r"Executable doesn't exist at (\S+)", error)
+    missing = re.search(r"Executable doesn't exist at (.+)", error)      # to the end of the line: a path may hold spaces
     if missing:
-        path = Path(missing.group(1))
+        path = Path(missing.group(1).strip())
         folder = next((p for p in path.parents if re.fullmatch(r"[a-z_]+-\d+", p.name)), None)
         if folder is not None:
             kind, build = folder.name.rsplit("-", 1)

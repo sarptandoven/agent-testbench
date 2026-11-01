@@ -226,8 +226,7 @@ def _halt(state: dict) -> tuple[str, str, str] | None:
         tried = "\n".join(f"  try {t['n']}: {t['description']} - {_why(t)}" for t in streak)
         return ("out_of_patience",
                 f"That is {C.counted(len(streak), 'try', 'tries')} in a row not kept (--patience {patience}): "
-                f"{STOP}, or try something "
-                "different in kind with `testbench loop try --new-direction \"...\"`.",
+                f"{STOP}, or try something different in kind with `testbench loop try --new-direction \"...\"`.",
                 f"{C.counted(len(streak), 'try', 'tries')} in a row "
                 f"{'was' if len(streak) == 1 else 'were'} not kept (--patience {patience}):\n{tried}\nBest {key} so far: "
                 f"{_fmt(best)} ({_best_at(state)}). More of the same is unlikely to help. Either {STOP}, or try an "
@@ -272,8 +271,7 @@ def _tell(root: Path, cfg: dict, state: dict, status: str, why: str, report: Pat
             "in kind."}.get(status, " The agent was told to stop the loop and report.")
     text = (f"loop {state['id']} on plan {state['plan']} {ENDED[status]}: {state['key']} {_fmt(base)} -> "
             f"{_fmt(best['value'])} ({state['goal']}) in {C.counted(len(tries), 'try', 'tries')}, {kept} kept, "
-            f"${spent(state):.3f} of "
-            f"${state['budget_usd']:.2f}." + (f" {why}" if why else "") + then
+            f"${spent(state):.3f} of ${state['budget_usd']:.2f}." + (f" {why}" if why else "") + then
             + (f" Best: {_best_at(state)}." if best["try"] is not None else "")
             + (f" Report: {notify.rel(report, root)}" if report else ""))
     notify.send(root, cfg, "loop_end" if status == "stopped" else "loop_rule", text, {
@@ -511,8 +509,7 @@ def describe(state: dict) -> str:
     lines = [f"loop {state['id']} ({state['status']}) on plan {state['plan']}: {state['goal']} {_what(state)}; "
              f"best {_fmt(state['best']['value'])} at {state['best']['commit'][:9]}; "
              f"{C.counted(len(state['tries']) - 1 if state['tries'] else 0, 'try', 'tries')}, {len(kept)} kept; "
-             f"${used:.3f} of "
-             f"${state['budget_usd']:.2f} spent" + (f"; {left:.1f} h left" if state["status"] == ACTIVE else ""),
+             f"${used:.3f} of ${state['budget_usd']:.2f} spent" + (f"; {left:.1f} h left" if state["status"] == ACTIVE else ""),
              f"branch {state['branch']} (from {state['original_branch']} at {state['base'][:9]})"]
     if _rules(state):
         halt = _halt(state) if state["status"] == ACTIVE else None
