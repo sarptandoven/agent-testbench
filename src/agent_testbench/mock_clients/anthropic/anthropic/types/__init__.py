@@ -1,8 +1,11 @@
 """Response types of the mock `anthropic` package (agent-testbench; docs/mocks.md). Request types (MessageParam,
-ToolParam and every other *Param) are plain dicts, as the real ones are TypedDicts."""
+ToolParam and every other *Param) are plain dicts, as the real ones are TypedDicts. The modules app code imports
+them from (anthropic.types.message, .text_block, .tool_use_block, ...) are here too. Each model's fields for
+model_validate follow anthropic 2.3.0."""
 from _testbench_mock import Obj as _Obj
 
-__all__ = ["Message", "TextBlock", "ToolUseBlock", "ThinkingBlock", "Usage", "MessageTokensCount", "ContentBlock",
+__all__ = ["Message", "TextBlock", "ToolUseBlock", "ThinkingBlock", "RedactedThinkingBlock", "Usage",
+           "MessageTokensCount", "ContentBlock",
            "RawMessageStreamEvent", "MessageStreamEvent", "RawMessageStartEvent", "RawMessageDeltaEvent",
            "RawMessageStopEvent", "RawContentBlockStartEvent", "RawContentBlockDeltaEvent", "RawContentBlockStopEvent",
            "TextDelta", "InputJSONDelta", "ThinkingDelta", "SignatureDelta", "MessageDeltaUsage", "Model",
@@ -10,28 +13,37 @@ __all__ = ["Message", "TextBlock", "ToolUseBlock", "ThinkingBlock", "Usage", "Me
            "ImageBlockParam", "ToolChoiceParam", "MessageCreateParams", "ModelParam"]
 
 
-class Message(_Obj):
-    pass
-
-
 class TextBlock(_Obj):
-    pass
+    _required, _optional = ("text", "type"), ("citations",)
 
 
 class ToolUseBlock(_Obj):
-    pass
+    _required, _optional = ("id", "input", "name", "type"), ("caller", "toolset_name")
 
 
 class ThinkingBlock(_Obj):
-    pass
+    _required = ("signature", "thinking", "type")
+
+
+class RedactedThinkingBlock(_Obj):
+    _required = ("data", "type")
 
 
 class Usage(_Obj):
-    pass
+    _required = ("input_tokens", "output_tokens")
+    _optional = ("cache_creation", "cache_creation_input_tokens", "cache_read_input_tokens", "inference_geo",
+                 "output_tokens_details", "server_tool_use", "service_tier", "speed")
+
+
+class Message(_Obj):
+    _required = ("id", "content", "model", "role", "type", "usage")
+    _optional = ("container", "diagnostics", "stop_details", "stop_reason", "stop_sequence")
+    _nested = {"content": {"text": TextBlock, "tool_use": ToolUseBlock, "thinking": ThinkingBlock,
+                           "redacted_thinking": RedactedThinkingBlock}, "usage": Usage}
 
 
 class MessageTokensCount(_Obj):
-    pass
+    _required = ("input_tokens",)
 
 
 class RawMessageStartEvent(_Obj):

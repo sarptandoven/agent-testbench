@@ -384,6 +384,69 @@ def test_openai_streams_async_and_errors(sdk, tmp_path):
         c.responses.create(model="gpt-5.5", input="hi")
 
 
+def _nones(v) -> list:
+    if isinstance(v, dict):
+        return [k for k, x in v.items() if x is None] + [n for x in v.values() for n in _nones(x)]
+    return [n for x in v for n in _nones(x)] if isinstance(v, list) else []
+
+
+def test_reply_objects_dump_and_validate_as_the_sdks_models_do(sdk):
+    anthropic = sdk("anthropic")
+    r = anthropic.Anthropic().messages.create(model="claude-opus-5-5", max_tokens=256, messages=USER)
+    assert _nones(r.model_dump()) and not _nones(r.model_dump(exclude_none=True)), "exclude_none drops every None"
+    assert not _nones(r.to_dict(exclude_none=True)) and "null" not in r.model_dump_json(exclude_none=True)
+    assert r.model_dump(include={"id", "usage"}, exclude={"usage": {"output_tokens"}}).keys() == {"id", "usage"}
+    assert "output_tokens" not in r.model_dump(include={"usage"}, exclude={"usage": {"output_tokens"}})["usage"]
+    with pytest.raises(TypeError, match="exclude_nones"):
+        r.model_dump(exclude_nones=True)
+    assert anthropic.types.Message.model_validate(r.model_dump()) == r, "a dumped reply reads back as itself"
+
+    m = anthropic.types.Message.model_validate({
+        "id": "msg_1", "type": "message", "role": "assistant", "model": "claude-opus-5-5", "stop_reason": "tool_use",
+        "content": [{"type": "text", "text": "Checking."}, {"type": "tool_use", "id": "t1", "name": "get_weather",
+                                                           "input": {"city": "Paris"}}],
+        "usage": {"input_tokens": 3, "output_tokens": 5}})
+    assert isinstance(m.content[1], anthropic.types.ToolUseBlock) and m.content[1].input["city"] == "Paris"
+    assert isinstance(m.usage, anthropic.types.Usage) and m.stop_sequence is None and m.usage.cache_read_input_tokens is None
+    with pytest.raises(ValueError, match="validation errors? for Message") as e:
+        anthropic.types.Message.model_validate({"type": "message", "role": "assistant"})
+    assert "id\n  Field required" in str(e.value) and "usage\n  Field required" in str(e.value)
+
+    openai = sdk("openai")
+    c = openai.types.chat.ChatCompletion.model_validate_json(json.dumps({
+        "id": "chatcmpl-1", "object": "chat.completion", "created": 1, "model": "gpt-5.5", "choices": [
+            {"index": 0, "finish_reason": "tool_calls", "message": {"role": "assistant", "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": "{}"}}]}}]}))
+    call = c.choices[0].message.tool_calls[0]
+    assert isinstance(call, openai.types.chat.ChatCompletionMessageFunctionToolCall) and call.function.name == "get_weather"
+    assert c.choices[0].message.content is None and c.usage is None and c.model_copy(update={"id": "x"}).id == "x"
+    done = openai.OpenAI().chat.completions.create(model="gpt-5.5", messages=USER)
+    assert openai.types.chat.ChatCompletion.model_validate(done.model_dump()) == done
+
+
+def test_the_modules_app_code_imports_types_from(sdk):
+    anthropic = sdk("anthropic")
+    from anthropic.types.message import Message
+    from anthropic.types.text_block import TextBlock
+    from anthropic.types.tool_use_block import ToolUseBlock
+    from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
+    assert (Message, TextBlock, ToolUseBlock) == (anthropic.types.Message, anthropic.types.TextBlock,
+                                                  anthropic.types.ToolUseBlock)
+    with pytest.raises(ModuleNotFoundError, match="the mock anthropic package .* does not have it"):
+        importlib.import_module("anthropic.types.beta_message")
+
+    openai = sdk("openai")
+    from openai.types.chat.chat_completion import ChatCompletion, Choice
+    from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall, Function
+    from openai.types.chat.chat_completion_chunk import ChatCompletionChunk, ChoiceDelta
+    from openai.types.completion_usage import CompletionUsage
+    from openai.types.chat.completion_create_params import CompletionCreateParams
+    r = openai.OpenAI().chat.completions.create(model="gpt-5.5", messages=USER)
+    assert isinstance(r, ChatCompletion) and isinstance(r.choices[0], Choice) and isinstance(r.usage, CompletionUsage)
+    assert ChatCompletionMessageToolCall.__name__ and Function and ChatCompletionChunk and ChoiceDelta
+    assert MessageCreateParamsNonStreaming is CompletionCreateParams is dict, "request types are plain dicts"
+
+
 # ---- testbench.yaml and the expectation ---------------------------------------------------------------------
 
 def _step(tmp_path, **step):
@@ -531,15 +594,24 @@ def test_plan_runs_an_app_on_the_mocks(tmp_path):
 
 # ---- the mock must not drift into names the real SDK lacks -------------------------------------------------------
 
+DEEP = ["anthropic.types." + m for m in (                     # the modules app code imports types from
+    "message", "text_block", "tool_use_block", "thinking_block", "redacted_thinking_block", "usage",
+    "message_tokens_count", "content_block", "model", "message_param", "text_block_param", "tool_param",
+    "tool_result_block_param", "tool_use_block_param")] + ["openai.types." + m for m in (
+        "completion_usage", "embedding", "create_embedding_response", "chat.chat_completion",
+        "chat.chat_completion_message", "chat.chat_completion_message_tool_call",
+        "chat.chat_completion_message_function_tool_call", "chat.chat_completion_chunk",
+        "chat.chat_completion_message_param", "chat.chat_completion_tool_param")]
 MOCK_NAMES = '''
-import json
+import importlib, json
 import anthropic, openai, openai.types.chat
 print(json.dumps({"anthropic": anthropic.__all__, "anthropic.types": anthropic.types.__all__,
                   "openai": openai.__all__, "openai.types": openai.types.__all__,
                   "openai.types.chat": openai.types.chat.__all__,
+                  **{m: importlib.import_module(m).__all__ for m in DEEP},
                   "anthropic create": list(anthropic._CREATE), "anthropic count": list(anthropic._COUNT),
                   "openai create": list(openai._CREATE), "openai embed": list(openai._EMBED)}))
-'''
+'''.replace("DEEP", repr(DEEP))
 
 
 @pytest.mark.parametrize("name", ["anthropic", "openai"])

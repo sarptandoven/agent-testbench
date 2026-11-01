@@ -48,9 +48,15 @@ does not exist or has a bad pattern all stop there with what to write instead.
 | calls | `messages.create` (also `stream=True`), `messages.stream` (`text_stream`, `get_final_message`, `get_final_text`, `until_done`), `messages.count_tokens`; the same under `beta.messages` | `chat.completions.create` (also `stream=True` with `stream_options`), `embeddings.create` |
 | replies | `Message` with `id`, `type`, `role`, `model`, `content` (`text`, `tool_use` and, with `thinking`, `thinking` blocks), `stop_reason`, `stop_sequence`, `usage` | `ChatCompletion` with `id`, `object`, `created`, `model`, `choices[i].message.content` / `.tool_calls`, `finish_reason`, `usage`; `CreateEmbeddingResponse` |
 | errors | `APIError`, `APIStatusError`, `APIConnectionError`, `APITimeoutError`, `BadRequestError`, `AuthenticationError`, `PermissionDeniedError`, `NotFoundError`, `RateLimitError`, `InternalServerError`, `OverloadedError`, ... | `OpenAIError`, `APIError`, `APIStatusError`, `APIConnectionError`, `APITimeoutError`, `BadRequestError`, `AuthenticationError`, `PermissionDeniedError`, `NotFoundError`, `RateLimitError`, `InternalServerError`, ... |
-| types | `anthropic.types` (`Message`, `TextBlock`, `ToolUseBlock`, stream events; every `*Param` is a dict) | `openai.types`, `openai.types.chat` (`ChatCompletion`, `ChatCompletionMessage`, ...; every `*Param` is a dict) |
+| types | `anthropic.types` (`Message`, `TextBlock`, `ToolUseBlock`, stream events; every `*Param` is a dict), and the modules they are imported from: `anthropic.types.message`, `.text_block`, `.tool_use_block`, `.thinking_block`, `.usage`, `.content_block`, ... | `openai.types`, `openai.types.chat` (`ChatCompletion`, `ChatCompletionMessage`, ...; every `*Param` is a dict), and `openai.types.chat.chat_completion` (`Choice`), `.chat_completion_message`, `.chat_completion_message_tool_call` (`Function`), `.chat_completion_chunk`, `openai.types.completion_usage`, ... |
 
-Reply objects take attribute access like the SDKs' models, and `to_dict()`, `model_dump()`, `to_json()`. They can
+Reply objects take attribute access like the SDKs' models, and `to_dict()`, `to_json()`, `model_dump()` and
+`model_dump_json()` with `exclude_none=` (and `include=` / `exclude=` for `model_dump`), `model_copy(update=...)`;
+a misspelt keyword is a `TypeError`, as in pydantic. `Message.model_validate(data)` and `model_validate_json(text)`
+(and the same on `ChatCompletion`, `Choice`, `TextBlock`, ...) build one from a dict, a saved reply for instance,
+nested blocks included, and raise pydantic's `ValidationError` (a `ValueError`) when a field the real model requires
+is missing; types are not checked beyond that. A module of request types (`*_param`, `*_params`) holds plain dicts
+whatever it is called; importing a response module the mock does not have says so. They can
 be passed back as they are (`messages.append({"role": "assistant", "content": response.content})`, or OpenAI's
 `messages.append(completion.choices[0].message)`). Errors carry what code reads from them: `status_code`, `body`,
 `response.headers` (`retry-after: 0` on a 429), `request_id`, and OpenAI's `code` and `param`. Any `api_key` works, and
