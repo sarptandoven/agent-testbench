@@ -551,6 +551,9 @@ def cmd_doctor(a):
     for mod, why in (("nbclient", "notebook steps"), ("ipykernel", "notebook steps"), ("playwright", "web steps"),
                      ("mcp", "the MCP server")):
         checks.append((f"{mod} ({why})", iu.find_spec(mod) is not None, "installed" if iu.find_spec(mod) else "missing"))
+        if mod == "playwright" and iu.find_spec(mod):
+            from .web import chromium_check
+            checks.append(("chromium (web steps)", *chromium_check()))
     checks.append(("ffprobe (media checks)", bool(shutil.which("ffprobe")), shutil.which("ffprobe") or "missing"))
     checks.append(("backends", True, ", ".join(backends.names())))
     for b in backends.registry().values():
