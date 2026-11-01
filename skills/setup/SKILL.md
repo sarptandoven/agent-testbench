@@ -13,6 +13,11 @@ description: Set up agent-testbench in a project - install it, write testbench.y
    notebook, test suite, training script and web app it finds - already checking what it can - and the working
    rules in `AGENTS.md` (read by Codex and others; `CLAUDE.md` points to it). Lines marked FILL IN need the number
    only the person knows ("accuracy >= 0.9"): ask, do not guess.
+   **When the person's goal matches a recipe, start from it**: `testbench recipes` lists them (pytest,
+   notebook-colab, pytorch-train, hf-finetune, web-app, llm-eval, docker-sandbox, ssh-gpu-box, data-pipeline) with
+   each plan's worst case. `testbench init --recipe NAME` writes that ladder of plans plus what init detects;
+   `testbench init --add --recipe NAME` adds it to an existing testbench.yaml without changing anything already
+   there. Then adapt its FILL IN lines to the project with the person.
 3. **Ask the person** for what only they can decide: the budget (`max_run_usd`, `ask_above_usd`,
    `max_day_usd`), which backends they have (Modal, Colab, neither), and what "working" means in numbers.
 4. **Set session defaults** - where `testbench session start` puts its kernel when no flags are given:

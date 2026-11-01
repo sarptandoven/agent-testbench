@@ -110,18 +110,25 @@ def _web(root: Path) -> tuple[str, str, str] | None:
     return None
 
 
-def _trainer(root: Path) -> tuple[str, str, str] | None:
+def trainer_script(root: Path) -> str | None:
+    """The project's training script (train.py and the like, at the top, in src/ or in scripts/), relative to root."""
     for name in TRAINERS:
         hits = [p for p in (root / name, root / "src" / name, root / "scripts" / name) if p.is_file()]
         if hits:
-            rel = hits[0].relative_to(root).as_posix()
-            text = ("  train-smoke:\n    backend: local\n    description: a short training run, to check it works end to end\n"
-                    "    steps:\n      - name: train briefly\n"
-                    f"        run: python {_q(rel)}            # FILL IN: flags for a tiny run (few steps, small data)\n"
-                    "        max_minutes: 10\n        expect:\n          exit_code: 0\n"
-                    "          # json: {outputs/metrics.json: {loss: \"< 1.0\"}}   # FILL IN: what it writes, and what is good\n")
-            return "train-smoke", text, f"a training script ({rel})"
+            return hits[0].relative_to(root).as_posix()
     return None
+
+
+def _trainer(root: Path) -> tuple[str, str, str] | None:
+    rel = trainer_script(root)
+    if rel is None:
+        return None
+    text = ("  train-smoke:\n    backend: local\n    description: a short training run, to check it works end to end\n"
+            "    steps:\n      - name: train briefly\n"
+            f"        run: python {_q(rel)}            # FILL IN: flags for a tiny run (few steps, small data)\n"
+            "        max_minutes: 10\n        expect:\n          exit_code: 0\n"
+            "          # json: {outputs/metrics.json: {loss: \"< 1.0\"}}   # FILL IN: what it writes, and what is good\n")
+    return "train-smoke", text, f"a training script ({rel})"
 
 
 def detect(root: Path) -> list[tuple[str, str, str]]:
