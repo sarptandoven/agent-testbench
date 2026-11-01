@@ -58,7 +58,7 @@ class _plain:
 
     def __exit__(self, kind, exc, tb):
         from .session_backends import SessionError
-        if kind is not None and issubclass(kind, (C.ConfigError, SessionError, FileNotFoundError, NB.ParamError)):
+        if kind is not None and issubclass(kind, (C.ConfigError, SessionError, FileNotFoundError, NB.NotebookError)):
             raise TestbenchError(str(exc)) from None
         return False
 

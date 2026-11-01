@@ -88,13 +88,16 @@ def _identity(root: Path) -> list[str]:
 
 def _own(root: Path) -> list[str]:
     """Pathspecs for what is testbench's own: the project's .testbench/, and this machine's folder (limits, ledger)
-    if it happens to be inside the project."""
+    if it happens to be inside the project. One the repository ignores already is left out: git refuses to add or
+    stash a path it ignores, even one a pathspec only excludes."""
     out = [OWN]
     try:
         out.append(":(exclude)" + str(budget.user_dir().resolve().relative_to(Path(root).resolve())))
     except ValueError:
         pass
-    return out
+    paths = [p.split(")", 1)[1] for p in out]
+    ignored = set(_git(root, "check-ignore", "--", *paths, check=False).splitlines())
+    return [p for p, path in zip(out, paths) if path not in ignored]
 
 
 def _changes(root: Path, where: str = ".") -> list[str]:
