@@ -25,6 +25,7 @@ hooks:
 nav:
   - Home: index.md
   - Getting started: getting-started.md
+  - Recipes: recipes.md
   - Expectations: expectations.md
   - Backends:
       - Overview: backends.md

@@ -140,6 +140,18 @@ async def plans(project_dir: str = ".") -> str:
     return _text(*await _cli(project_dir, ["plans"]))
 
 
+@server.tool(description="Recipes: proven starting points for testbench.yaml by goal (pytest, notebook-colab, "
+                         "pytorch-train, hf-finetune, web-app, llm-eval, docker-sandbox, ssh-gpu-box, data-pipeline), "
+                         "each a ladder of plans - free here first, a short check on the target hardware, then the full "
+                         "run - with checks that fail when the result is wrong. With no name: what each is for, its "
+                         "backends and each plan's worst case at the project's prices. With a name: the recipe itself, "
+                         "YAML with FILL IN lines to adapt. Start from one when the person's goal matches it: "
+                         "`testbench init --recipe NAME`, or `testbench init --add --recipe NAME` for an existing "
+                         "testbench.yaml.")
+async def recipes(name: str = "", project_dir: str = ".") -> str:
+    return _text(*await _cli(project_dir, ["recipes", *([name] if name else [])]))
+
+
 @server.tool(description="Run a plan. Waits up to wait_seconds (passing on progress) and returns the report if it "
                          "finished, otherwise the run id to pass to wait_run. Refused if over budget. Above the approval "
                          "threshold the person is asked directly when the client supports it; otherwise it needs "

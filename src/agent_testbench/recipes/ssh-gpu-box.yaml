@@ -1,0 +1,84 @@
+# Recipe ssh-gpu-box: your own GPU machine over ssh - a tiny run here, a GPU check on the box, then the full run there.
+#
+# Proves: box-smoke - training runs end to end on this machine's CPU, tiny and free; box-check - testbench reaches
+#   the box, builds its virtualenv there, torch sees the box's GPU, and a short run keeps that GPU busy; box-full -
+#   the full run on the box reaches the result you need within its time.
+# FILL IN: ssh.host (a Host from ~/.ssh/config, or user@host; `ssh HOST true` must work with keys, no password), the
+#   box's Python, the packages (ssh.pip, pinned; built once into a virtualenv there), the GPU's name, train.py's flags
+#   (init puts the training script it finds in the project here) and the numbers that mean it works.
+# Expects train.py like the pytorch-train recipe's: it prints `loss=<number>` and writes metrics.json and model.pt
+#   into --out.
+# The hard stop is on the box: a watchdog started there before anything else ends what a run started at its
+#   max_minutes (plus 2), even if this machine sleeps or loses the connection. testbench bounds the work, not the
+#   machine: a rented instance that bills while it is on stays on - set usd_per_hour to its rate, so worst cases are
+#   real and the budget counts them.
+# Costs: nothing at usd_per_hour 0 (your own machine).
+
+# The box, reached with ssh in BatchMode over one reused connection (a password prompt fails with a message instead
+# of hanging). Secrets go over ssh's stdin, never onto a command line.
+ssh:
+  host: gpu-box                            # FILL IN: a Host from ~/.ssh/config, or user@host
+  usd_per_hour: 0.0                        # FILL IN: 0 for your own machine; a rented one's hourly rate
+  python: python3                          # the box's Python, 3.10 or newer
+  workdir: ~/.testbench-remote             # projects, sessions and runs go here on the box
+  setup: venv                              # a virtualenv per project there, built once and kept
+  pip: [torch==2.14.1]                     # FILL IN: and what train.py imports; PyPI's torch 2.14 needs a recent NVIDIA driver (CUDA 13)
+  command: [ssh]                           # or [ssh, -p, "2222"], [ssh, -J, bastion]
+
+sessions:
+  backend: ssh                             # `testbench session start` with no --backend: a kernel on the box
+  idle_minutes: 15
+  max_minutes: 120
+
+plans:
+  box-smoke:
+    backend: local
+    description: one epoch of a tiny subset on this machine's CPU - it runs end to end and learns (free)
+    steps:
+      - name: train tiny
+        run: python train.py --epochs 1 --limit 512 --batch-size 32 --device cpu --out outputs/smoke    # FILL IN: your flags for a tiny run
+        env: {CUDA_VISIBLE_DEVICES: ""}
+        max_minutes: 10
+        expect:
+          files: [outputs/smoke/model.pt]
+          metrics:
+            stdout:
+              "\\bloss=([0-9.eE+-]+)": "< 2.30"     # FILL IN: below where an untrained model starts (ln 10 for 10 classes)
+
+  box-check:
+    backend: ssh
+    gpu: RTX4090                           # FILL IN: a label for the report; the report also records the GPU actually used
+    description: on the box - its virtualenv, torch on its GPU, and a short run with the GPU busy
+    steps:
+      - name: cuda works
+        run: |
+          set -e
+          nvidia-smi --query-gpu=name,driver_version,memory.total,memory.used --format=csv
+          python -c "import torch; assert torch.cuda.is_available(), 'torch sees no GPU'; print('torch', torch.__version__, 'on', torch.cuda.get_device_name(0))"
+        max_minutes: 3
+        expect:
+          text: {stdout: ["on NVIDIA"]}    # FILL IN: the GPU's name as torch prints it, e.g. "on NVIDIA GeForce RTX 4090"
+      - name: train short
+        run: python train.py --epochs 1 --max-steps 300 --device cuda --out outputs/box-check    # FILL IN
+        max_minutes: 10
+        expect:
+          files: [outputs/box-check/model.pt]
+          gpu: {busy_pct: ">= 50"}         # half the readings or more with the GPU busy: it did the work
+          metrics:
+            stdout:
+              "\\bloss=([0-9.eE+-]+)": "< 2.30"
+
+  box-full:
+    backend: ssh
+    gpu: RTX4090
+    description: the full run on the box
+    steps:
+      - name: train
+        run: python train.py --epochs 30 --device cuda --out outputs/full    # FILL IN
+        max_minutes: 240                   # FILL IN: what it needs plus a margin; the watchdog on the box stops it there
+        artifacts: [outputs/full/metrics.json]
+        expect:
+          files: [outputs/full/model.pt]
+          gpu: {busy_pct: ">= 70"}
+          json:
+            outputs/full/metrics.json: {accuracy: "between 0.90 and 0.995"}   # FILL IN: near 1.0 on a hard task usually means a leak

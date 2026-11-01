@@ -76,23 +76,42 @@ def _print_report(run_dir: Path) -> None:
     print(md.read_text() if md.exists() else runs.status_line(run_dir))
 
 
-def cmd_init(a):
-    root = Path.cwd()
-    target = root / C.CONFIG_NAME
-    if target.exists() and not a.force:
-        print(f"{target} already exists (use --force to replace it)")
-        return 2
-    from .scaffold import detect
-    found = detect(root)
-    plans = "".join(text for _, text, _ in found) or EMPTY_PLAN
-    project = "".join(c if c.isalnum() or c in "-_" else "-" for c in root.name)[:40].strip("-") or "project"
-    target.write_text(INIT_TEMPLATE.format(project=project, plans=plans))
+def _write_agent_rules(root: Path) -> None:
     for name in ("AGENTS.md", "CLAUDE.md"):
         f = root / name
         text = f.read_text() if f.exists() else ""
         if "<!-- agent-testbench -->" not in text:
             body = AGENTS_SECTION if name == "AGENTS.md" else "See AGENTS.md for how to work in this project (agent-testbench).\n"
             f.write_text((text.rstrip() + "\n\n" if text.strip() else "") + body)
+
+
+def _print_machine_limits(machine) -> None:
+    if machine:
+        print(f"Wrote {machine}: limits for every project on this machine, which a project's budget can lower but never "
+              "raise (edit it yourself to raise them).")
+
+
+def cmd_init(a):
+    root = Path.cwd()
+    target = root / C.CONFIG_NAME
+    if a.add and not a.recipe:
+        print("--add adds a recipe's plans to testbench.yaml: testbench init --add --recipe NAME (`testbench recipes` "
+              "lists them)")
+        return 2
+    if a.add and target.exists():
+        return _add_recipes(root, target, a.recipe)
+    if target.exists() and not a.force:
+        print(f"{target} already exists (use --force to replace it"
+              + (", or --add to add the recipe's plans to it)" if a.recipe else ")"))
+        return 2
+    from .scaffold import detect
+    found = detect(root)
+    project = "".join(c if c.isalnum() or c in "-_" else "-" for c in root.name)[:40].strip("-") or "project"
+    if a.recipe:
+        return _init_from_recipes(root, target, project, found, a.recipe)
+    plans = "".join(text for _, text, _ in found) or EMPTY_PLAN
+    target.write_text(INIT_TEMPLATE.format(project=project, plans=plans))
+    _write_agent_rules(root)
     first = next(iter(C.load(root)["plans"]))
     machine = budget.write_limits_if_missing()
     print(f"Wrote {target.name}" + (":" if found else " with a starter plan (no notebooks, tests, app or training "
@@ -100,11 +119,96 @@ def cmd_init(a):
     for name, _, what in found:
         print(f"  plan {name}: {what}")
     print("and the working rules in AGENTS.md (CLAUDE.md points to it).")
-    if machine:
-        print(f"Wrote {machine}: limits for every project on this machine, which a project's budget can lower but never "
-              "raise (edit it yourself to raise them).")
+    _print_machine_limits(machine)
     print(f"Next: fill in the lines marked FILL IN in {target.name} - the numbers that mean \"working\" - then "
           f"`testbench run {first}`.")
+    return 0
+
+
+def _print_recipe_plans(cfg: dict, chosen: list[dict]) -> None:
+    from . import recipes as RC
+    for r in chosen:
+        for plan in r["plans"]:
+            print(f"  plan {plan}: {RC.describe(cfg, plan)} (recipe {r['name']})")
+        for stand_in, own in r["swapped"].items():
+            print(f"    runs {own}, found here, where the recipe says {stand_in}")
+
+
+def _init_from_recipes(root: Path, target: Path, project: str, found: list, wanted: list[str]) -> int:
+    """testbench.yaml from recipes, plus the plans init detects that the recipes do not already cover."""
+    import yaml
+    from . import recipes as RC
+    try:
+        chosen = [RC.load(name, root) for name in dict.fromkeys(wanted)]
+        theirs = {plan: spec for r in chosen for plan, spec in r["plans"].items()}
+        covered = RC.subjects(theirs)
+        kept, left = [], []
+        for name, text, what in found:
+            plan = yaml.safe_load("plans:\n" + text)["plans"]
+            (left if name in theirs or RC.subjects(plan) & covered else kept).append((name, text, what))
+        text, notes = RC.compose(INIT_TEMPLATE.format(project=project, plans="".join(t for _, t, _ in kept)), chosen,
+                                 fresh=True)
+        cfg = RC.check(text, root)
+    except RC.RecipeError as exc:
+        print(f"testbench: {exc}")
+        return 2
+    target.write_text(text)
+    _write_agent_rules(root)
+    machine = budget.write_limits_if_missing()
+    print(f"Wrote {target.name} from recipe{'s' * (len(chosen) > 1)} {', '.join(r['name'] for r in chosen)}:")
+    _print_recipe_plans(cfg, chosen)
+    for name, _, what in kept:
+        print(f"  plan {name}: {what}, found here")
+    for name, _, what in left:
+        print(f"  found {what}: the recipe's plans already cover it, so it gets no plan of its own")
+    for note in notes:
+        print(note)
+    print("and the working rules in AGENTS.md (CLAUDE.md points to it).")
+    _print_machine_limits(machine)
+    print(f"Next: fill in the lines marked FILL IN in {target.name} - the commands, paths and numbers that mean "
+          f"\"working\" - then `testbench run {next(iter(chosen[0]['plans']))}`, the cheapest plan first.")
+    return 0
+
+
+def _add_recipes(root: Path, target: Path, wanted: list[str]) -> int:
+    """A recipe's plans (and the sections the file lacks) added to an existing testbench.yaml; nothing in it changes."""
+    from . import recipes as RC
+    try:
+        C.load(root)
+    except C.ConfigError as exc:
+        print(f"testbench: {exc}\nA recipe is added only to a {C.CONFIG_NAME} that loads; fix it, then run this again.")
+        return 2
+    try:
+        chosen = [RC.load(name, root) for name in dict.fromkeys(wanted)]
+        text, notes = RC.compose(target.read_text(), chosen)
+        cfg = RC.check(text, root)
+    except RC.RecipeError as exc:
+        print(f"testbench: {exc}")
+        return 2
+    target.write_text(text)
+    print(f"Added to {target.name} (the plans, budget and sections already there are unchanged):")
+    _print_recipe_plans(cfg, chosen)
+    for note in notes:
+        print(note)
+    print(f"Next: fill in the lines marked FILL IN under the new plans - the commands, paths and numbers that mean "
+          f"\"working\" - then `testbench run {next(iter(chosen[0]['plans']))}`.")
+    return 0
+
+
+def cmd_recipes(a):
+    from . import recipes as RC
+    if a.name:
+        try:
+            print(RC.load(a.name)["text"].rstrip())
+        except RC.RecipeError as exc:
+            print(f"testbench: {exc}")
+            return 2
+        return 0
+    try:
+        base = C.load(C.find_root())
+    except C.ConfigError:
+        base = None                                  # no project here (or one that does not load): default prices
+    print(RC.listing(base))
     return 0
 
 
@@ -581,7 +685,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("init", help="write testbench.yaml and the working rules (AGENTS.md) for this project")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--recipe", action="append", default=[], metavar="NAME",
+                   help="start from a recipe (repeatable; `testbench recipes` lists them)")
+    p.add_argument("--add", action="store_true",
+                   help="with --recipe: add the recipe's plans to the existing testbench.yaml, changing nothing in it")
     p.set_defaults(fn=cmd_init)
+    p = sub.add_parser("recipes", help="testbench.yaml starting points for a goal: list them with their costs, or print one")
+    p.add_argument("name", nargs="?", help="print this recipe")
+    p.set_defaults(fn=cmd_recipes)
     sub.add_parser("plans", help="list plans, their hardware and worst-case cost").set_defaults(fn=cmd_plans)
     p = sub.add_parser("estimate", help="worst-case cost of a plan and whether it may launch")
     p.add_argument("plan")

@@ -1,0 +1,83 @@
+# Recipe pytorch-train: a PyTorch training ladder - a tiny CPU run here, a few minutes on a Modal T4, then the full run.
+#
+# Proves: smoke - the script runs end to end on this machine's CPU, learns (its last loss is below an untrained
+#   model's, its accuracy above chance) and saves a checkpoint; gpu-check - torch's CUDA build works on the target
+#   GPU, the GPU is busy (not idle while the CPU or the data loader does the work), and the loss still goes down;
+#   full - the real run reaches the accuracy you need, on the GPU, within its time.
+# FILL IN: train.py's flags (the ones below are an example; init puts the training script it finds in the project
+#   here), the loss an untrained model starts at (ln(number of classes) for classification: 2.30 for 10), the
+#   accuracy that means it works, the packages train.py imports (modal.pip, pinned) and the full run's max_minutes.
+# Expects train.py to print `loss=<number>` as it trains (the last one printed is checked) and to write
+#   metrics.json ({"accuracy": ...}) and model.pt into --out. Adapt the checks to what your script prints and writes.
+# Data: the Modal plans pass `--data-dir "${TESTBENCH_CACHE:-.cache}/data"`, a folder on the project's Modal volume
+#   that survives between runs, so a dataset is downloaded once (smoke uses .cache/data here). Big local folders (data,
+#   checkpoints) are shipped with the project unless testbench.yaml's `exclude:` lists them.
+# Costs: smoke is free; gpu-check is about $0.23 at worst (10 minutes of a T4 plus start-up); full about $1.54 at
+#   worst (60 minutes of an A10), above the default ask_above_usd of $0.50, so a person approves it before it runs.
+#   `testbench recipes` prints each worst case at your project's prices.
+
+# The image for the Modal plans, built once and reused. Pin every package, so a run next month installs what this
+# one did. PyPI's torch 2.14 wheels bundle CUDA 13 libraries, which need a recent NVIDIA driver; gpu-check's first
+# step is where a mismatch shows (torch sees no GPU), for cents rather than at the start of the full run.
+modal:
+  python: "3.11"
+  pip: [torch==2.14.1]                     # FILL IN: and what train.py imports (torchvision==0.29.1 goes with torch 2.14.1)
+  cpu: 4                                   # data loading needs a few cores, or the GPU waits for it
+  memory_gb: 16
+
+plans:
+  smoke:
+    backend: local
+    description: one epoch of a tiny subset on this machine's CPU - it runs end to end and learns (free)
+    steps:
+      - name: train tiny
+        run: python train.py --epochs 1 --limit 512 --batch-size 32 --device cpu --data-dir .cache/data --out outputs/smoke    # FILL IN: your flags for a tiny run
+        env: {CUDA_VISIBLE_DEVICES: ""}    # the CPU path, even on a machine with a GPU
+        max_minutes: 10
+        artifacts: [outputs/smoke/metrics.json]
+        expect:
+          files: [outputs/smoke/model.pt, outputs/smoke/metrics.json]
+          metrics:
+            stdout:                        # \b: not the `loss=` inside `val_loss=`
+              "\\bloss=([0-9.eE+-]+)": "< 2.30"     # FILL IN: below where an untrained model starts, so it learned
+          json:
+            outputs/smoke/metrics.json: {accuracy: "> 0.2"}      # FILL IN: better than chance (0.1 for 10 classes)
+
+  gpu-check:
+    backend: modal
+    gpu: T4
+    description: a few minutes on a Modal T4 - CUDA works, the GPU is busy, the loss goes down (cents)
+    steps:
+      - name: cuda works
+        run: |
+          set -e
+          nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+          python -c "import torch; assert torch.cuda.is_available(), 'torch sees no GPU'; print('torch', torch.__version__, 'on', torch.cuda.get_device_name(0))"
+        max_minutes: 2
+        expect:
+          text: {stdout: ["on Tesla T4"]}  # torch's CUDA build runs with this machine's driver
+      - name: train short
+        run: python train.py --epochs 1 --max-steps 300 --device cuda --data-dir "${TESTBENCH_CACHE:-.cache}/data" --out outputs/gpu-check    # FILL IN
+        max_minutes: 8
+        artifacts: [outputs/gpu-check/metrics.json]
+        expect:
+          files: [outputs/gpu-check/model.pt]
+          gpu: {busy_pct: ">= 50"}         # half the readings or more with the GPU busy: it did the work
+          metrics:
+            stdout:
+              "\\bloss=([0-9.eE+-]+)": "< 2.30"     # FILL IN: as in smoke
+
+  full:
+    backend: modal
+    gpu: A10
+    description: the full training run on a Modal A10; a person approves its worst case before it starts
+    steps:
+      - name: train
+        run: python train.py --epochs 30 --device cuda --data-dir "${TESTBENCH_CACHE:-.cache}/data" --out outputs/full    # FILL IN
+        max_minutes: 60                    # FILL IN: what the run needs plus a margin; also its hard stop and its cost bound
+        artifacts: [outputs/full/metrics.json, outputs/full/model.pt]    # a big checkpoint is better saved under $TESTBENCH_CACHE
+        expect:
+          files: [outputs/full/model.pt]
+          gpu: {busy_pct: ">= 70"}
+          json:
+            outputs/full/metrics.json: {accuracy: "between 0.90 and 0.995"}   # FILL IN: near 1.0 on a hard task usually means a leak

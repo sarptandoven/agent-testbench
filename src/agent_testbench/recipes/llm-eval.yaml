@@ -1,0 +1,45 @@
+# Recipe llm-eval: an LLM app's eval - a score over fixed cases that must clear a bar, and stay near a known-good value.
+#
+# Proves: eval-quick - on a small fixed sample (the same cases and seed every run) the score clears the bar you set,
+#   and every case was scored; eval-full - on the whole eval set the score is within a tolerance of the value of a
+#   run you trust: a drop is a regression, and a jump is worth a look too (a leak, a scorer that passes everything).
+# Loop-ready: `testbench loop start eval-quick --metric outputs/eval-quick.json:score --budget-usd 0` then keeps a
+#   prompt or model change only when the score goes up (`--metric check:score` reads the printed score instead).
+# FILL IN: the eval command, the bar, the known-good score and how much it moves between runs, and the NAMES of the
+#   API keys the eval needs (`secrets:`; export them in your shell - never their values in this file).
+# Expects the eval to print `score=<number>` and write {"score": ..., "n": <cases scored>} to --out.
+# Costs: nothing on testbench's side; it runs on this machine. The model calls are billed by your provider and are
+#   not in testbench's budget: keep the quick sample small and --limit set. The app's own tests should not call the
+#   real API at all: use strict mocks (agent_testbench.mocks.StrictAPI, `pythonpath: [mocks]`).
+
+plans:
+  eval-quick:
+    backend: local
+    description: the eval on 50 fixed cases; the score must clear the bar (and is the metric for a loop)
+    steps:
+      - name: eval sample
+        run: python eval.py --limit 50 --seed 0 --out outputs/eval-quick.json    # FILL IN: your eval command
+        max_minutes: 10
+        secrets: []                        # FILL IN: e.g. [OPENAI_API_KEY] - names only; each must be exported
+        artifacts: [outputs/eval-quick.json]
+        expect:
+          metrics:
+            stdout:
+              "\\bscore=([0-9.]+)": ">= 0.70"           # FILL IN: the lowest score that counts as working
+          json:
+            outputs/eval-quick.json: {score: ">= 0.70", n: 50}   # n: every case was scored, none skipped on an error
+
+  eval-full:
+    backend: local
+    description: the whole eval set; the score must stay near the known-good value
+    steps:
+      - name: eval all
+        run: python eval.py --seed 0 --out outputs/eval-full.json    # FILL IN
+        max_minutes: 30
+        secrets: []                        # FILL IN: as above
+        artifacts: [outputs/eval-full.json]
+        expect:
+          metrics:
+            stdout:
+              "\\bscore=([0-9.]+)": "~= 0.80 +- 0.03"    # FILL IN: a trusted run's score, and how much it moves between runs
+          duration: {minutes: "<= 20"}     # an eval that suddenly takes much longer is retrying or timing out

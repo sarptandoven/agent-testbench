@@ -1,0 +1,61 @@
+# Recipe docker-sandbox: code nobody has reviewed yet, run in a fresh container with no network at all.
+#
+# Proves: sandbox-tests - the project's tests pass in a fresh container from a pinned image with no network, so
+#   nothing the code does can download, upload or reach a service, and nothing it writes lands on this machine;
+#   sandbox-run - the container really is offline (a connection attempt fails), then the code runs and writes what
+#   it should. Live sessions go into a container too (its `sessions:`), so exploring the code is sandboxed as well.
+# FILL IN: the packages the code needs, the test arguments and the number of tests, the command that runs the code
+#   and what it writes.
+# Packages: `docker.pip` is installed when testbench builds the image, once per docker: section, with the network on;
+#   the containers that run the code have none, so nothing can be installed at run time - put every package here,
+#   pinned. Or use an image you build yourself (FROM python:3.12-slim, RUN pip install -r requirements.txt): set
+#   `image:` to its tag and `setup: none` (it must then have ipykernel, jupyter_client, nbformat, nbclient and pyyaml).
+# Not a virtual machine: containers share this machine's kernel. Give the code no secrets, mount nothing writable,
+#   never add --privileged; https://github.com/sarptandoven/agent-testbench/blob/main/docs/docker.md says what a
+#   container isolates and what it does not.
+# Needs: a running Docker (`docker info` answers). Costs: nothing (usd_per_hour 0: this machine); the first run builds
+#   the image, a minute or two.
+
+# The containers: a pinned image, no network, hard limits on CPU and memory (a process over the limit is killed).
+docker:
+  image: python:3.12-slim
+  setup: build
+  pip: [pytest==9.1.1]                     # FILL IN: and every package the code needs, pinned
+  network: none                            # only a loopback interface: no downloads, no uploads, no services
+  cpu: 2
+  memory_gb: 4
+  usd_per_hour: 0.0
+
+sessions:
+  backend: docker                          # `testbench session start` with no --backend: a container like the plans'
+  idle_minutes: 10
+  max_minutes: 60
+
+plans:
+  sandbox-tests:
+    backend: docker
+    description: the tests, in a fresh container with no network
+    steps:
+      - name: tests
+        run: python -m pytest -q --junitxml=junit.xml       # FILL IN: your arguments
+        max_minutes: 10
+        artifacts: [junit.xml]
+        expect:
+          junit: {path: junit.xml, failures: 0, errors: 0, tests: ">= 1"}    # FILL IN: ">= N", the tests you have now
+
+  sandbox-run:
+    backend: docker
+    description: the container is offline, then the code runs in it and writes what it should
+    steps:
+      - name: offline
+        run: python -c "import socket; socket.create_connection(('1.1.1.1', 443), timeout=5)"
+        max_minutes: 1
+        expect:
+          exit_code: 1                     # the connection must fail ...
+          text: {stdout: ["Network is unreachable"]}     # ... because there is no network, not for another reason
+      - name: run it
+        run: python main.py --out outputs  # FILL IN: the command that runs the code
+        max_minutes: 10
+        artifacts: ["outputs/*"]
+        expect:
+          files: ["outputs/*"]             # FILL IN: what it writes, e.g. [outputs/result.json]
