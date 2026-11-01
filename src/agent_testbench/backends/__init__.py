@@ -2,7 +2,7 @@
 costs, its section of testbench.yaml - and hands out the two classes that do the work: a plan runner (takes a
 launched run, returns its report and cost) and a session (one kernel kept up on its machine).
 
-Built in: local, modal, colab, ssh, docker. Others come from installed packages that declare an entry point:
+Built in: local, modal, colab, ssh, docker, kubernetes. Others come from installed packages that declare an entry point:
 
     # pyproject.toml of a package such as testbench-ssh
     [project.entry-points."agent_testbench.backends"]
@@ -29,7 +29,8 @@ BUILTIN = {"local": "agent_testbench.backends.local:backend",
            "modal": "agent_testbench.backends.modal_backend:backend",
            "colab": "agent_testbench.backends.colab_backend:backend",
            "ssh": "agent_testbench.backends.ssh_backend:backend",
-           "docker": "agent_testbench.backends.docker_backend:backend"}
+           "docker": "agent_testbench.backends.docker_backend:backend",
+           "kubernetes": "agent_testbench.backends.kubernetes_backend:backend"}
 
 
 class PlanRunner(Protocol):
