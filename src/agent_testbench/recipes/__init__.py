@@ -162,7 +162,8 @@ def compose(text: str, recipes: list[dict], fresh: bool = False) -> tuple[str, l
     """`text` (a testbench.yaml) with each recipe's plans after the plans already there, under the recipe's header, and
     each section a recipe needs added where the file has none. Nothing in the file changes - except in one init has
     just written (fresh), where a recipe's `sessions:` replaces the default and a commented-out example of a section
-    the recipe sets is dropped. A plan name that is taken is refused. Returns (the new text, notes for the person)."""
+    the recipe sets is dropped. An existing file never gets a recipe's `sessions:` (it would move `session start`'s
+    kernels without a word): a note says what to add. A plan name that is taken is refused. Returns (the new text, notes for the person)."""
     try:
         taken = dict.fromkeys(map(str, (yaml.safe_load(text) or {}).get("plans") or {}), C.CONFIG_NAME)
     except (yaml.YAMLError, AttributeError) as exc:
@@ -189,6 +190,12 @@ def compose(text: str, recipes: list[dict], fresh: bool = False) -> tuple[str, l
                        else "recipe {}'s plans were written for this one - make sure yours has what they need")
                 notes.append(f"Kept the `{key}:` section already in {C.CONFIG_NAME} ({why.format(r['name'])}):\n"
                              + "\n".join(_shift(line, 4) for line in lines))
+            elif key == "sessions" and not fresh:
+                backend = (r["data"].get("sessions") or {}).get("backend", "local")      # the plans do not need it
+                notes.append(f"Left out recipe {r['name']}'s `sessions:` section: {C.CONFIG_NAME} has none, so "
+                             "`testbench session start` with no --backend still starts a kernel on local. For one on "
+                             f"{backend}, run `testbench session start --backend {backend}`, or add this to "
+                             f"{C.CONFIG_NAME} to make it the default:\n" + "\n".join(_shift(line, 4) for line in lines))
             else:
                 if fresh:
                     bl = [b for b in bl if not (b[0] is None and re.match(rf"#\s*{key}:", (_trim(b[1]) or [""])[0]))]

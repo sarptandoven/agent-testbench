@@ -41,9 +41,11 @@ Next: fill in the lines marked FILL IN in testbench.yaml - the commands, paths a
   those the recipe's plans already cover (the same notebook or script, a pytest suite, a web page), and says which it
   left out.
 - **Without changing anything.** `--add` only adds: the recipe's plans go after yours, indented like yours, and each
-  section the recipe needs (`modal:`, `colab:`, `docker:`, `ssh:`, `sessions:`) is added only if the file has none.
+  section the recipe's plans need (`modal:`, `colab:`, `docker:`, `ssh:`) is added only if the file has none.
   If it has one, yours is kept and init prints the recipe's version, so you can merge what its plans need (the
-  packages, above all). A plan name that is already taken is refused, and nothing is written.
+  packages, above all). A recipe's `sessions:` (docker-sandbox, ssh-gpu-box) is never added: it would move
+  `testbench session start`'s kernels off this machine, so init prints it for you to add or not. A plan name that is
+  already taken is refused, and nothing is written.
 - **Only if it loads.** The combined file is checked as testbench.yaml is when it loads, before it is written. A
   recipe that runs a notebook the project does not have is refused with what to do.
 - **Inside your budget.** A recipe never sets `budget:`, `pricing:` or `guard:`. Every recipe plan fits the default

@@ -208,6 +208,18 @@ def test_add_appends_and_changes_nothing_already_there(tmp_path):
     assert in_order(after, yml.read_text())
 
 
+def test_add_leaves_the_session_default_alone_and_says_what_to_add(tmp_path):
+    yml = tmp_path / "testbench.yaml"
+    yml.write_text("project: mine\nplans:\n  mine:\n    steps:\n      - {name: a, run: \"true\"}\n")
+    r = cli(tmp_path, "init", "--add", "--recipe", "docker-sandbox")
+    assert r.returncode == 0, r.stdout + r.stderr
+    cfg = C.load(tmp_path)
+    assert cfg["sessions"]["backend"] == "local", "`session start` keeps starting kernels where it did"
+    assert "\nsessions:" not in yml.read_text() and cfg["docker"]["network"] == "none", "the plans' section goes in"
+    assert "Left out recipe docker-sandbox's `sessions:` section" in r.stdout
+    assert "`testbench session start --backend docker`" in r.stdout and "\n      backend: docker" in r.stdout, r.stdout
+
+
 def test_add_follows_the_file_s_own_indentation_and_refuses_what_it_cannot_extend(tmp_path):
     yml = tmp_path / "testbench.yaml"
     yml.write_text("project: four\nplans:\n    mine:\n        steps:\n            - {name: a, run: \"true\"}\n")
