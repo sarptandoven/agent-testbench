@@ -58,7 +58,7 @@ Wrote analysis-fixed.ipynb (the original is unchanged):
   analysis-fixed-runs:
     backend: local
     ...
-        params: {EPOCHS: 1, N_SAMPLES: 100}   # its form fields; the ones that count work set small
+        params: {EPOCHS: 1, N_SAMPLES: 100}   # its parameters; the ones that count work set small
         expect:
           no_errors: true                    # every cell runs
           files: ["**/embedding.npy"]        # what it writes
@@ -97,7 +97,7 @@ Jupyter does), with no form fields set, no uploads and no secrets given, for at 
 | undefined | `NameError` for a name nothing makes | the import to add, or that it came from a deleted cell |
 | missing file | `FileNotFoundError` | which file, where the notebook expects it (relative to its folder), and whether an earlier cell should have made it; Drive, `/content` and other machines' paths each get their own advice |
 | GPU | CUDA or NVIDIA errors on a machine with no NVIDIA GPU | a plan on `backend: modal` with a T4 (or colab), or a CPU fallback; out of GPU memory: smaller batches |
-| timeout | the time limit ran out | which cell was running, its form fields to set small, or a longer `--timeout` |
+| timeout | the time limit ran out | which cell was running, its parameters (form fields, papermill's) to set small, or a longer `--timeout` |
 | input, upload, secret | `input()`, `files.upload()`, `userdata.get()` with nobody there | a form field, the plan's `uploads:`, the plan's `secrets:` |
 | magic, syntax, network, memory, name clash | `%tensorflow_version`, Python 2, a download that failed, the kernel died, a local file named like a package | what to change |
 | code | anything else | the notebook's own code fails: work on it live with `testbench session start` and `testbench exec --cells` |
@@ -119,8 +119,8 @@ project, else next to the notebook (and `.testbench/` is kept out of git):
 ## The plan that proves it
 
 The diagnosis ends with a plan to paste under `plans:` in testbench.yaml: the notebook, run top to bottom, with every
-cell expected to run (`no_errors: true`), the files it writes expected, and `params:` for its form fields with the
-ones that count work set small (epochs, steps and iterations to 1, samples and rows to 100, batch sizes to 8), so the
+cell expected to run (`no_errors: true`), the files it writes expected, and `params:` for its parameters (Colab form fields,
+papermill's `parameters` cell) with the ones that count work set small (epochs, steps and iterations to 1, samples and rows to 100, batch sizes to 8), so the
 proof is quick. Secrets it reads are listed under `secrets:`; a `files.upload()` gets an `uploads:` line to fill in.
 On a machine without an NVIDIA GPU, a notebook that needs one gets `backend: modal` with a T4 - that costs money, so
 `testbench estimate` it first. Once the notebook is fixed, `testbench run <plan>` proves it, with a report that names

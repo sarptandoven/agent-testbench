@@ -31,7 +31,7 @@ from pathlib import Path
 import nbformat
 
 from . import config as C
-from .notebook import form_fields
+from .notebook import fields as nb_fields
 from .scaffold import _q, _slug
 
 
@@ -134,6 +134,13 @@ def _norm(name: str) -> str:
 
 def _fname(node) -> str | None:
     return node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else None
+
+
+def _root(node) -> str | None:
+    """The name an attribute chain starts from: PIL for PIL.Image, z for z.open."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
 
 
 def _catches(handler, names) -> bool:
@@ -474,7 +481,9 @@ def read(nb_path: str | Path, workdir: str | Path | None = None) -> dict:
 
     imports, pip_lines, reads, writes, unknown, consts = [], [], [], set(), [], {}
     inputs, secrets, env_vars, colab, mounts, uploads, gpu_hints, gpu_guard = [], [], [], {}, [], [], [], False
-    abs_paths, content = [], []
+    abs_paths, content, code_dirs = [], [], ["."]
+    imported ={(a.asname or a.name).split(".")[0] for c in cells if c["tree"] for node in ast.walk(c["tree"])
+                if isinstance(node, (ast.Import, ast.ImportFrom)) for a in node.names}       # open() of io, gzip, Image
     for c in cells:
         n = c["n"]
         for line in c["shell"]:
@@ -555,7 +564,9 @@ def read(nb_path: str | Path, workdir: str | Path | None = None) -> dict:
                     fn, args = _fname(node.func), node.args
                     owner = node.func.value if isinstance(node.func, ast.Attribute) else None
                     kw = {k.arg: k.value for k in node.keywords if k.arg}
-                    via_path = isinstance(owner, ast.Call) and _fname(owner.func) in ("Path", "PurePath")
+                    via_path = owner is not None and (     # Path("x").open(), (OUT / "x").open(), p.open() for p = Path(..)
+                        isinstance(owner, ast.Call) and _fname(owner.func) in ("Path", "PurePath")
+                        or isinstance(owner, (ast.BinOp, ast.Name)) and _str(owner, consts) is not None)
                     if fn in ("input", "getpass") and (owner is None or _fname(owner) == "getpass"):
                         inputs.append((n, node.lineno, fn))
                     elif fn == "mount" and _fname(owner) == "drive":
@@ -569,6 +580,13 @@ def read(nb_path: str | Path, workdir: str | Path | None = None) -> dict:
                     elif (fn == "getenv" or (fn == "get" and _fname(owner) == "environ")) and len(args) == 1 \
                             and "default" not in kw and _str(args[0], consts):
                         env_vars.append((_str(args[0], consts), n))
+                    elif fn in ("append", "insert") and _fname(owner) == "path" and _root(owner) == "sys" and args:
+                        arg = args[-1]                     # sys.path.append(os.path.abspath("..")): its code is local
+                        while isinstance(arg, ast.Call) and _fname(arg.func) in ("abspath", "realpath", "normpath", "str") \
+                                and arg.args:
+                            arg = arg.args[0]
+                        if _str(arg, consts):
+                            code_dirs.append(_str(arg, consts))
                     elif fn == "cuda" and owner is not None:
                         gpu_hints.append(n)
                     elif fn in ("is_available", "device_count", "list_physical_devices", "gpu_device_name"):
@@ -577,6 +595,8 @@ def read(nb_path: str | Path, workdir: str | Path | None = None) -> dict:
                         reads.append((_str(owner, consts), n))
                     elif fn in ("write_text", "write_bytes") and via_path:
                         writes.add(_str(owner, consts))
+                    elif fn == "open" and owner is not None and not via_path and _root(owner) not in imported:
+                        pass                               # an object's own open(): a member of a zip file, a bucket
                     elif fn == "open":
                         path = _str(owner, consts) if via_path else _str(args[0], consts) if args else _str(kw.get("file"), consts)
                         mode_node = (args[0] if via_path else args[1] if len(args) > 1 else None) if args else None
@@ -589,7 +609,11 @@ def read(nb_path: str | Path, workdir: str | Path | None = None) -> dict:
                         first = args[0] if args else next((kw[k] for k in ("filepath_or_buffer", "path", "fname", "file",
                                                                          "filename", "path_or_buf", "io") if k in kw), None)
                         path = _str(first, consts)
-                        if path and (fn in READ_ANY and "://" not in path or _pathlike(path)):
+                        mode = _str(args[1] if len(args) > 1 else kw.get("mode"), consts) if fn in ("File", "ZipFile") \
+                            else None                      # h5py.File(path, "w"), ZipFile(path, "w") make the file
+                        if path and mode and re.search(r"[wax]", mode) and _pathlike(path):
+                            writes.add(path)
+                        elif path and (fn in READ_ANY and "://" not in path or _pathlike(path)):
                             reads.append((path, n))
                     elif fn in WRITERS:
                         for a in list(args) + list(kw.values()):
@@ -665,8 +689,11 @@ def read(nb_path: str | Path, workdir: str | Path | None = None) -> dict:
                         else f"Write the code that makes `{name}` in a cell above it.")
 
     # ---- packages
-    local = {Path(w).stem for w in writes if w.endswith(".py")} | {p.stem for p in workdir.glob("*.py")} | \
-            {p.name for p in workdir.iterdir() if p.is_dir() and (p / "__init__.py").exists()}
+    local = {Path(w).stem for w in writes if w.endswith(".py")}
+    for d in {workdir / Path(c).expanduser() for c in code_dirs}:     # modules, and folders of them (namespace ones too)
+        if d.is_dir():
+            local |= {p.stem for p in d.glob("*.py")} | {p.name for p in d.iterdir() if p.is_dir() and (
+                any(p.glob("*.py")) or any(p.glob("*/__init__.py")))}
     wanted: dict[str, dict] = {}
     for mod, n, safe in imports:
         top = mod.split(".")[0]
@@ -795,9 +822,8 @@ def read(nb_path: str | Path, workdir: str | Path | None = None) -> dict:
         add("gpu", "info", None, f"it was saved from a Colab {meta_gpu} runtime; this machine has no NVIDIA GPU.")
     findings.sort(key=lambda f: (SEVERITY[f["severity"]], f["cell"] or 0))
     fields = {}
-    for c in cells:
-        for name, value in form_fields(c["source"]).items():
-            fields[name] = None if name in fields else value
+    for f in nb_fields(nb):                             # Colab form fields and papermill parameters, as params: sets
+        fields[f["name"]] = None if f["name"] in fields else f["value"]
     lang_info = nb.metadata.get("language_info") or {}
     return {"cells": len(cells), "findings": findings, "packages": packages, "colab": covered, "defines": defines,
             "undefined": undefined, "fields": {k: v for k, v in fields.items() if v is not None},
@@ -907,7 +933,7 @@ def classify(err: dict, info: dict, workdir: Path) -> tuple[str, str]:
     if ename == "StepTimeout":
         fields = ", ".join(info["fields"])
         return "timeout", (f"cell {n} was still running when the time limit ran out. If it trains, downloads or loops "
-                           "over data, make it do less: " + (f"set its form fields ({fields}) small in the plan's params:"
+                           "over data, make it do less: " + (f"set its parameters ({fields}) small in the plan's params:"
                                                               if fields else "fewer epochs or a sample of the data, as form "
                                                               "fields (NAME = value  #@param) a plan sets with params:")
                            + "; or give it longer: `testbench rescue NOTEBOOK --timeout 600`.")
@@ -1080,7 +1106,7 @@ def plan_yaml(nb_rel: str, info: dict, diag: dict) -> tuple[str, str]:
     params = small_params(info["fields"])
     if params:
         lines.append("        params: {" + ", ".join(f"{_q(k)}: {json.dumps(v)}" for k, v in params.items()) + "}"
-                     + "   # its form fields; the ones that count work set small")
+                     + "   # its parameters; the ones that count work set small")
     if info["secrets"]:
         lines.append(f"        secrets: [{', '.join(info['secrets'])}]          # the person exports them; never written here")
     if info["uploads"]:

@@ -187,17 +187,18 @@ Exactly one of `notebook:`, `run:` or `web:`.
 | field | default | |
 |---|---|---|
 | `name` | required | unique within the plan |
-| `notebook` | | an `.ipynb`; runs cell by cell in an IPython kernel |
+| `notebook` | | an `.ipynb` or a percent-format `.py`; runs cell by cell in its kernel ([notebooks.md](notebooks.md)) |
 | `run` | | a shell command (bash) |
 | `web` | | see below |
 | `max_minutes` | `10` | the step is stopped when it runs out; also bounds the cost estimate |
-| `params` | `{}` | notebook form fields to set: `{EPOCHS: 2}` replaces the value on `EPOCHS = ...  #@param` |
+| `params` | `{}` | notebook parameters to set: `{EPOCHS: 2}` replaces the value on `EPOCHS = ...  #@param`, or sets a papermill parameter |
 | `cells` | all | code cells to run, counted from 1: `"1-3,5"` or `[1, 2]` |
 | `uploads` | `[]` | answers to `files.upload()`, one list of files per call: `[[data.csv], [a.mp4, b.mp4]]` |
 | `colab_shim` | `true` | install the headless `google.colab` stand-in in the kernel |
 | `env` | `{}` | extra environment variables |
 | `secrets` | `[]` | secret NAMES. Local: must be exported. Modal: Modal secrets of these names are attached |
 | `pythonpath` | `[]` | folders put first on `PYTHONPATH` (e.g. `mocks`) |
+| `mocks` | `{}` | mock LLM SDKs for the step: `[openai, anthropic]`, or with options ([mocks.md](mocks.md)) |
 | `artifacts` | `[]` | globs copied into the run folder as evidence |
 | `expect` | `{}` | see below |
 | `continue_on_failure` | `false` | keep going to the next step even if this one fails |

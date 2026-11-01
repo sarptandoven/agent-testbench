@@ -2,6 +2,11 @@
 
 ## 0.2.0 - not yet released
 
+- Fixes where the 0.2.0 features meet: `loop try` works in repositories that gitignore `.testbench/`; rescue no
+  longer calls files a notebook writes (`path.open("w")`, `ZipFile(p, "w")`, archive members) or its own code
+  (namespace folders, `sys.path.append`) missing, and sets papermill parameters small; `init --recipe` uses a
+  percent-format `.py` notebook; MCP name refusals say why under mcp 2; the Python API raises `TestbenchError` for
+  a notebook it cannot run; a loop's approval command is quoted.
 - `testbench diff A B` (`--json`, MCP `diff_runs`) says what changed between two runs: each checked number old ->
   new and whether that is better by its rule, checks that flipped, evidence that changed, the commits with
   `git diff --stat`, packages that changed version. `testbench watch PLAN` reruns a free plan whenever project
