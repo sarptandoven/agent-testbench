@@ -41,7 +41,8 @@ file goes under your home folder, and `AGENTS.md` is still written when you are 
   for you to remove.
 - **Merging, not replacing.** Each file is read and the entry is added as new text. Every other entry stays,
   formatted as it was, along with comments and trailing commas where the format has them (VS Code's `mcp.json`
-  is JSONC; a TOML file keeps everything byte for byte, with the new table appended). The result has to read back
+  is JSONC, and a comment after the last server stays right after it, the new entry below it; a TOML file keeps
+  everything byte for byte, with the new table appended). The result has to read back
   as the old content plus exactly the new entry before anything is written. The old file is kept as
   `<file>.bak`, and the new one replaces it in a single step. If a file already has an `agent-testbench` or
   `testbench` entry, or any entry that starts this server, connect says so and leaves the file alone. Running it

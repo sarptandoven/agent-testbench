@@ -355,6 +355,8 @@ class JSONText:
             if t.startswith("//", k):                             # a comment ends that line: it stays there
                 eol = t.find("\n", k)
                 at = len(t) if eol == -1 else eol - (t[eol - 1] == "\r")
+            if t[at:close].strip():                               # comments after the last member: they stay
+                at += len(t[at:close].rstrip())                   # right after it, and the new member follows them
             ind = self._line_indent(ks)
             self.t = (t[:ve] + ("" if comma else ",") + t[ve:at] + f"{self.nl}{ind}{json.dumps(key)}: "
                       + self._dump(value, ind) + t[at:])
@@ -362,8 +364,8 @@ class JSONText:
         base = self._line_indent(start)
         ind = base + self.unit
         member = f"{self.nl}{ind}{json.dumps(key)}: {self._dump(value, ind)}"
-        if t[start + 1:close].strip():                            # only comments inside: they follow the member
-            self.t = t[:start + 1] + member + t[start + 1:]
+        if t[start + 1:close].strip():                            # only comments inside: the member follows them
+            self.t = t[:start + 1] + t[start + 1:close].rstrip() + member + self.nl + base + t[close:]
         else:
             self.t = t[:start + 1] + member + self.nl + base + t[close:]
 

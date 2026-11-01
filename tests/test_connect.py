@@ -252,6 +252,25 @@ def test_vscode_jsonc_comments_and_trailing_commas_survive(proj, capsys):
     assert set(K.JSONText(None, text).data()["servers"]) == {"other", "agent-testbench"}
 
 
+def test_a_comment_after_the_last_server_stays_right_after_it(proj, capsys):
+    path = proj / ".vscode" / "mcp.json"
+    path.parent.mkdir()
+    path.write_text('{\n  "servers": {\n    "other": {"type": "stdio", "command": "npx"}\n'
+                    '    /* "old": {"command": "retired"} - kept for reference */\n    // the last line of mine\n'
+                    '  }\n}\n')
+    assert run("vscode", capsys=capsys)[0] == 0
+    text = path.read_text()
+    assert ('    "other": {"type": "stdio", "command": "npx"},\n    /* "old": {"command": "retired"} - kept for '
+            'reference */\n    // the last line of mine\n    "agent-testbench": {') in text, text
+    assert set(K.JSONText(None, text).data()["servers"]) == {"other", "agent-testbench"}
+    path.write_text('{\n  "servers": {\n    // add servers here\n  }\n}\n')
+    assert run("vscode", capsys=capsys)[0] == 0
+    text = path.read_text()
+    assert text.startswith('{\n  "servers": {\n    // add servers here\n    "agent-testbench": {') and \
+        text.endswith("    }\n  }\n}\n"), text
+    assert list(K.JSONText(None, text).data()["servers"]) == ["agent-testbench"]
+
+
 def test_crlf_files_stay_crlf(proj, capsys):
     path = proj / ".cursor" / "mcp.json"
     path.parent.mkdir()
