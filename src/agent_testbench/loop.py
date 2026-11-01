@@ -98,7 +98,15 @@ def _own(root: Path) -> list[str]:
         pass
     paths = [p.split(")", 1)[1] for p in out]
     ignored = set(_git(root, "check-ignore", "--", *paths, check=False).splitlines())
-    return [p for p, path in zip(out, paths) if path not in ignored]
+    return [p for p, path in zip(out, paths) if path not in ignored] + _env_files(root)
+
+
+def _env_files(root: Path) -> list[str]:
+    """Pathspecs that leave out the untracked .env and .env.* files the repository does not ignore: they hold
+    secrets, which never go into a try's commit (as they never go into a copy of the project), nor into a stash."""
+    found = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z", "--", ":(glob)**/.env",
+                            ":(glob)**/.env.*"], cwd=root, capture_output=True, text=True, timeout=300).stdout
+    return [":(exclude,literal)" + p for p in found.split("\0") if p]
 
 
 def _changes(root: Path, where: str = ".") -> list[str]:

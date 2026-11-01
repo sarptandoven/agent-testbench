@@ -1123,10 +1123,19 @@ def plan_yaml(nb_rel: str, info: dict, diag: dict) -> tuple[str, str]:
     return name, "\n".join(lines) + "\n"
 
 
+def _same(a: Path, b: Path) -> bool:
+    """One file under both names: the same path, or another name for it (a hard link, or the name in another case
+    where the file system ignores case, as macOS and Windows do)."""
+    try:
+        return Path(a).resolve() == Path(b).resolve() or (Path(a).exists() and os.path.samefile(a, b))
+    except OSError:
+        return False
+
+
 def write_fix(nb_path: Path, out: Path, info: dict, failure: dict | None) -> list[str]:
     """A copy with mechanical fixes only: `%pip install` for `!pip install`, and a first cell that installs the missing
     packages rescue is sure of and adds standard imports nothing in the notebook makes. Nothing is moved."""
-    if out.resolve() == nb_path.resolve():
+    if _same(out, nb_path):
         raise RescueError(f"--fix {out} is the notebook itself; rescue never writes the original. Give another path.")
     nb = nbformat.read(str(nb_path), as_version=4)
     changes = []
@@ -1177,7 +1186,7 @@ def rescue(notebook: str | Path, *, timeout: float = 120, fix: str | Path | None
         raise RescueError(f"{notebook} does not exist")
     if nb_path.suffix.lower() != ".ipynb":
         raise RescueError(f"{notebook} is not a .ipynb notebook")
-    if fix and Path(fix).expanduser().resolve() == nb_path:
+    if fix and _same(Path(fix).expanduser(), nb_path):
         raise RescueError(f"--fix {fix} is the notebook itself; rescue never writes the original. Give another path.")
     workdir = nb_path.parent
     try:

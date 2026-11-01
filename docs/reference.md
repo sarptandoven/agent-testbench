@@ -271,7 +271,8 @@ testbench loop stop
 - **Start** needs a git repository with no uncommitted changes. It creates the branch `testbench-loop/<id>`, then
   runs the plan on the code as it is: the baseline. `--metric` names a number one of the plan's json expectations
   checks (`FILE:KEY`, as in `expect: {json: {FILE: {KEY: ...}}}`), so it reads the same on every backend.
-- **A try** commits every change in the project folder (not `.testbench/`) and runs the plan in a scratch copy of
+- **A try** commits every change in the project folder (not `.testbench/`, nor a new `.env` or `.env.*` file,
+  which stays where it is: secrets go by name) and runs the plan in a scratch copy of
   that commit. It is kept when the run passes and the metric beats the best by more than `--min-delta` (higher for
   `--goal max`, lower for `min`). Otherwise the branch is reset to the best commit; edits made while the run went
   are stashed and put back on top. A failing baseline is fine: then the first passing try that reports the metric

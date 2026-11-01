@@ -8,7 +8,7 @@ testbench connect --list               # each client: on this machine?, set up i
 testbench connect cursor               # this project: .cursor/mcp.json and AGENTS.md
 testbench connect codex gemini         # several at once
 testbench connect vscode --user        # every project of this user: ~/.copilot/mcp-config.json
-testbench connect claude --dry-run     # the change as a diff; nothing is written
+testbench connect claude --dry-run     # the change as a diff (other entries' values as "..."); nothing is written
 ```
 
 | client | `testbench connect` | project file | `--user` file | reads the rules from |

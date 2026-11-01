@@ -85,7 +85,7 @@ def _copy_artifacts(patterns: list[str], workdir: Path, dest: Path) -> list[str]
     kept = []
     for pattern in patterns:
         for hit in sorted(glob.glob(str(workdir / pattern), recursive=True)):
-            src = Path(hit)
+            src = Path(os.path.abspath(hit))           # "../x" is outside the workdir: kept by its name, in dest
             if not src.is_file():
                 continue
             rel = src.relative_to(workdir) if src.is_relative_to(workdir) else Path(src.name)

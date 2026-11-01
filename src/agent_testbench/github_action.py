@@ -268,7 +268,7 @@ def _ran(rep: dict, plan: str, status: str) -> str:
             + (f" (worst case ${worst:.2f})" if isinstance(worst, (int, float)) else "")
             + (f"; {sum(1 for c in checks if c.get('ok'))} of {len(checks)} checks passed" if checks else "")
             + f". Run {code(rep.get('run_id'), 80)} on "
-            + (f"commit `{str(src.get('commit'))[:12]}`" + (" with uncommitted changes" if src.get("dirty") else "")
+            + (f"commit {code(str(src.get('commit'))[:12])}" + (" with uncommitted changes" if src.get("dirty") else "")
                if src.get("commit") else "code outside git") + ".")
 
 
@@ -305,7 +305,7 @@ def _numbers_section(rep: dict, against: dict | None) -> list[str]:
 def render(plan: str, status: str, rep: dict | None, *, marker: str, message: str = "", against: dict | None = None,
            links: dict | None = None, footer: str = "") -> str:
     """The comment: the verdict, what did not pass, the numbers checked and how they moved, the cost, and links."""
-    status = status or "error"
+    status = re.sub(r"[^a-z]", "", str(status or "").lower())[:20] or "error"   # report.json's, which a step can write
     lines = [marker, f"### {VERDICT.get(status, status.upper())} - plan {code(plan, 80)}", ""]
     if rep:
         lines += [_ran(rep, plan, status), ""]

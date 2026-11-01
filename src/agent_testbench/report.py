@@ -31,6 +31,14 @@ def _cell(text) -> str:
     return _line(text).replace("|", "\\|")
 
 
+def _fenced(text, lang: str = "") -> list[str]:
+    """text as a code block whose fence is longer than any run of backticks in it, so output that prints ``` (a log
+    of markdown, a notebook's own code block) cannot end the block and turn the rest into markdown - report.md is also
+    the job summary of the GitHub Action."""
+    fence = "`" * max(3, 1 + max(map(len, re.findall(r"`+", str(text))), default=0))
+    return [fence + lang, str(text), fence]
+
+
 def _g(v) -> str:
     return f"{v:g}" if isinstance(v, (int, float)) else str(v)
 
@@ -38,6 +46,15 @@ def _g(v) -> str:
 def _encodable(text: str) -> str:
     """Text that can be written as UTF-8 (a file name that is not UTF-8 reaches the report as a lone surrogate)."""
     return text.encode("utf-8", "replace").decode("utf-8")
+
+
+def inside(run_dir: Path, path: Path) -> bool:
+    """path is a file in the run folder. A report names its evidence (a step's dir, images, artifacts), and a report
+    from a container or another machine can name anything: an absolute path, .. or a link must not lead out."""
+    try:
+        return Path(path).resolve().is_relative_to(Path(run_dir).resolve()) and Path(path).is_file()
+    except (OSError, RuntimeError, ValueError, TypeError):
+        return False
 
 
 def load(run_dir: Path) -> dict | None:
@@ -121,9 +138,9 @@ def render(report: dict) -> str:
             if e.get("line"):
                 lines += [f"- raised at {e['line']}"]
             if e.get("source_head"):
-                lines += ["- cell starts:", "", "```python", e["source_head"], "```"]
+                lines += ["- cell starts:", "", *_fenced(e["source_head"], "python")]
             if e.get("traceback_tail"):
-                lines += ["", "<details><summary>traceback</summary>", "", "```", e["traceback_tail"][-2500:], "```",
+                lines += ["", "<details><summary>traceback</summary>", "", *_fenced(e["traceback_tail"][-2500:]),
                           "", "</details>"]
         bad = [c for c in s.get("expectations", []) or [] if not c["ok"]]
         for c in bad:
@@ -133,7 +150,7 @@ def render(report: dict) -> str:
             for item in web.get(key, [])[:5]:
                 lines += [f"- {key.replace('_', ' ')}: {item}"]
         if s.get("stdout_tail") and not e.get("traceback_tail"):
-            lines += ["", "Last output:", "", "```", s["stdout_tail"][-1500:], "```"]
+            lines += ["", "Last output:", "", *_fenced(s["stdout_tail"][-1500:])]
         mocked = any(str(c.get("check", "")).startswith("mock ") for c in s.get("expectations") or [])
         lines += [f"- evidence: `{s.get('dir')}/` (log.txt, result.json"
                   + (", executed.ipynb" if s["kind"] == "notebook" else "")
@@ -293,7 +310,7 @@ def html_body(report: dict, run_dir: Path) -> str:
         for name in names:
             f = run_dir / s.get("dir", "") / name
             mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(f.suffix.lower())
-            if not mime or not f.is_file() or f.stat().st_size > min(IMAGE_LIMIT, budget_left):
+            if not mime or not inside(run_dir, f) or f.stat().st_size > min(IMAGE_LIMIT, budget_left):
                 continue
             raw = f.read_bytes()
             if hashlib.sha256(raw).digest() in seen:                 # a plot shown in a cell and saved as a file
