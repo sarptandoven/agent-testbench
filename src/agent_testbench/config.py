@@ -72,6 +72,7 @@ def validate(raw: dict, root: Path) -> dict:
         if not isinstance(cfg["budget"].get(key), (int, float)) or cfg["budget"][key] < 0:
             raise ConfigError(f"`budget.{key}` must be a number of US dollars, e.g. {DEFAULTS['budget'][key]}")
     _sessions(cfg["sessions"])
+    cfg["export"] = check_export(cfg.get("export"))
     plans = cfg.get("plans") or {}
     if not isinstance(plans, dict):
         raise ConfigError("`plans:` must map plan names to {backend, steps}; see `testbench init` for an example")
@@ -94,6 +95,59 @@ def _sessions(s: dict) -> None:
     for key in ("idle_minutes", "max_minutes"):
         if not isinstance(s.get(key), (int, float)) or s[key] <= 0:
             raise ConfigError(f"`sessions.{key}` must be a positive number of minutes")
+
+
+EXPORT_KEYS = {"mlflow": ("tracking_uri", "experiment", "artifacts"),
+               "wandb": ("project", "entity", "mode", "dir", "tags", "artifacts"), "csv": ("path",), "jsonl": ("path",)}
+EXPORT_SECRETS = {"mlflow": "MLFLOW_TRACKING_TOKEN (or MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD)",
+                  "wandb": "WANDB_API_KEY"}
+EXPORT_EXAMPLES = {"tracking_uri": "http://127.0.0.1:5000 or sqlite:///.testbench/mlflow.db", "experiment": "my-project",
+                   "project": "my-project", "entity": "my-team", "mode": "offline", "dir": ".testbench"}
+
+
+def check_export(e) -> dict:
+    """export: where every finished run goes too (docs/export.md). Returns {target: options}; false leaves one out."""
+    example = "{csv: .testbench/runs.csv, mlflow: {tracking_uri: http://127.0.0.1:5000, experiment: my-project}}"
+    if e is None:
+        return {}
+    if not isinstance(e, dict):
+        raise ConfigError(f"`export` maps trackers to their settings, e.g. {example}")
+    out = {}
+    for target, opts in e.items():
+        where = f"export.{target}"
+        if target not in EXPORT_KEYS:
+            raise ConfigError(f"`export` has no {target!r}; use {', '.join(EXPORT_KEYS)}, e.g. {example}")
+        if opts is False:
+            continue
+        opts = {"path": opts} if isinstance(opts, str) and target in ("csv", "jsonl") else \
+            {} if opts in (None, True) else opts
+        if not isinstance(opts, dict):
+            raise ConfigError(f"`{where}` is a mapping of settings ({', '.join(EXPORT_KEYS[target])})"
+                              + (f", or the file's path, e.g. `{target}: .testbench/runs.{target}`" if target in ("csv", "jsonl") else ""))
+        for k, v in opts.items():
+            if re.search(r"token|key|secret|password|passwd|credential", str(k), re.I):
+                raise ConfigError(f"`{where}.{k}`: secrets never go in testbench.yaml. Set "
+                                  f"{EXPORT_SECRETS.get(target, 'it')} in the environment, where the tracker reads it; "
+                                  "testbench never prints or writes it")
+            if k not in EXPORT_KEYS[target]:
+                raise ConfigError(f"`{where}` has no {k!r}; use {', '.join(EXPORT_KEYS[target])}")
+            if k == "artifacts" and not isinstance(v, bool):
+                raise ConfigError(f"`{where}.artifacts` is true (upload the report and the evidence files, the "
+                                  "default) or false")
+            if k == "tags" and (not isinstance(v, list) or not all(isinstance(t, str) for t in v)):
+                raise ConfigError(f"`{where}.tags` is a list of words, e.g. [baseline, nightly]")
+            if k not in ("artifacts", "tags") and (not isinstance(v, str) or not v.strip()):
+                raise ConfigError(f"`{where}.{k}` is a string, e.g. {EXPORT_EXAMPLES.get(k, f'.testbench/runs.{target}')}")
+        if re.match(r"\w[\w+.-]*://[^/@\s]+@", str(opts.get("tracking_uri", ""))):
+            raise ConfigError(f"`{where}.tracking_uri` holds credentials; write the URL without them and set "
+                              f"{EXPORT_SECRETS['mlflow']} in the environment")
+        if opts.get("mode") not in (None, "online", "offline", "disabled"):
+            raise ConfigError(f"`{where}.mode` is online (to the W&B server), offline (kept on this machine for "
+                              "`wandb sync`) or disabled")
+        if target == "wandb" and set(str(opts.get("project", ""))) & set("/\\#?%:"):
+            raise ConfigError(f"`{where}.project` is a W&B project name, without / \\ # ? % or :")
+        out[target] = opts
+    return out
 
 
 def _plan(name: str, plan: dict, root: Path) -> dict:

@@ -20,6 +20,9 @@
   Windows; never `os.kill(pid, 0)` on Windows, it ends the process). `scaffold.py`: what `testbench init` writes.
 - CI: `action.yml` (the GitHub Action) and `.github/workflows/action.yml` (its self-test).
 - Loops: `loop.py` (`testbench loop`: tries on a git branch, kept or reverted by a plan run's metric).
+- Exports: `export.py` (`testbench export`, and testbench.yaml's `export:` after every run from `runs.finalize`:
+  MLflow, W&B, csv, jsonl). Trackers are imported only when used and never fail or hold up a run; their tests
+  skip unless mlflow / wandb are installed (in a separate venv: `docs/export.md`).
 - Sessions: `kernelkit/` (the launcher and client that run on the session's machine), `session_backends.py`
   (local, Modal Sandbox, Colab CLI), `sessions.py` (state, budget, supervisor).
 - `claude plugin validate . && claude plugin validate .claude-plugin/plugin.json --strict` after plugin changes.

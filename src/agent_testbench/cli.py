@@ -192,6 +192,9 @@ def cmd_report(a):
     rep = R.load(run_dir)
     if fmt == "md" or (rep is None and fmt != "json"):
         _print_report(run_dir)
+        from .export import summary
+        if exports := summary(run_dir):
+            print(exports)
         return 0
     if fmt == "json":
         text = json.dumps(rep, indent=1) if rep else "{}"
@@ -220,6 +223,40 @@ def cmd_history(a):
     h = R.history(reports[-a.n:])
     print(json.dumps(h, indent=1) if a.json else R.render_history(a.plan, h))
     return 0
+
+
+def cmd_export(a):
+    from . import export as X
+    root, cfg = _root_cfg()
+    if a.to:
+        flags = {"mlflow": {"tracking_uri": a.tracking_uri, "experiment": a.experiment},
+                 "wandb": {"project": a.project, "entity": a.entity, "mode": a.mode}}.get(a.to, {"path": a.path})
+        flags = {k: v for k, v in flags.items() if v is not None} | ({"artifacts": False} if a.no_artifacts else {})
+        targets = C.check_export({a.to: {**(cfg["export"].get(a.to) or {}), **flags}})
+    else:
+        targets = cfg["export"]
+    if not targets:
+        print("Nothing to export to: pass --to mlflow, wandb, csv or jsonl, or add an `export:` section to "
+              "testbench.yaml, e.g. `export: {csv: .testbench/runs.csv}` (docs/export.md)")
+        return 2
+    try:
+        for t in targets:
+            X.require(t)
+    except X.Missing as exc:
+        print(f"testbench: {exc}")
+        return 2
+    if a.run == "all":
+        dirs = [p for p in runs.all_runs(root) if runs.read_state(p).get("status") in runs.DONE]
+    else:
+        dirs = [runs.resolve(root, a.run)]
+    worst = 0
+    for run_dir in dirs:
+        for target, ok, msg, code in X.export(root, run_dir, targets, cfg["project"]):
+            print(f"{run_dir.name} {target}: " + (msg if ok else f"FAILED: {msg}"))
+            worst = max(worst, code)
+    if not dirs:
+        print("No finished runs to export yet.")
+    return worst
 
 
 def cmd_prices(a):
@@ -623,6 +660,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-n", type=int, default=30, help="the latest N runs (default 30)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_history)
+    p = sub.add_parser("export", help="a run in MLflow, W&B, a csv or a jsonl file, with its numbers and evidence "
+                                      "(again: updates it, no duplicate)")
+    p.add_argument("run", nargs="?", help="run id or prefix, latest (the default), or all (every finished run)")
+    p.add_argument("--to", choices=["mlflow", "wandb", "csv", "jsonl"],
+                   help="where to (default: every target in testbench.yaml's export: section)")
+    p.add_argument("--tracking-uri", help="with --to mlflow (default: export.mlflow.tracking_uri, MLFLOW_TRACKING_URI)")
+    p.add_argument("--experiment", help="with --to mlflow (default: the project's name)")
+    p.add_argument("--project", help="with --to wandb: the W&B project (default: the project's name)")
+    p.add_argument("--entity", help="with --to wandb: the W&B team or user")
+    p.add_argument("--mode", choices=["online", "offline", "disabled"], help="with --to wandb")
+    p.add_argument("--path", help="with --to csv or jsonl: the file (default: .testbench/runs.csv or .jsonl)")
+    p.add_argument("--no-artifacts", action="store_true", help="trackers: leave out the report and evidence files")
+    p.set_defaults(fn=cmd_export)
     p = sub.add_parser("runs", help="recent runs")
     p.add_argument("-n", type=int, default=10)
     p.set_defaults(fn=cmd_runs)
