@@ -63,7 +63,10 @@ LR, SEED; its papermill parameters (set in the code cell tagged `parameters`) ar
 ```
 
 papermill itself injects any name you give it; testbench refuses, so a typo cannot run the notebook with its
-defaults while looking as if it ran with yours.
+defaults while looking as if it ran with yours. For the same reason, `cells:` (or `exec --cells`) that leave out
+the cell a parameter is set in stop the step with a ParamError naming that cell: add it to `cells:`, or drop the
+parameter. `params:`, `cells:`, `uploads:` and `colab_shim:` on a `run:` or `web:` step are refused when
+testbench.yaml loads, since only notebook steps use them.
 
 **Listing them.** `testbench nb fields NB` lists both kinds with their cells and current values:
 

@@ -269,6 +269,25 @@ def fields(nb) -> list[dict]:
     return sorted(out, key=lambda f: f["cell"])
 
 
+def check_cells_set_params(nb, params: dict, numbers) -> None:
+    """A ParamError when the code cells to run (numbered from 1) leave out a cell that one of `params` is set in:
+    its value would never reach the code. Call it before prepare(), which adds a cell."""
+    where = {}
+    for f in fields(nb):
+        where.setdefault(f["name"], f)
+    left = {k: where[k] for k in params if k in where and where[k]["cell"] not in set(numbers)}
+    if not left:
+        return
+    what = "; ".join(f"{k} in code cell {f['cell']} ("
+                     + ("a Colab form field)" if f["kind"] == "form" else "the cell tagged `parameters`)")
+                     for k, f in left.items())
+    cells = sorted({f["cell"] for f in left.values()})
+    raise ParamError(f"params: {what} - the cells asked for ({', '.join(map(str, numbers))}) do not include "
+                     f"{'that cell' if len(cells) == 1 else 'those cells'}, so the value would never be used. Add "
+                     f"cell{'s' * (len(cells) > 1)} {', '.join(map(str, cells))} to the cells to run, or drop "
+                     f"{', '.join(left)} from params")
+
+
 def set_params(cells_source: list[str], params: dict, parameters=()) -> list[str]:
     """Set form fields the way the Colab form does: each value replaces the one on its #@param line.
 
@@ -423,6 +442,8 @@ def run(nb_path: str | Path, *, params: dict, cells: list[int] | None, deadline:
 
     nb = read(nb_path)
     kernel_name, lang, note = kernel(nb)
+    if cells and params and lang == "python":
+        check_cells_set_params(nb, params, cells)
     code_idx, added = prepare(nb, params, lang)
     numbers = cells or list(range(1, len(code_idx) + 1))
     bad = [n for n in numbers if n > len(code_idx)]

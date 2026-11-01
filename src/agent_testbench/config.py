@@ -28,6 +28,9 @@ DEFAULTS = {
 STEP_DEFAULTS = {"max_minutes": 10, "params": {}, "env": {}, "secrets": [], "pythonpath": [], "artifacts": [],
                  "expect": {}, "uploads": [], "cells": None, "colab_shim": True, "continue_on_failure": False,
                  "mocks": {}}
+NOTEBOOK_ONLY = {"params": "it sets a notebook's Colab form fields and papermill parameters",
+                 "cells": "it picks the notebook's code cells to run", "uploads": "it answers files.upload() in a notebook",
+                 "colab_shim": "it puts the google.colab stand-in in the notebook's kernel"}
 
 
 class ConfigError(ValueError):
@@ -322,6 +325,13 @@ def _step(where: str, step: dict, root: Path) -> dict:
             near = difflib.get_close_matches(str(key), known, n=1)
             raise ConfigError(f"`{where}` ({step['name']}) has no {key!r}"
                               + (f" (did you mean {near[0]!r}?)" if near else "") + f"; a step takes {', '.join(known)}")
+    if kinds[0] != "notebook":                           # set on another step, these would be ignored without a word
+        for key, what in NOTEBOOK_ONLY.items():
+            if step.get(key, STEP_DEFAULTS[key]) not in (STEP_DEFAULTS[key], None):
+                raise ConfigError(f"`{where}` ({step['name']}) is a {kinds[0]}: step, and `{key}:` applies to notebook: "
+                                  f"steps only ({what}), so it would be ignored. Remove it"
+                                  + (", and give the command its values on its command line or in `env:`, e.g. "
+                                     "env: {EPOCHS: \"2\"}" if key == "params" else ""))
     s = {**copy.deepcopy(STEP_DEFAULTS), **step, "kind": kinds[0]}
     if not number(s["max_minutes"], positive=True):
         raise ConfigError(f"`{where}.max_minutes` must be a positive number; the step is stopped when it runs out")

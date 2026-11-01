@@ -204,7 +204,10 @@ def exec_code(root: Path, cfg: dict, sdir: Path, code: str, timeout: float = 600
 
 def exec_cells(root: Path, cfg: dict, sdir: Path, nb_path: Path, spec, params: dict, timeout: float) -> list[dict]:
     """Run a notebook's code cells (numbered from 1) in the session, with params set; stop at the first error."""
-    code = NB.cell_sources(NB.read(nb_path), params or {})
+    nb = NB.read(nb_path)
+    if spec and params and NB.language(nb) == "python":
+        NB.check_cells_set_params(nb, params, C.parse_cells(spec))
+    code = NB.cell_sources(nb, params or {})
     numbers = C.parse_cells(spec) if spec else list(range(1, len(code) + 1))
     bad = [x for x in numbers if x > len(code)]
     if bad:

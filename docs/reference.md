@@ -182,7 +182,8 @@ A plan runs its steps in order and stops at the first one that does not pass, un
 
 ## Steps
 
-Exactly one of `notebook:`, `run:` or `web:`.
+Exactly one of `notebook:`, `run:` or `web:`. `params`, `cells`, `uploads` and `colab_shim` are for notebook
+steps; on another step they are refused, not ignored.
 
 | field | default | |
 |---|---|---|

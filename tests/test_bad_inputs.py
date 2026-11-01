@@ -68,9 +68,18 @@ def load(tmp_path: Path, text: str) -> dict:
     ("project: p\ndocker: {usd_per_hour: .inf}\nplans: {p: {backend: docker, steps: [{name: a, run: x}]}}\n", "`docker.usd_per_hour`"),
     ("project: p\ndocker: {run_args: \"-v '/x\"}\nplans: {p: {backend: docker, steps: [{name: a, run: x}]}}\n", "cannot be split"),
     # a plan travels as JSON, which has no dates, sets or loops
-    ("project: p\nplans: {p: {steps: [{name: a, run: x, params: {START: 2024-01-01}}]}}\n",
-     "`plans.p.steps[0].params.START` is datetime.date(2024, 1, 1), which a plan cannot carry; write it in quotes"),
-    ("project: p\nplans: &a {p: {steps: [{name: a, run: x, params: *a}]}}\n", "contains itself"),
+    ("project: p\nplans: {p: {steps: [{name: a, run: x, env: {START: 2024-01-01}}]}}\n",
+     "`plans.p.steps[0].env.START` is datetime.date(2024, 1, 1), which a plan cannot carry; write it in quotes"),
+    ("project: p\nplans: &a {p: {steps: [{name: a, run: x, env: *a}]}}\n", "contains itself"),
+    # what only a notebook step uses would be ignored on another step
+    ("project: p\nplans: {p: {steps: [{name: a, run: x, params: {EPOCHS: 2}}]}}\n",
+     "`plans.p.steps[0]` (a) is a run: step, and `params:` applies to notebook: steps only (it sets a notebook's Colab "
+     "form fields and papermill parameters), so it would be ignored. Remove it, and give the command its values on "
+     "its command line or in `env:`"),
+    ("project: p\nplans: {p: {steps: [{name: a, run: x, cells: '1-3'}]}}\n", "`cells:` applies to notebook: steps only"),
+    ("project: p\nplans: {p: {steps: [{name: a, run: x, uploads: [[a.csv]]}]}}\n", "`uploads:` applies to notebook:"),
+    ("project: p\nplans: {p: {steps: [{name: a, web: {url: 'http://x'}, colab_shim: false}]}}\n",
+     "is a web: step, and `colab_shim:` applies to notebook: steps only"),
     # YAML itself: duplicate keys drop the first silently; deep nesting and huge integers raise past yaml.YAMLError
     ("project: p\n" + STEP + "  p:\n    steps: [{name: b, run: x}]\n", "line 7: 'p' is given twice in the same mapping (also on line 3)"),
     ("project: p\nplans: {p: {steps: [{name: a, run: x, expect: {json: {a.json: {x: 1}}, json: {b.json: {y: 1}}}}]}}\n",
@@ -119,6 +128,9 @@ def test_what_still_loads(tmp_path):
     cfg = load(tmp_path, "project: p\nbase: &b {run: x, max_minutes: 1}\nplans:\n  p:\n    steps:\n"
                          "      - {<<: *b, name: a, max_minutes: 2}\n      - {<<: *b, name: b}\n")
     assert [s["max_minutes"] for s in cfg["plans"]["p"]["steps"]] == [2, 1], "a merge key may be overridden"
+    cfg = load(tmp_path, "project: p\nplans: {p: {steps: [{name: a, run: x, params: {}, cells: , uploads: [], "
+                         "colab_shim: true}]}}\n")
+    assert cfg["plans"]["p"]["steps"][0]["params"] == {}, "notebook-only keys at their defaults change nothing: kept"
     cfg = load(tmp_path, "project: p\nplans: {p: {steps: [{name: 2024, run: x}]}}\n")
     assert cfg["plans"]["p"]["steps"][0]["name"] == "2024", "a number as a step name is its text"
     cfg = load(tmp_path, "project: p\nplans: {p: {steps: [{name: a, web: {url: 'http://x', actions: }}]}}\n")
