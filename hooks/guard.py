@@ -9,7 +9,7 @@ Anywhere, it keeps the limits out of the agent's hands:
      edit of ~/.testbench/limits.yaml (the limits for every project on this machine) or ~/.testbench/prices.json;
   2. editing or deleting a ledger (.testbench/ledger.jsonl, ~/.testbench/ledger.jsonl) is refused, and so is a
      command that points testbench at another limits folder (TESTBENCH_USER_DIR, HOME);
-  3. a run, session or loop with --approve (or approved_by_person=true) becomes a question to the person, and
+  3. a run, watch, session or loop with --approve (or approved_by_person=true) becomes a question to the person, and
      so does `testbench prices --update --url` (prices from somewhere else);
 Inside a project with a testbench.yaml, it also acts on:
   4. raw cloud launches (`modal run/deploy/serve/shell`, `colab new/run/ssh/exec`) are refused, because
@@ -234,7 +234,7 @@ def check_approvals(cmd: str, root) -> None:
         if sub == "prices" and any(w == "--url" or w.startswith("--url=") for w in rest):
             decide("ask", "agent-testbench: this fetches prices from another catalog than the project's own; a "
                           "catalog can only raise prices, but approve only if you know where this one comes from.")
-        launches = sub == "run" or (sub in ("loop", "session") and names[:1] == ["start"])
+        launches = sub in ("run", "watch") or (sub in ("loop", "session") and names[:1] == ["start"])
         approving = any(w == "--approve" or w.startswith("--approve=") for w in rest)
         if launches and not approving and re.search(r"[$`]", " ".join(rest)):
             approving = True                                 # $FLAG could be --approve; the person decides
@@ -244,6 +244,12 @@ def check_approvals(cmd: str, root) -> None:
             plan = names[0] if names else ""
             decide("ask", "agent-testbench: a run with --approve spends money above the approval threshold."
                    + (estimate(root, plan) if root else "") + " Approve only if you agreed to this cost.")
+        if sub == "watch":
+            plan = names[0] if names else ""
+            decide("ask", "agent-testbench: `testbench watch --approve` runs a plan that costs money again every time "
+                          "the project's files change, each run up to its worst case (and inside max_run_usd and the "
+                          "day limits)." + (estimate(root, plan).replace(" can cost up to", ": each run can cost up to")
+                                            if root else "") + " Approve only if you agreed to that spending.")
         if sub == "loop":
             decide("ask", "agent-testbench: this loop's total budget is above the approval threshold (every run of "
                           "the loop together, up to --budget-usd). Approve only if you agreed to that total.")

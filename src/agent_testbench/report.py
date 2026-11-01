@@ -60,17 +60,24 @@ def check_number(c: dict) -> float | None:
     return n if math.isfinite(n) else None                       # nan is no number to track or to loop on
 
 
-def _metrics(report: dict) -> dict:
-    """Numbers checked by expectations, keyed by step and check: what a change moved."""
+def checked(report: dict) -> dict:
+    """Every check that found a number, keyed by step and check ("step | check"): {key: (number, step, check)}."""
     out = {}
     for s in report.get("steps") or []:
         for c in (s.get("expectations") or []) if isinstance(s, dict) else []:
             if isinstance(c, dict) and (n := check_number(c)) is not None:
-                out[f"{s.get('name')} | {c.get('check')}"] = n
+                out[f"{s.get('name')} | {c.get('check')}"] = (n, s, c)
     return out
 
 
+def _metrics(report: dict) -> dict:
+    """Numbers checked by expectations, keyed by step and check: what a change moved."""
+    return {k: n for k, (n, _, _) in checked(report).items()}
+
+
 def compare(prev: dict | None, cur: dict) -> dict:
+    """What changed since the previous run of the plan: steps fixed, broken and still failing, and the checked
+    numbers that moved. Every report keeps it as `delta`; `testbench diff` (diff.py) builds on it."""
     if not prev:
         return {}
     ps = {s["name"]: s["status"] for s in prev.get("steps", [])}
@@ -305,6 +312,7 @@ def html_body(report: dict, run_dir: Path) -> str:
                 + "".join(f"<tr><td><a href='{e(x['path'])}'>{e(x['path'])}</a></td><td>{e(str(x['bytes']))}</td>"
                           f"<td><code>{e(x['sha256'][:16])}</code></td></tr>" for x in files) + "</table></div></details>"]
     if src or env:
+        env = {k: v for k, v in env.items() if k != "package_versions"}      # for testbench diff; too long for here
         out += ["<h2>Provenance</h2><pre>" + e(json.dumps({"source": src, "environment": env,
                                                            "evidence_sha256": r.get("evidence_sha256")}, indent=1)) + "</pre>"]
     return "\n".join(out)

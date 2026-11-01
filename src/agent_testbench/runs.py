@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import subprocess
 import sys
 import time
@@ -46,12 +47,18 @@ def all_runs(root: Path) -> list[Path]:
 
 
 def resolve(root: Path, run: str | None) -> Path:
-    """A run id, a unique prefix, 'last', or None (the latest run)."""
+    """A run id, a unique prefix, 'last', 'last~N' (the Nth run before the latest), or None (the latest run)."""
     runs = all_runs(root)
     if not runs:
         raise FileNotFoundError("No runs yet. Start one with `testbench run <plan>`.")
     if run in (None, "", "last", "latest"):
         return runs[-1]
+    back = re.fullmatch(r"(?:last|latest)~(\d{1,9})", str(run))
+    if back:
+        if int(back.group(1)) >= len(runs):
+            raise FileNotFoundError(f"{run} is before the first run: there are {len(runs)} runs (`testbench runs` "
+                                    "lists them)")
+        return runs[-1 - int(back.group(1))]
     hits = [p for p in runs if p.name == run] or [p for p in runs if p.name.startswith(run)]
     if len(hits) != 1:
         raise FileNotFoundError(f"run {run!r} matches {len(hits)} runs; `testbench runs` lists them")
@@ -172,19 +179,25 @@ def wait(run_dir: Path, timeout: float, on_line=print) -> dict:
                 for line in new.rstrip().splitlines()[-30:]:
                     on_line("  " + line[:300])
             seen_log[path] = len(text)
-        state = read_state(run_dir)
+        state = settle(run_dir)
         if state.get("status") in DONE:
             return state
-        if state.get("status") in ("queued", "running") and not alive(state.get("driver_pid")) and not state.get("foreground"):
-            time.sleep(1)
-            state = read_state(run_dir)
-            if state.get("status") not in DONE:
-                write_state(run_dir, status="error", error="the driver process exited without finishing; see driver.log")
-                notify.run_end(Path(run_dir).resolve().parents[2], run_dir)
-                return read_state(run_dir)
         if time.time() >= end:
             return state
         time.sleep(2 if state.get("backend") == "local" else 5)
+
+
+def settle(run_dir: Path) -> dict:
+    """The run's state now. A run whose driver exited without finishing it is closed here, as an error (and told)."""
+    state = read_state(run_dir)
+    if state.get("status") in ("queued", "running") and not alive(state.get("driver_pid")) and not state.get("foreground"):
+        time.sleep(1)
+        state = read_state(run_dir)
+        if state.get("status") not in DONE:
+            write_state(run_dir, status="error", error="the driver process exited without finishing; see driver.log")
+            notify.run_end(Path(run_dir).resolve().parents[2], run_dir)
+            return read_state(run_dir)
+    return state
 
 
 def cancel(run_dir: Path) -> str:

@@ -3,7 +3,8 @@
 A report (schema/report-v1.schema.json) carries:
   source       the project's git commit at launch, whether it had uncommitted changes, and a hash of them
                (the diff and the untracked files), so "this passed" names exactly which code passed;
-  environment  Python, platform and a hash of the installed packages where the plan ran (Modal, Colab, ssh too);
+  environment  Python, platform, the installed packages' versions and a hash of them, where the plan ran (Modal,
+               Colab, ssh too);
   evidence     every file the run kept (logs, executed notebooks, images, artifacts) with its size and sha256, and
                one sha256 over all of them, so evidence that was changed afterwards no longer matches.
 """
@@ -59,10 +60,12 @@ def source(root: Path) -> dict | None:
 def environment() -> dict:
     """Where the plan's code ran: called by the executor on that machine."""
     from importlib.metadata import distributions
-    pkgs = sorted({f"{(d.metadata['Name'] or '').lower()}=={d.version}" for d in distributions() if d.metadata["Name"]})
+    found = [((d.metadata["Name"] or "").lower(), d.version) for d in distributions() if d.metadata["Name"]]
+    pkgs = sorted({f"{name}=={version}" for name, version in found})
     return {"python": platform.python_version(), "implementation": platform.python_implementation(),
             "platform": platform.platform(), "machine": platform.machine(), "executable": sys.executable,
-            "packages": len(pkgs), "packages_sha256": hashlib.sha256("\n".join(pkgs).encode()).hexdigest()}
+            "packages": len(pkgs), "packages_sha256": hashlib.sha256("\n".join(pkgs).encode()).hexdigest(),
+            "package_versions": dict(sorted(found))}         # so `testbench diff` can name the packages that changed
 
 
 def evidence(run_dir: Path) -> tuple[list[dict], str]:

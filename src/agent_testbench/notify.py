@@ -3,7 +3,7 @@ so whoever left an agent working overnight hears about it without looking.
 
     notify:
       webhook_env: TESTBENCH_WEBHOOK                  # the URL in an environment variable (or webhook: https://...)
-      on: [run_end, loop_end, approval_needed]         # which events (default: all three)
+      on: [run_end, loop_end, approval_needed]         # which events (default: these three; watch_run is opt-in)
 
 The body is Slack-compatible ({"text": "..."}) and carries the same facts as fields (event, project, plan or loop,
 status, numbers, cost, run, report), so any service that takes a JSON POST can use it. Delivery never breaks or
@@ -153,12 +153,20 @@ def _money(v) -> str:
 
 
 def run_end(root: Path, run_dir: Path, rep: dict | None = None, cfg: dict | None = None) -> None:
-    """A run finished (passed, failed, cancelled, error): what it proved, what it cost, where its report is."""
+    """A run finished (passed, failed, cancelled, error): what it proved, what it cost, where its report is. A run
+    `testbench watch` started is told only as watch_run, and only when its result differs from the run before it:
+    a watch runs on every save, and a message for each would be noise."""
     from . import report as R, runs
     try:
         state = runs.read_state(run_dir)
         rep = rep or R.load(run_dir) or {}
         status = state.get("status") or rep.get("status")
+        event, origin = "run_end", state.get("origin") or {}
+        if origin.get("watch"):
+            before = (rep.get("delta") or {}).get("previous_status")
+            if status == "cancelled" or before is None or (before == "passed") == (status == "passed"):
+                return
+            event = "watch_run"
         numbers = {c["check"]: n for s in rep.get("steps", []) for c in s.get("expectations") or []
                    if (n := R.check_number(c)) is not None}
         failed = [f"{s['name']}: {c['check']} - {c['detail']}" for s in rep.get("steps", []) if s["status"] != "passed"
@@ -168,22 +176,25 @@ def run_end(root: Path, run_dir: Path, rep: dict | None = None, cfg: dict | None
         why = rep.get("stopped_because") or state.get("error")
         hw = (state.get("backend") or "?") + (f" {state['gpu']}" if state.get("gpu") else "")
         cost = rep.get("cost_usd", state.get("cost_usd"))
-        origin = state.get("origin") or {}
         report = run_dir / "report.md"
         text = (f"run {run_dir.name} of plan {state.get('plan')} on {hw} {str(status).upper()}"
                 + ((f" (loop {origin['loop']}, " + ("the baseline)" if origin.get("try") == 0
                                                       else f"try {origin.get('try')})")) if origin.get("loop") else "")
+                + (f" (testbench watch; the run before it {(rep.get('delta') or {}).get('previous_status')})"
+                   if event == "watch_run" else "")
                 + f" after {rep.get('minutes', state.get('minutes', '?'))} min, about {_money(cost)}."
                 + (f" Stopped because {why}." if why else "")
                 + "".join(f" {x}." for x in (errors + failed)[:3])
                 + (" Checked: " + "; ".join(f"{k} (found {v:g})" for k, v in list(numbers.items())[:6]) + "."
                    if numbers else "")
                 + (f" Report: {rel(report, root)}" if report.exists() else ""))
-        send(root, cfg, "run_end", text, {
+        send(root, cfg, event, text, {
             "plan": state.get("plan"), "status": status, "run_id": run_dir.name, "backend": state.get("backend"),
             "gpu": state.get("gpu"), "minutes": rep.get("minutes", state.get("minutes")), "cost_usd": cost,
             "numbers": numbers, "failed": (errors + failed)[:10], "stopped_because": why,
             "loop": origin.get("loop"), "loop_try": origin.get("try"),
+            **({"watch": origin["watch"], "previous_status": (rep.get("delta") or {}).get("previous_status")}
+               if event == "watch_run" else {}),
             "report": rel(report, root) if report.exists() else None})
     except Exception as exc:
         _log(root, f"run_end: nothing sent - {type(exc).__name__}: {exc}"[:400])

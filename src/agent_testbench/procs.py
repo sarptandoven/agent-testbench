@@ -73,12 +73,18 @@ def stop_group(pid: int | None, hard: bool = False) -> None:
         pass
 
 
-def stop_and_wait(pid: int | None, grace: float = 10) -> None:
-    """Ask, wait up to `grace` seconds, then end it hard."""
+def stop_and_wait(pid: int | None, grace: float = 10, proc: subprocess.Popen | None = None) -> None:
+    """Ask, wait up to `grace` seconds, then end it hard. proc: the Popen, when it is this process's child; it is
+    waited on, so it is collected as soon as it exits (until then its pid still looks alive, for all of `grace`)."""
     if not pid:
         return
     stop_group(pid)
     end = time.time() + grace
+    if proc is not None:
+        try:
+            proc.wait(timeout=grace)
+        except subprocess.TimeoutExpired:
+            pass
     while time.time() < end and alive(pid):
         time.sleep(0.25)
     if alive(pid):

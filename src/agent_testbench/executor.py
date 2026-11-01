@@ -107,7 +107,7 @@ def _run_command(cmd: str, *, workdir: Path, env: dict, deadline: float, log_pat
             code = proc.wait(timeout=max(1, deadline - time.time()))
             return {"exit_code": code, "timed_out": False}
         except BaseException as exc:                              # timeout, or the run was cancelled
-            stop_and_wait(proc.pid, grace=10)
+            stop_and_wait(proc.pid, grace=10, proc=proc)
             if not isinstance(exc, subprocess.TimeoutExpired):
                 raise
             return {"exit_code": None, "timed_out": True}

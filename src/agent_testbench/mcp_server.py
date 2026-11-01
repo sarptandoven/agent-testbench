@@ -200,6 +200,28 @@ async def get_report(run: str = "", project_dir: str = ".", images: bool = True)
     return [_text(code, out), *shown] if shown else _text(code, out)
 
 
+def _run_ref(value: str) -> str:
+    """A run as a tool argument: a name, or a name with ~N (last~1: the run before the latest). Never an option."""
+    base, tilde, back = value.partition("~")
+    if tilde and (not base or not back.isdigit()):
+        raise ValueError(f"run {value!r} is not a run testbench knows (a run id, a prefix, last, or last~N)")
+    _name(base, "run")
+    return value
+
+
+@server.tool(description="What changed between two runs, in plain words: the verdict and each step, every checked "
+                         "number (old -> new, by how much, and better or worse by the check's rule, e.g. '>= 0.9' "
+                         "wants higher), checks that newly pass or fail, evidence files added, removed or changed "
+                         "(sha256), cost and minutes, the code (commits, uncommitted changes, git diff --stat between "
+                         "the commits) and where it ran (Python, platform, packages that changed version). a and b are "
+                         "runs, older first: ids, prefixes, 'last' or 'last~N'. A plan name as a alone compares the "
+                         "plan's last two finished runs; a run alone, it and the run of its plan before it; nothing, "
+                         "the latest run and the one before it. as_json=true returns the comparison as data.")
+async def diff_runs(a: str = "", b: str = "", project_dir: str = ".", as_json: bool = False) -> str:
+    refs = [_run_ref(x) for x in (a, b) if x]
+    return _text(*await _cli(project_dir, ["diff", *(["--json"] if as_json else []), "--", *refs]))
+
+
 @server.tool(description="Export a run (default: the latest; 'all' for every finished run) where people track "
                          "experiments: to is mlflow, wandb, csv or jsonl (default: every target in testbench.yaml's "
                          "export: section). It carries the plan, status, cost, commit, params, every checked number "

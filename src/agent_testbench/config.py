@@ -176,7 +176,8 @@ def _sessions(s: dict) -> None:
         raise ConfigError("`sessions.secrets` is a list of secret NAMES, e.g. [HF_TOKEN]")
 
 
-NOTIFY_EVENTS = ("run_end", "loop_end", "approval_needed")
+NOTIFY_EVENTS = ("run_end", "loop_end", "approval_needed", "watch_run")
+NOTIFY_DEFAULT = NOTIFY_EVENTS[:3]            # watch_run (a watched run whose result changed) only when asked for
 NOTIFY_EXAMPLE = "{webhook_env: TESTBENCH_WEBHOOK, on: [run_end, loop_end, approval_needed]}"
 
 
@@ -204,13 +205,13 @@ def _notify(n) -> dict | None:
         raise ConfigError("`notify.webhook_env` is the NAME of an environment variable that holds the webhook URL, "
                           "e.g. TESTBENCH_WEBHOOK - not the URL itself (export TESTBENCH_WEBHOOK=https://... where "
                           "testbench runs)")
-    on = n.get("on", list(NOTIFY_EVENTS))
+    on = n.get("on", list(NOTIFY_DEFAULT))
     on = [on] if isinstance(on, str) else on
     if not isinstance(on, list) or not on or any(e not in NOTIFY_EVENTS for e in on):
         bad = [e for e in on if e not in NOTIFY_EVENTS] if isinstance(on, list) else []
         raise ConfigError(f"`notify.on` lists the events to send, from {', '.join(NOTIFY_EVENTS)}"
                           + (f"; there is no {bad[0]!r}" if bad else "")
-                          + f" (default: all three), e.g. {NOTIFY_EXAMPLE}")
+                          + f" (default: {', '.join(NOTIFY_DEFAULT)}), e.g. {NOTIFY_EXAMPLE}")
     return {"webhook": url.strip() if url else None, "webhook_env": env or None, "on": list(dict.fromkeys(on))}
 
 

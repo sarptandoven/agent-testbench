@@ -40,6 +40,7 @@ and the line that raised it. A call over `--timeout` is interrupted and the kern
 testbench plans                  # what may run, on what hardware, worst-case cost
 testbench run smoke              # prints the report; long runs: testbench wait <run>
 testbench report                 # failing cell and line, missed expectations, evidence, what changed
+testbench diff smoke             # its last two runs: each number old -> new (better or worse), checks flipped, code
 ```
 
 Explore to find and fix the problem; prove with a plan before you say it works. A session is not proof -

@@ -10,7 +10,7 @@ webhook works as it is; so does any URL that takes a JSON POST.
 ```yaml
 notify:
   webhook_env: TESTBENCH_WEBHOOK                 # the environment variable that holds the URL
-  on: [run_end, loop_end, approval_needed]       # which events (default: all three)
+  on: [run_end, loop_end, approval_needed]       # which events (default: these three; watch_run only when listed)
 ```
 
 ```
@@ -32,7 +32,7 @@ section, or the variable is not set).
 |---|---|
 | `webhook` | the URL to POST to, `https://...` |
 | `webhook_env` | instead: the NAME of an environment variable that holds the URL |
-| `on` | a list of `run_end`, `loop_end`, `approval_needed`; default all three |
+| `on` | a list of `run_end`, `loop_end`, `approval_needed`, `watch_run`; default the first three |
 
 Exactly one of `webhook` and `webhook_env`. A mistake in the section stops testbench.yaml from loading, with a
 message that says what to write instead (and never repeats the URL).
@@ -43,7 +43,8 @@ Every message is Slack's `{"text": "..."}` plus fields: `event`, `project`, `mac
 
 | event | sent when | fields |
 |---|---|---|
-| `run_end` | every run that finishes: passed, failed, cancelled or error (also one whose driver died, when `testbench wait` or `cancel` notices) | `plan`, `status`, `run_id`, `backend`, `gpu`, `minutes`, `cost_usd`, `numbers` (what each measuring check found), `failed` (failed checks and errors), `stopped_because`, `loop` and `loop_try` (for a loop's runs), `report` |
+| `run_end` | every run that finishes: passed, failed, cancelled or error (also one whose driver died, when `testbench wait` or `cancel` notices) - except the runs of `testbench watch` | `plan`, `status`, `run_id`, `backend`, `gpu`, `minutes`, `cost_usd`, `numbers` (what each measuring check found), `failed` (failed checks and errors), `stopped_because`, `loop` and `loop_try` (for a loop's runs), `report` |
+| `watch_run` | only when listed in `on`: a run of `testbench watch` whose result differs from the run before it (a pass after a failure, or the other way round); a watch runs on every save, so its other runs send nothing ([watch.md](watch.md)) | those of `run_end`, and `watch`, `previous_status` |
 | `loop_end` | a stopping rule fires (`target_reached`, `out_of_patience`, `max_tries_made`), a try is refused because the loop's budget or `--max-hours` is used up (`no_budget_left`, `out_of_time`), and when the loop stops (`stopped`) | `loop`, `plan`, `status`, `why`, `metric`, `goal`, `baseline`, `best`, `best_commit`, `best_run`, `tries`, `kept`, `cost_usd`, `budget_usd`, `branch`, `report` (once stopped) |
 | `approval_needed` | a run, session or loop is refused with "Needs approval" (over `ask_above_usd`); a hard refusal (over `max_run_usd` or a day limit) is not sent, since it is not a question for you | `what`, `plan`, `backend`, `gpu`, `status`, `worst_case_usd`, `max_minutes`, `message`, `approve_with` |
 

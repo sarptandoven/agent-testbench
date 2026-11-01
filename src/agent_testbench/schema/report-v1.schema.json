@@ -46,7 +46,9 @@
         "machine": {"type": "string"},
         "executable": {"type": "string"},
         "packages": {"type": "integer"},
-        "packages_sha256": {"type": "string", "description": "sha256 of the sorted name==version list"}
+        "packages_sha256": {"type": "string", "description": "sha256 of the sorted name==version list"},
+        "package_versions": {"type": "object", "additionalProperties": {"type": "string"},
+                             "description": "every installed package's version, by lowercase name (testbench diff names the ones that changed)"}
       }
     },
     "evidence": {
