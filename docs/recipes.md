@@ -160,8 +160,8 @@ the API keys under `secrets:` (exported in your shell; never their values in the
 change only when the score goes up (`--metric check:score` reads the printed score instead).
 
 **Costs** nothing on testbench's side; the model calls are billed by your provider and are not in testbench's budget,
-so keep the quick sample small. The app's own tests should use strict mocks (`agent_testbench.mocks.StrictAPI`), not
-the real API.
+so keep the quick sample small. The app's own tests should use the mock SDKs (`mocks: [openai, anthropic]` on their
+step, [docs/mocks.md](mocks.md)), not the real API.
 
 ### docker-sandbox
 

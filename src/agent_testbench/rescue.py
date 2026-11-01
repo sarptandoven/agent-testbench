@@ -481,8 +481,8 @@ def read(nb_path: str | Path, workdir: str | Path | None = None) -> dict:
 
     imports, pip_lines, reads, writes, unknown, consts = [], [], [], set(), [], {}
     inputs, secrets, env_vars, colab, mounts, uploads, gpu_hints, gpu_guard = [], [], [], {}, [], [], [], False
-    abs_paths, content = [], []
-    imported = {(a.asname or a.name).split(".")[0] for c in cells if c["tree"] for node in ast.walk(c["tree"])
+    abs_paths, content, code_dirs = [], [], ["."]
+    imported ={(a.asname or a.name).split(".")[0] for c in cells if c["tree"] for node in ast.walk(c["tree"])
                 if isinstance(node, (ast.Import, ast.ImportFrom)) for a in node.names}       # open() of io, gzip, Image
     for c in cells:
         n = c["n"]
@@ -580,6 +580,13 @@ def read(nb_path: str | Path, workdir: str | Path | None = None) -> dict:
                     elif (fn == "getenv" or (fn == "get" and _fname(owner) == "environ")) and len(args) == 1 \
                             and "default" not in kw and _str(args[0], consts):
                         env_vars.append((_str(args[0], consts), n))
+                    elif fn in ("append", "insert") and _fname(owner) == "path" and _root(owner) == "sys" and args:
+                        arg = args[-1]                     # sys.path.append(os.path.abspath("..")): its code is local
+                        while isinstance(arg, ast.Call) and _fname(arg.func) in ("abspath", "realpath", "normpath", "str") \
+                                and arg.args:
+                            arg = arg.args[0]
+                        if _str(arg, consts):
+                            code_dirs.append(_str(arg, consts))
                     elif fn == "cuda" and owner is not None:
                         gpu_hints.append(n)
                     elif fn in ("is_available", "device_count", "list_physical_devices", "gpu_device_name"):
@@ -682,8 +689,11 @@ def read(nb_path: str | Path, workdir: str | Path | None = None) -> dict:
                         else f"Write the code that makes `{name}` in a cell above it.")
 
     # ---- packages
-    local = {Path(w).stem for w in writes if w.endswith(".py")} | {p.stem for p in workdir.glob("*.py")} | \
-            {p.name for p in workdir.iterdir() if p.is_dir() and (p / "__init__.py").exists()}
+    local = {Path(w).stem for w in writes if w.endswith(".py")}
+    for d in {workdir / Path(c).expanduser() for c in code_dirs}:     # modules, and folders of them (namespace ones too)
+        if d.is_dir():
+            local |= {p.stem for p in d.glob("*.py")} | {p.name for p in d.iterdir() if p.is_dir() and (
+                any(p.glob("*.py")) or any(p.glob("*/__init__.py")))}
     wanted: dict[str, dict] = {}
     for mod, n, safe in imports:
         top = mod.split(".")[0]

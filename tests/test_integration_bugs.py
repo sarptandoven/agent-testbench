@@ -61,3 +61,19 @@ def test_the_python_api_turns_a_notebook_it_cannot_run_into_a_testbench_error(pl
         assert "plain Python file" in str(exc)
     else:
         raise AssertionError("no error")
+
+
+def test_rescue_counts_the_project_s_own_code_as_local_not_as_packages_to_pip_install(tmp_path):
+    # A folder of modules without __init__.py (a namespace package: `from src.model import net`) and code a notebook
+    # reaches with sys.path.append("..") import fine - the run passed - yet reading said "blocks: pip install src".
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "model.py").write_text("def net():\n    return 42\n")
+    (tmp_path / "tools.py").write_text("def f():\n    return 2\n")
+    (tmp_path / "nosuchpkg_xyz").mkdir()
+    (tmp_path / "nosuchpkg_xyz" / "rows.csv").write_text("a\n1\n")      # a data folder: no code in it
+    top = make_notebook(tmp_path / "top.ipynb", ["from src.model import net\nprint(net())"])
+    sub = make_notebook(tmp_path / "notebooks" / "sub.ipynb", [
+        "import os, sys\nsys.path.append(os.path.abspath('..'))\nfrom tools import f\nfrom src.model import net",
+        "import nosuchpkg_xyz"])
+    assert [p["import"] for p in RS.read(top)["packages"]] == []
+    assert [p["import"] for p in RS.read(sub)["packages"]] == ["nosuchpkg_xyz"], "a folder of data is not code"

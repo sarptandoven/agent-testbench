@@ -10,7 +10,7 @@
 # Expects the eval to print `score=<number>` and write {"score": ..., "n": <cases scored>} to --out.
 # Costs: nothing on testbench's side; it runs on this machine. The model calls are billed by your provider and are
 #   not in testbench's budget: keep the quick sample small and --limit set. The app's own tests should not call the
-#   real API at all: use strict mocks (agent_testbench.mocks.StrictAPI, `pythonpath: [mocks]`).
+#   real API at all: `mocks: [openai, anthropic]` on their step gives them strict mock SDKs (docs/mocks.md).
 
 plans:
   eval-quick:
