@@ -24,7 +24,8 @@ DEFAULTS = {
     "sessions": {"backend": "local", "gpu": None, "idle_minutes": 10, "max_minutes": 60, "secrets": []},
 }
 STEP_DEFAULTS = {"max_minutes": 10, "params": {}, "env": {}, "secrets": [], "pythonpath": [], "artifacts": [],
-                 "expect": {}, "uploads": [], "cells": None, "colab_shim": True, "continue_on_failure": False}
+                 "expect": {}, "uploads": [], "cells": None, "colab_shim": True, "continue_on_failure": False,
+                 "mocks": {}}
 
 
 class ConfigError(ValueError):
@@ -183,6 +184,7 @@ def _step(where: str, step: dict, root: Path) -> dict:
         if not isinstance(s[key], dict):
             raise ConfigError(f"`{where}.{key}` must be a mapping")
     _expect(f"{where}.expect", s["expect"])
+    s["mocks"] = _mocks(f"{where}.mocks", s["mocks"], root)
     for key in ("secrets", "pythonpath", "artifacts", "uploads"):
         if not isinstance(s[key], list):
             raise ConfigError(f"`{where}.{key}` must be a list")
@@ -212,6 +214,43 @@ def _step(where: str, step: dict, root: Path) -> dict:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", str(name)):
             raise ConfigError(f"`{where}.secrets` lists secret NAMES only, never values")
     return s
+
+
+def _mocks(where: str, value, root: Path) -> dict:
+    """mocks: [openai, anthropic], or with options: {anthropic: {replies: tests/replies.yaml, fail_on_call: 3}}."""
+    from . import mocks as M
+    example = "[openai, anthropic], or with options {anthropic: {replies: tests/replies.yaml, fail_on_call: 3}}"
+    if value in (None, [], {}):
+        return {}
+    if isinstance(value, str):
+        value = [value]
+    if isinstance(value, list):
+        if not all(isinstance(v, str) for v in value):
+            raise ConfigError(f"`{where}` lists the mock clients by name, e.g. {example}")
+        value = {v: {} for v in value}
+    if not isinstance(value, dict):
+        raise ConfigError(f"`{where}` lists the mock clients, e.g. {example}")
+    core, out = M.client_core(), {}
+    for name, opts in value.items():
+        if name not in M.SDKS:
+            raise ConfigError(f"`{where}` names {name!r}; testbench has mock clients for {', '.join(M.SDKS)}. For "
+                              "another API, write a strict mock with agent_testbench.mocks.StrictAPI and list its "
+                              "folder under pythonpath:")
+        opts = opts or {}
+        bad = core.options_error(opts)
+        if bad:
+            raise ConfigError(f"`{where}.{name}`: {bad}")
+        if "replies" in opts:
+            f = root / opts["replies"]
+            if not f.is_file():
+                raise ConfigError(f"`{where}.{name}.replies`: {opts['replies']} does not exist (paths are relative to "
+                                  f"{root})")
+            try:
+                core.parse_replies(yaml.safe_load(f.read_text(encoding="utf-8")))
+            except (yaml.YAMLError, ValueError) as exc:
+                raise ConfigError(f"`{where}.{name}.replies` ({opts['replies']}): {exc}") from None
+        out[name] = opts
+    return out
 
 
 def _rule(where: str, rule) -> None:
@@ -288,6 +327,11 @@ def _expect(where: str, e: dict) -> None:
         if not isinstance(most, (int, float)) or isinstance(most, bool) or not 0 <= most <= 1:
             raise ConfigError(f"`{at}.max_diff` is a number from 0 (identical) to 1, e.g. 0.02")
     _table(f"{where}.duration", e.get("duration") or {}, '{minutes: "<= 5"}', X.DURATION_KEYS)
+    example = '{calls: "<= 5", output_tokens: "<= 2000"}'
+    for sdk, rules in _table(f"{where}.mock_calls", e.get("mock_calls") or {}, f"{{anthropic: {example}}}").items():
+        if sdk not in X.MOCK_SDKS:
+            raise ConfigError(f"`{where}.mock_calls` names {sdk!r}; the mock clients are {', '.join(X.MOCK_SDKS)}")
+        _table(f"{where}.mock_calls.{sdk}", rules, example, X.MOCK_KEYS)
 
 
 def parse_cells(spec, where="cells") -> list[int]:

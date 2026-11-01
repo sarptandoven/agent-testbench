@@ -65,7 +65,8 @@ state built up by hand can hide a bug that a clean run exposes.
   `modal run`, `modal deploy`, `colab new`). Stop sessions when done; never leave a GPU idle.
 - **Secrets.** Refer to secrets by name only (`secrets:` / `--secret NAME`). Never print, copy or write a
   secret value; never read `.env` or credential files.
-- **Paid APIs.** Tests use strict mocks (a module with the client's name on the step's `pythonpath:`); a real
+- **Paid APIs.** Tests use strict mocks: `mocks: [openai, anthropic]` on the step for those SDKs, else a module
+  with the client's name on the step's `pythonpath:`. A mock's refusal (a 400) names the argument to fix. A real
   paid call is the person's decision.
 - **The outside world.** Commits, pushes, releases, emails and posts need the person's yes each time.
 - **Honesty.** Report failures as findings. Never weaken an expectation to make a run pass; if one was wrong,

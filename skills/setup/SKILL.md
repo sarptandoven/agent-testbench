@@ -49,10 +49,13 @@ description: Set up agent-testbench in a project - install it, write testbench.y
    `artifacts: [outputs/*.png, renders/*.mp4]`.
 7. **Code nobody has reviewed** (a new dependency, a downloaded notebook) runs best in `backend: docker` with
    `docker: {network: none}`: a fresh container per run, a copy of the project, no network.
-8. **Mock paid APIs.** Make a `mocks/` folder with a module named like the real client (e.g. `mocks/acme.py`)
-   built on `agent_testbench.mocks.StrictAPI`: it checks arguments against the service's published schema, returns a
-   reply of the real shape (a generated test video, a fixed JSON), logs calls, and refuses anything else. Add
-   `pythonpath: [mocks]` to the test steps. Real calls stay out of tests.
+8. **Mock paid APIs.** Code that calls the `openai` or `anthropic` Python SDK needs one line on its test steps:
+   `mocks: [openai, anthropic]` - strict mock clients answer instead, with no key and no network; a replies file
+   gives the answers and tool calls a test needs, and `expect: {mock_calls: {anthropic: {calls: "<= 5"}}}` bounds
+   the calls (docs/mocks.md). For any other paid API, make a `mocks/` folder with a module named like the real client
+   (e.g. `mocks/acme.py`) built on `agent_testbench.mocks.StrictAPI`: it checks arguments against the service's
+   published schema, returns a reply of the real shape (a generated test video, a fixed JSON), logs calls, and
+   refuses anything else. Add `pythonpath: [mocks]` to the test steps. Real calls stay out of tests.
 9. **Notebooks.** Keep them Colab-friendly (form fields `NAME = value  #@param`, no hard-coded `/content`
    paths, small previews instead of embedded video). For editing, `testbench nb split nb.ipynb cells/` and
    `testbench nb build cells/ nb.ipynb`. A step's `uploads: [[file]]` answers each `files.upload()` in order;

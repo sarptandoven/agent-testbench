@@ -28,6 +28,7 @@ nav:
   - Recipes: recipes.md
   - Expectations: expectations.md
   - Notebooks: notebooks.md
+  - Mock LLM clients: mocks.md
   - Backends:
       - Overview: backends.md
       - Docker: docker.md

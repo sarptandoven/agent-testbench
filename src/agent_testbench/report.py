@@ -95,8 +95,10 @@ def render(report: dict) -> str:
                 lines += [f"- {key.replace('_', ' ')}: {item}"]
         if s.get("stdout_tail") and not e.get("traceback_tail"):
             lines += ["", "Last output:", "", "```", s["stdout_tail"][-1500:], "```"]
+        mocked = any(str(c.get("check", "")).startswith("mock ") for c in s.get("expectations") or [])
         lines += [f"- evidence: `{s.get('dir')}/` (log.txt, result.json"
-                  + (", executed.ipynb" if s["kind"] == "notebook" else "") + ")", ""]
+                  + (", executed.ipynb" if s["kind"] == "notebook" else "")
+                  + (", mock_calls.jsonl" if mocked else "") + ")", ""]
     d = r.get("delta") or {}
     if d:
         lines += [f"## Compared with the previous run `{d.get('previous_run')}` ({d.get('previous_status')})", ""]

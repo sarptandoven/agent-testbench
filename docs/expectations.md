@@ -32,6 +32,8 @@ expect:
   image:
     plots/loss.png: {like: golden/loss.png, max_diff: 0.02}
   duration: {minutes: "<= 5"}
+  mock_calls:                           # steps with mocks: [anthropic, openai]
+    anthropic: {calls: "<= 5", output_tokens: "<= 2000"}
 ```
 
 Paths are relative to the folder the step runs in (the project folder, or its scratch copy).
@@ -291,6 +293,24 @@ web:
 - expected title contains 'Counter': 'Error'
 - expected no console or page errors: error: Uncaught TypeError: Cannot read properties of null (reading 'click')
 - expected every action worked: action 1 {'click': '#increment'}: Timeout 5000ms exceeded.
+```
+
+## mock_calls
+
+Steps with `mocks: [anthropic, openai]` (the mock LLM clients, [docs/mocks.md](mocks.md)): what the step asked of
+them, read from the step's `mock_calls.jsonl`. Keys: `calls`, `refused`, `injected`, `input_tokens`,
+`output_tokens`, `tool_calls`. `refused: 0` is checked for every mocked SDK unless given, so a request the real API
+would refuse fails the step even when the code caught the error.
+
+```yaml
+mock_calls:
+  anthropic: {calls: "<= 5", output_tokens: "<= 2000", tool_calls: ">= 1"}
+  openai: {calls: ">= 1"}
+```
+
+```
+- expected mock anthropic refused 0: 1 (wanted == 0); call 1: BadRequestError: messages[0] has role 'system': put the system prompt in the top-level system= parameter (...)
+- expected mock anthropic calls <= 3: 5 (wanted <= 3.0); messages.create claude-opus-5-5 x5
 ```
 
 ## The numbers, over time
