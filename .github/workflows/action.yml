@@ -1,6 +1,7 @@
 name: action
 # Tests the GitHub Action in action.yml (uses: ./) the way a user's workflow runs it: plans that pass (Linux, macOS,
-# and a web plan in Chromium), a plan that fails, and a plan that is refused before it starts.
+# and a web plan in Chromium), a plan that fails, a plan that is refused before it starts, and the pull request
+# comment and attestation (comment: true, attest: true).
 on: [push, pull_request]
 permissions:
   contents: read
@@ -155,3 +156,77 @@ jobs:
           grep -q 'Needs approval: plan pricey could cost up to' "$SUMMARY"
           grep -q 'approve: true' "$SUMMARY"
           test "$COST" = 0.0000
+
+  comment-and-attest:
+    name: comment and attestation
+    # A pull request from a fork gets a read-only token and no id-token; the action skips both there (tested
+    # locally in tests/test_action.py), so this job runs on pushes and on this repository's own pull requests.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write          # post and edit the comment
+      actions: read                 # compare with main's latest run; link this job's summary
+      id-token: write               # sign the attestation
+      attestations: write           # store it
+    concurrency:
+      group: action-comment-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - id: testbench
+        uses: ./
+        with:
+          plan: smoke
+          project-dir: examples/tiny-model
+          extra-pip: scikit-learn==1.5.2 matplotlib==3.9.2
+          artifact-name: testbench-smoke-attested
+          comment: true
+          attest: true
+      - name: check the attestation (gh attestation verify) and the comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          STATUS: ${{ steps.testbench.outputs.status }}
+          RUN_ID: ${{ steps.testbench.outputs.run-id }}
+          RUN_DIR: ${{ steps.testbench.outputs.run-dir }}
+          SUMMARY: ${{ steps.testbench.outputs.summary-path }}
+          COMMENT_URL: ${{ steps.testbench.outputs.comment-url }}
+          ATTESTATION_URL: ${{ steps.testbench.outputs.attestation-url }}
+        run: |
+          set -euo pipefail
+          echo "status=$STATUS attestation=$ATTESTATION_URL comment=$COMMENT_URL"
+          test "$STATUS" = passed
+          test -n "$ATTESTATION_URL" && test -s "$RUN_DIR/attestation.sigstore.json"
+          grep -q "^Attestation: \[report.json and [0-9]* evidence files\]($ATTESTATION_URL), signed by this workflow at commit \`${GITHUB_SHA:0:12}\`" "$SUMMARY"
+          workflow="$GITHUB_REPOSITORY/.github/workflows/action.yml"
+          # fetched from GitHub's attestations API; signed by this workflow, at this commit
+          gh attestation verify "$RUN_DIR/report.json" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$workflow" --source-digest "$GITHUB_SHA"
+          # from the bundle the artifact carries, and an evidence file on its own
+          gh attestation verify "$RUN_DIR/report.json" --repo "$GITHUB_REPOSITORY" \
+            --bundle "$RUN_DIR/attestation.sigstore.json" --source-digest "$GITHUB_SHA"
+          gh attestation verify "$RUN_DIR/steps/02-train-quick/artifacts/outputs/metrics.json" --repo "$GITHUB_REPOSITORY"
+          # a file that was not signed is refused
+          echo "not evidence" > "$RUNNER_TEMP/unsigned.txt"
+          if gh attestation verify "$RUNNER_TEMP/unsigned.txt" --repo "$GITHUB_REPOSITORY"; then
+            echo "an unsigned file passed gh attestation verify"; exit 1
+          fi
+          (cd "$RUN_DIR/../../.." && testbench verify "$RUN_ID" --attestation)
+          if [ "$EVENT" = pull_request ]; then
+            test -n "$COMMENT_URL"
+            id="${COMMENT_URL##*#issuecomment-}"
+            body="$(gh api "repos/$GITHUB_REPOSITORY/issues/comments/$id" --jq .body)"
+            marker='<!-- agent-testbench comment: action/testbench-smoke-attested -->'
+            test "$(printf '%s\n' "$body" | head -n 1)" = "$marker"
+            printf '%s\n' "$body" | grep -q '^### PASS - plan `smoke`'
+            printf '%s\n' "$body" | grep -q '| ok | `train quick` | `outputs/metrics.json: accuracy >= 0.85` |'
+            printf '%s\n' "$body" | grep -q "\[attestation\]($ATTESTATION_URL)"
+            # one comment for this plan, however many times the pull request was pushed to
+            n="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+                  --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | wc -l)"
+            test "$n" -eq 1
+          else
+            test -z "$COMMENT_URL"           # a push has no pull request to comment on
+          fi

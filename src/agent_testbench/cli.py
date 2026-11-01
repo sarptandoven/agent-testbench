@@ -416,14 +416,20 @@ def cmd_verify(a):
         return 2
     problems = provenance.verify(run_dir, rep)
     if problems:
-        print(f"{run_dir.name}: the evidence no longer matches its report:\n  " + "\n  ".join(problems))
+        print(f"{run_dir.name}: the evidence no longer matches its report:\n  " + "\n  ".join(problems)
+              + ("\nThe attestation was not checked: the evidence does not match the report it would vouch for."
+                 if a.attestation else ""))
         return 1
     src = rep.get("source") or {}
     print(f"{run_dir.name}: all {len(rep['evidence'])} evidence files match their recorded sha256 "
           f"({rep['evidence_sha256'][:16]}); ran on "
           + (f"commit {src['commit'][:12]}" + (" with uncommitted changes" if src.get("dirty") else "") if src
              else "code outside git"))
-    return 0
+    if not a.attestation:
+        return 0
+    code, text = provenance.verify_attestation(run_dir, rep, a.repo or provenance.github_repo(root))
+    print(f"{run_dir.name}: {text}")
+    return code
 
 
 def cmd_cancel(a):
@@ -828,6 +834,13 @@ def build_parser() -> argparse.ArgumentParser:
                                 "folder) or junit (XML for CI)")
             p.add_argument("--json", action="store_true", help="same as --format json")
             p.add_argument("-o", "--output", help="write to this file")
+        if name == "verify":
+            p.add_argument("--attestation", action="store_true",
+                           help="also check report.json's GitHub artifact attestation (the action's attest: true) with "
+                                "`gh attestation verify`: made by a workflow of the repository, at the report's commit")
+            p.add_argument("--repo", metavar="OWNER/REPO",
+                           help="with --attestation: the repository whose workflow made it (default: "
+                                "GITHUB_REPOSITORY, else the origin remote)")
         p.set_defaults(fn=fn)
     p = sub.add_parser("prices", help="the prices estimates use and where each comes from; --update fetches the catalog")
     p.add_argument("--update", action="store_true", help="fetch the price catalog (it can raise prices, never lower them)")

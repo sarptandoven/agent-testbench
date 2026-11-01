@@ -66,6 +66,25 @@ inputs:
     description: true installs headless Chromium (and its system libraries on Linux) for the plan's web steps.
     required: false
     default: "false"
+  comment:
+    description: >-
+      true: on a pull request, post the verdict, what failed, the numbers checked and how they moved since the base
+      branch's latest run, the cost and links as one comment per plan, edited on later pushes. Needs
+      `pull-requests: write` (and `actions: read` for the comparison). A fork's read-only token is skipped with a
+      notice; a comment never fails the job.
+    required: false
+    default: "false"
+  attest:
+    description: >-
+      true: sign report.json and every evidence file with GitHub's artifact attestations
+      (actions/attest-build-provenance), so `gh attestation verify` shows they came from this workflow at this
+      commit. Needs `id-token: write` and `attestations: write`; skipped with a notice on pull requests from forks.
+    required: false
+    default: "false"
+  github-token:
+    description: The token for the comment and the attestation (the job's GITHUB_TOKEN by default). Never printed.
+    required: false
+    default: ${{ github.token }}
 
 outputs:
   status:
@@ -95,6 +114,12 @@ outputs:
   artifact-url:
     description: A link to the uploaded evidence artifact.
     value: ${{ steps.upload.outputs.artifact-url }}
+  comment-url:
+    description: "With comment: true, a link to the pull request comment; empty when none was posted (not a pull request, a fork, no permission)."
+    value: ${{ steps.comment.outputs.comment-url }}
+  attestation-url:
+    description: "With attest: true, a link to the attestation of report.json and the evidence; empty when none was made."
+    value: ${{ steps.attested.outputs.attestation-url }}
 
 runs:
   using: composite
@@ -110,6 +135,8 @@ runs:
         PLAYWRIGHT: ${{ inputs.playwright }}
         SETUP_PYTHON: ${{ inputs.setup-python }}
         WAIT_MINUTES: ${{ inputs.wait-minutes }}
+        COMMENT: ${{ inputs.comment }}
+        ATTEST: ${{ inputs.attest }}
       run: |
         set -euo pipefail
         bad=0
@@ -124,6 +151,8 @@ runs:
         flag fail-on-failure "$FAIL_ON_FAILURE"
         flag playwright "$PLAYWRIGHT"
         flag setup-python "$SETUP_PYTHON"
+        flag comment "$COMMENT"
+        flag attest "$ATTEST"
         if [ -z "$PLAN" ]; then
           echo "::error title=agent-testbench::input plan is required: the name of a plan in testbench.yaml"
           bad=1
@@ -441,6 +470,61 @@ runs:
         print(f"status: {status}" + (f", run {run_id}" if run_id else "") + f"; summary: {summary_path}")
         PY
 
+    # attest: true. The checksums of report.json and the evidence (checked against report.json first), signed by
+    # GitHub's artifact attestations; the signed bundle goes into the run folder before it is uploaded.
+    - name: list what to attest
+      id: attest-prep
+      if: ${{ !cancelled() && steps.prep.outputs.attest == 'true' }}
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PY: ${{ steps.install.outputs.python }}
+        WORK: ${{ steps.prep.outputs.work }}
+        RUN_DIR: ${{ steps.files.outputs.run-dir }}
+        SUMMARY_FILE: ${{ steps.files.outputs.summary-path }}
+      run: |
+        set -euo pipefail
+        py="${PY:-$(command -v python3 || command -v python)}"
+        "$py" "$ACTION_PATH/src/agent_testbench/github_action.py" attest-subjects
+
+    - name: attest the report and the evidence
+      id: attest
+      if: ${{ !cancelled() && steps.attest-prep.outputs.ready == 'true' }}
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8    # v4.2.2
+      with:
+        subject-checksums: ${{ steps.attest-prep.outputs.checksums }}
+        github-token: ${{ inputs.github-token }}
+        create-storage-record: "false"                # a storage record is for images pushed to a registry
+
+    - name: keep the attestation with the evidence
+      id: attested
+      if: ${{ !cancelled() && steps.attest-prep.outputs.ready == 'true' }}
+      shell: bash
+      env:
+        OUTCOME: ${{ steps.attest.outcome }}
+        ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+        BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        SUBJECTS: ${{ steps.attest-prep.outputs.subjects }}
+        RUN_DIR: ${{ steps.files.outputs.run-dir }}
+        RUN_ID: ${{ steps.files.outputs.run-id }}
+        SUMMARY_FILE: ${{ steps.files.outputs.summary-path }}
+      run: |
+        set -euo pipefail
+        if [ "$OUTCOME" != success ] || [ -z "$ATTESTATION_URL" ]; then
+          line="Attestation: none was made (the step that signs it says why, in the job log). It needs \`permissions: id-token: write\` and \`attestations: write\` on the job, and a public repository (a private one needs GitHub Enterprise Cloud)."
+          printf '\n%s\n' "$line" >> "$GITHUB_STEP_SUMMARY"
+          printf '\n%s\n' "$line" >> "$SUMMARY_FILE"
+          echo "::error title=agent-testbench::attest is true but no attestation was made: the step that signs it says why. It needs permissions id-token: write and attestations: write, and a public repository (a private one needs GitHub Enterprise Cloud)"
+          exit 1
+        fi
+        if [ -n "$BUNDLE" ] && [ -f "$BUNDLE" ]; then
+          cp "$BUNDLE" "$RUN_DIR/attestation.sigstore.json"     # offline checks: gh attestation verify --bundle
+        fi
+        echo "attestation-url=$ATTESTATION_URL" >> "$GITHUB_OUTPUT"
+        line="Attestation: [report.json and $((SUBJECTS - 1)) evidence files]($ATTESTATION_URL), signed by this workflow at commit \`${GITHUB_SHA:0:12}\`. Check a downloaded run with \`testbench verify $RUN_ID --attestation\`, or \`gh attestation verify report.json --repo $GITHUB_REPOSITORY\`."
+        printf '\n%s\n' "$line" >> "$GITHUB_STEP_SUMMARY"
+        printf '\n%s\n' "$line" >> "$SUMMARY_FILE"
+
     - name: upload the evidence
       id: upload
       if: ${{ !cancelled() && steps.files.outputs.run-dir != '' }}
@@ -463,6 +547,30 @@ runs:
         line="Evidence: [$NAME]($URL), the run folder: report.html with the images, junit.xml, and every log and file the run kept."
         printf '\n%s\n' "$line" >> "$GITHUB_STEP_SUMMARY"
         printf '\n%s\n' "$line" >> "$SUMMARY_FILE"
+
+    # comment: true. One comment per plan on the pull request, edited on later pushes; it never fails the job.
+    - name: comment on the pull request
+      id: comment
+      if: ${{ !cancelled() && steps.prep.outputs.comment == 'true' }}
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PY: ${{ steps.install.outputs.python }}
+        TESTBENCH_GITHUB_TOKEN: ${{ inputs.github-token }}
+        PLAN: ${{ inputs.plan }}
+        STATUS: ${{ steps.files.outputs.status }}
+        RUN_ID: ${{ steps.files.outputs.run-id }}
+        RUN_DIR: ${{ steps.files.outputs.run-dir }}
+        MESSAGE: ${{ steps.files.outputs.message }}
+        ARTIFACT_NAME: ${{ steps.files.outputs.artifact-name }}
+        ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        ATTESTATION_URL: ${{ steps.attested.outputs.attestation-url }}
+        SUMMARY_FILE: ${{ steps.files.outputs.summary-path }}
+      run: |
+        set -uo pipefail
+        py="${PY:-$(command -v python3 || command -v python)}"
+        "$py" "$ACTION_PATH/src/agent_testbench/github_action.py" comment \
+          || echo "::warning title=agent-testbench::the pull request comment could not be written (the output above says why); the job does not fail for it"
 
     - name: pass or fail
       if: ${{ !cancelled() }}

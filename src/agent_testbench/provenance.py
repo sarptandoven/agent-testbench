@@ -6,11 +6,20 @@ A report (schema/report-v1.schema.json) carries:
   environment  Python, platform and a hash of the installed packages where the plan ran (Modal, Colab, ssh too);
   evidence     every file the run kept (logs, executed notebooks, images, artifacts) with its size and sha256, and
                one sha256 over all of them, so evidence that was changed afterwards no longer matches.
+
+A run made by the GitHub Action with `attest: true` is also signed: a GitHub artifact attestation of report.json
+(and of each evidence file) says which repository's workflow made it, at which commit. verify_attestation checks it
+with `gh attestation verify`; together with verify() that covers the evidence too, since report.json records the
+sha256 of every evidence file.
 """
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import platform
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -98,3 +107,79 @@ def verify(run_dir: Path, report: dict) -> list[str]:
     problems += [f"missing: {p}" for p in recorded if p not in now]
     problems += [f"added after the run: {p}" for p in now if p not in recorded]
     return problems
+
+
+# ---- attestations: a report signed by a GitHub workflow (the action's `attest: true`) -------------------------------
+
+BUNDLE = "attestation.sigstore.json"          # the action keeps the signed bundle here, next to report.json
+
+
+def github_repo(root: Path) -> str:
+    """OWNER/REPO of the GitHub repository a project is in: GITHUB_REPOSITORY inside a workflow, else the origin
+    remote; "" when neither says."""
+    if re.fullmatch(r"[\w.-]+/[\w.-]+", os.environ.get("GITHUB_REPOSITORY") or ""):
+        return os.environ["GITHUB_REPOSITORY"]
+    try:
+        out = _git(Path(root), "remote", "get-url", "origin").stdout.decode(errors="replace").strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    m = re.search(r"github\.com[:/]+([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", out)
+    return f"{m[1]}/{m[2]}" if m else ""
+
+
+def verify_attestation(run_dir: Path, report: dict, repo: str, gh: str | None = None) -> tuple[int, str]:
+    """Whether report.json carries a GitHub artifact attestation made by a workflow of repo, at the commit the report
+    names, checked with `gh attestation verify` (offline from the bundle in the run folder when the action kept one).
+    Returns (0, what it shows), (1, what does not check out) or (2, why it could not be checked)."""
+    run_dir = Path(run_dir)
+    gh = gh or shutil.which("gh")
+    if not gh:
+        return 2, ("the attestation was not checked: it takes `gh`, the GitHub CLI (https://cli.github.com), which is "
+                   f"not on PATH. With it: gh attestation verify {run_dir / 'report.json'} "
+                   f"--repo {repo or 'OWNER/REPO'}")
+    if not repo:
+        return 2, ("the attestation was not checked: say which GitHub repository's workflow should have made it, with "
+                   "--repo OWNER/REPO")
+    cmd = [gh, "attestation", "verify", str(run_dir / "report.json"), "--repo", repo, "--format", "json"]
+    bundle = run_dir / BUNDLE
+    if bundle.is_file():
+        cmd += ["--bundle", str(bundle)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 2, f"the attestation was not checked: gh attestation verify did not finish ({exc})"
+    if r.returncode != 0:
+        said = "\n  ".join((r.stderr.strip() or r.stdout.strip() or f"exit code {r.returncode}").splitlines()[-6:])
+        if r.returncode == 4 or re.search(r"gh auth login|not logged in|HTTP 401|GH_TOKEN", said):
+            return 2, ("the attestation was not checked: gh is not signed in to GitHub (run `gh auth login`, or set "
+                       f"GH_TOKEN). gh said:\n  {said}")
+        return 1, (f"report.json has no attestation from a workflow of {repo} that checks out"
+                   + (f" (checked against {BUNDLE})" if bundle.is_file() else "") + f". gh said:\n  {said}")
+    try:
+        results = json.loads(r.stdout or "[]")
+    except ValueError:
+        results = []
+    certs = [((x.get("verificationResult") or {}).get("signature") or {}).get("certificate") or {}
+             for x in results if isinstance(x, dict)] if isinstance(results, list) else []
+    certs = [c for c in certs if isinstance(c, dict)]
+    commit = str((report.get("source") or {}).get("commit") or "")
+    digests = [str(c["sourceRepositoryDigest"]) for c in certs if c.get("sourceRepositoryDigest")]
+    if commit and digests and commit not in digests:
+        return 1, (f"report.json is attested by a workflow of {repo} at commit {digests[0][:12]}, but the report says "
+                   f"it ran on commit {commit[:12]}: the workflow ran other code than it was started on, so the "
+                   "attestation does not vouch for this report's commit")
+    cert = next((c for c in certs if c.get("sourceRepositoryDigest") == commit), certs[0] if certs else {})
+    signer = str(cert.get("buildConfigURI") or cert.get("subjectAlternativeName") or f"a workflow of {repo}")
+    signer = re.sub(r"^https://github\.com/", "", signer)
+    run = str(cert.get("runInvocationURI") or "")
+    if not commit:
+        at = ", for code outside git (no commit to compare)"
+    elif digests:
+        at = f", at commit {commit[:12]}, the commit the report names"
+    else:
+        at = f"; gh did not say at which commit, so the report's commit {commit[:12]} was not compared"
+    text = (f"report.json is attested: signed by {signer}" + (f" in {run}" if run else "") + at
+            + (f"; checked against {BUNDLE}" if bundle.is_file() else "") + ".")
+    if cert.get("runnerEnvironment") == "self-hosted":
+        text += " It ran on a self-hosted runner: whoever runs that machine could have changed the run."
+    return 0, text
