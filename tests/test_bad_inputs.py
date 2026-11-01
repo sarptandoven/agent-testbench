@@ -277,8 +277,11 @@ def test_verify_catches_an_edited_or_broken_evidence_list(tmp_path):
 @pytest.mark.posix
 def test_evidence_with_a_file_name_that_is_not_utf8(tmp_path):
     (tmp_path / "steps").mkdir()
-    with open(os.path.join(os.fsencode(tmp_path / "steps"), b"caf\xe9.png"), "wb") as f:
-        f.write(b"x")
+    try:
+        with open(os.path.join(os.fsencode(tmp_path / "steps"), b"caf\xe9.png"), "wb") as f:
+            f.write(b"x")
+    except (OSError, ValueError):                       # macOS (APFS) and Windows only take names in UTF-8
+        pytest.skip("this file system refuses a file name that is not UTF-8")
     files, total = provenance.evidence(tmp_path)
     rep = json.loads(json.dumps({"evidence": files, "evidence_sha256": total}))      # as report.json keeps it
     assert provenance.verify(tmp_path, rep) == []

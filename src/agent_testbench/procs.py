@@ -18,19 +18,19 @@ from pathlib import Path
 WINDOWS = os.name == "nt"
 
 
-def write_text_atomic(path, text: str) -> None:
+def write_text_atomic(path, text: str, encoding: str = "utf-8") -> None:
     """Replace a small file (state.json) so a reader sees the old text or the new, never half: through a temp file of
     this process and thread's own, then os.replace. On Windows a file another process has open cannot be replaced
     for that moment, so it tries again briefly."""
     path = Path(path)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-    tmp.write_text(text)
-    for attempt in range(60):
+    tmp.write_text(text, encoding=encoding)
+    for attempt in range(200):
         try:
             os.replace(tmp, path)
             return
         except PermissionError:
-            if not WINDOWS or attempt == 59:
+            if not WINDOWS or attempt == 199:
                 tmp.unlink(missing_ok=True)
                 raise
             time.sleep(0.05)
@@ -38,14 +38,14 @@ def write_text_atomic(path, text: str) -> None:
 
 def read_text_retry(path) -> str:
     """Read a small file another process may be replacing at this moment (on Windows that is a PermissionError)."""
-    for attempt in range(60):
+    for attempt in range(200):
         try:
-            return Path(path).read_text()
+            return Path(path).read_text(encoding="utf-8")
         except PermissionError:
-            if not WINDOWS or attempt == 59:
+            if not WINDOWS or attempt == 199:
                 raise
             time.sleep(0.05)
-    return Path(path).read_text()
+    return Path(path).read_text(encoding="utf-8")
 
 
 def group_kwargs() -> dict:

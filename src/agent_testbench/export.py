@@ -151,9 +151,7 @@ def _flat(rec: dict) -> dict:
 
 def _replace(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.replace(path)
+    procs.write_text_atomic(path, text)
 
 
 def to_csv(root: Path, run_dir: Path, rec: dict, opts: dict) -> str:

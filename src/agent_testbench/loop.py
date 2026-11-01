@@ -34,7 +34,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import budget, config as C, notify, report as R, runs
+from . import budget, config as C, notify, procs, report as R, runs
 
 ACTIVE = "running"
 OWN = ":(exclude).testbench"       # testbench's own folder (runs, notes, this loop) is never tried or reverted
@@ -50,10 +50,7 @@ def loops_dir(root: Path) -> Path:
 
 
 def _save(state: dict) -> dict:
-    p = Path(state["dir"]) / "state.json"
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=1))
-    tmp.replace(p)
+    procs.write_text_atomic(Path(state["dir"]) / "state.json", json.dumps(state, indent=1))
     return state
 
 

@@ -102,7 +102,8 @@ def test_stop_ends_the_kernel_and_records_cost(plain):
     assert [e["event"] for e in ledger] == ["launch", "finish"]
 
 
-@pytest.mark.parametrize("flags, why", [(["--idle-minutes", "0.03"], "idle for"), (["--max-minutes", "0.05"], "max_minutes")])
+@pytest.mark.parametrize("flags, why", [(["--idle-minutes", "0.03"], "idle for"),     # max: room for a kernel to
+                                        (["--max-minutes", "0.2"], "max_minutes")])      # start on a busy machine
 def test_sessions_stop_themselves(plain, flags, why):
     env = {"TESTBENCH_SUPERVISE_SECONDS": "1"}
     r = cli(plain, "session", "start", *flags, env=env)

@@ -8,6 +8,11 @@ from conftest import cli, git, score, write_config
 START = ("loop", "start", "score", "--metric", "metrics.json:score", "--budget-usd", "0")
 
 
+def why(root: Path, r) -> str:
+    """The output, and the last run's report: a loop's run that errors says why only there."""
+    return r.stdout + r.stderr + "\n--- the last run's report:\n" + cli(root, "report").stdout[-4000:]
+
+
 def state(root: Path) -> dict:
     return json.loads(next((root / ".testbench" / "loops").glob("*/state.json")).read_text())
 
@@ -54,9 +59,11 @@ def test_each_try_s_verdict_is_sent_when_asked_for(repo, webhook):
     cfg = (repo / "testbench.yaml").read_text() + f"notify:\n  webhook: {webhook.url}\n  on: [run_end, loop_try]\n"
     (repo / "testbench.yaml").write_text(cfg)
     git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "notify")
-    assert cli(repo, *START).returncode == 0
+    r = cli(repo, *START)
+    assert r.returncode == 0, why(repo, r)
     score(repo, 2)
-    assert cli(repo, "loop", "try", "two").returncode == 0
+    r = cli(repo, "loop", "try", "two")
+    assert r.returncode == 0, why(repo, r)
     score(repo, 0)
     assert cli(repo, "loop", "try", "zero").returncode == 1
     tries = webhook.events("loop_try")
@@ -71,7 +78,7 @@ def test_each_try_s_verdict_is_sent_when_asked_for(repo, webhook):
 
 def test_a_baseline_at_the_target_refuses_the_first_try(repo):
     r = cli(repo, *START, "--goal", "min", "--target", "1")
-    assert r.returncode == 0 and "Target reached (score <= 1)" in r.stdout, r.stdout
+    assert r.returncode == 0 and "Target reached (score <= 1)" in r.stdout, why(repo, r)
     score(repo, 0)
     r = cli(repo, "loop", "try", "zero")
     assert r.returncode == 2 and "best score 1 (the baseline, commit" in r.stdout, r.stdout
@@ -121,7 +128,8 @@ def test_patience_refuses_more_of_the_same(repo, webhook):
 
 
 def test_a_patience_of_one_reads_as_one_try(repo):
-    assert cli(repo, *START, "--patience", "1").returncode == 0
+    r = cli(repo, *START, "--patience", "1")
+    assert r.returncode == 0, why(repo, r)
     score(repo, 0)
     r = cli(repo, "loop", "try", "zero")
     assert r.returncode == 1 and "That is 1 try in a row not kept (--patience 1)" in r.stdout, r.stdout
