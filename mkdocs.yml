@@ -29,6 +29,7 @@ nav:
   - Expectations: expectations.md
   - Notebooks: notebooks.md
   - Mock LLM clients: mocks.md
+  - Rescue a notebook: rescue.md
   - Backends:
       - Overview: backends.md
       - Docker: docker.md

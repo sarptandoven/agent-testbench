@@ -27,6 +27,8 @@
 - Exports: `export.py` (`testbench export`, and testbench.yaml's `export:` after every run from `runs.finalize`:
   MLflow, W&B, csv, jsonl). Trackers are imported only when used and never fail or hold up a run; their tests
   skip unless mlflow / wandb are installed (in a separate venv: `docs/export.md`).
+- Rescue: `rescue.py` (`testbench rescue`: reads a notebook, runs it through `executor.run_step`, diagnoses the first
+  failing cell; the import-to-pip-name table is there).
 - Sessions: `kernelkit/` (the launcher and client that run on the session's machine), `session_backends.py`
   (local, Modal Sandbox, Colab CLI), `sessions.py` (state, budget, supervisor).
 - `claude plugin validate . && claude plugin validate .claude-plugin/plugin.json --strict` after plugin changes.

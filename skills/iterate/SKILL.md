@@ -91,6 +91,9 @@ not another variation of them.
 
 ## Notebooks
 
+When a notebook does not run (downloaded, old, someone else's), start with `testbench rescue nb.ipynb`: it says
+which cell fails, why and what to do, and writes a plan that proves it once fixed.
+
 Edit notebooks as cell files, not JSON: `testbench nb split nb.ipynb cells/`, edit `cells/NN_*.py`,
 `testbench nb build cells/ nb.ipynb`. Colab form fields (`NAME = value  #@param`) and papermill parameters (a
 cell tagged `parameters`) are set with `params:` in a plan or `--params` in a session; `testbench nb fields nb.ipynb`
