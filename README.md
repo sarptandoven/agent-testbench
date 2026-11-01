@@ -265,6 +265,9 @@ plugin, which adds the `iterate` and `setup` skills.
 | `testbench estimate` / `spend [--modal]` / `prices [--update]` | money |
 | `testbench lint` / `rescue` / `nb split/build/fields` / `note` | notebooks and the lab notebook |
 
+`testbench help COMMAND` shows a command's options and examples; exit codes are in
+[docs/reference.md](docs/reference.md#exit-codes) (0 passed, 1 failed, 2 refused or bad input, 3 still running).
+
 ## Documentation
 
 - [docs/reference.md](docs/reference.md) - every field of testbench.yaml, sessions, plans, steps, loops, proof

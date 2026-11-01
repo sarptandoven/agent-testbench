@@ -2,6 +2,11 @@
 
 ## 0.2.0 - not yet released
 
+- The command line explains itself: `testbench` / `testbench help` list the commands in groups with the ones to
+  start with; every `--help` ends with examples; a mistyped command, plan, run, session, recipe, client or example
+  name gets the closest one, and words in the wrong order get the right order. `status` exits 0/1/3 like `wait`;
+  `session stop` with nothing running exits 0; a failed `session install` exits 1. `--format json` works wherever
+  `--json` does, `wait --wait`, and `-s/--session` on every session command. Exit codes: docs/reference.md.
 - Not only Python: recipes jest, vitest, go-test, cargo-test and playwright-ts, each with a local plan judged by the
   runner's JUnit report and (all but Playwright) an offline docker plan. `testbench init` detects npm test runners,
   Go modules and Rust crates. `junit:` reads real reports from nine runners correctly (mocha's failures, Go's

@@ -34,6 +34,17 @@ class ConfigError(ValueError):
     pass
 
 
+def near(word, names, cutoff: float = 0.6) -> str:
+    """' (did you mean X?)' when word is a near miss for one of names, else ''."""
+    hit = difflib.get_close_matches(str(word), [str(n) for n in names], n=1, cutoff=cutoff)
+    return f" (did you mean {hit[0]}?)" if hit else ""
+
+
+def no_plan(cfg: dict, name) -> str:
+    """What to say when testbench.yaml has no plan of that name: the closest one, and every plan."""
+    return f"No plan {name!r}{near(name, cfg['plans'])}. Plans: {', '.join(cfg['plans'])}"
+
+
 def find_root(start: str | Path = ".") -> Path:
     """The nearest directory at or above `start` that holds testbench.yaml."""
     here = Path(start).resolve()

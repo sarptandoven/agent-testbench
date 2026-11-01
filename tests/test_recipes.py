@@ -129,7 +129,8 @@ def test_recipes_name_prints_it_as_it_ships(tmp_path):
     r = cli(tmp_path, "recipes", "pytorch-train")
     assert r.returncode == 0 and r.stdout == (RC.HERE / "pytorch-train.yaml").read_text()
     r = cli(tmp_path, "recipes", "pytorch")
-    assert r.returncode == 2 and "no recipe 'pytorch'; the recipes are cargo-test, data-pipeline, docker-sandbox" in r.stdout
+    assert r.returncode == 2 and ("no recipe 'pytorch' (did you mean pytorch-train?); the recipes are cargo-test, "
+                                  "data-pipeline, docker-sandbox") in r.stdout
 
 
 def test_init_with_recipes_writes_a_config_that_loads(tmp_path):

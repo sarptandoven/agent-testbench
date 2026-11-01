@@ -10,8 +10,33 @@ Colab, or a machine in a broken state to appear, and are quoted from the source;
 |---|---|---|---|
 | `0` | passed, or done | ok | kept |
 | `1` | failed | the code raised | reverted |
-| `2` | refused or misconfigured: nothing ran | refused, or no such session | refused |
+| `2` | refused, misconfigured or a command line it cannot read: nothing ran | refused, or no such session | refused |
 | `3` | still running (`testbench wait` follows it) | interrupted at `--timeout` | still running |
+
+Each command's own codes are in the [reference](reference.md#commands).
+
+## The command line
+
+`testbench` alone, or `testbench help`, lists every command in groups, with the ones to start with; `testbench help
+<command>` shows its options and examples.
+
+- `` testbench: no command 'rnu'; did you mean `testbench run smoke`? `testbench --help` lists the commands. `` - a
+  mistyped command. The suggestion is the whole command line, ready to run; for a word that is a subcommand it says
+  where it lives: `` no command 'start'; did you mean `testbench session start` or `testbench loop start`? ``
+- `` testbench: 'smoke' is not a command; the command comes first: `testbench run smoke`. `` - and for a plan's name
+  on its own, `` no command 'smoke'; smoke is a plan here: `testbench run smoke` runs it. ``
+- `testbench run: error: the following arguments are required: PLAN`, then `` `testbench run --help` says what it
+  takes, with examples. `` - every command's help ends with examples. `unrecognized arguments: --json` is the same:
+  `--json` (or `--format json`) is on `report`, `diff`, `history`, `estimate`, `exec` and `rescue`.
+- `argument --timeout/--wait: 'soon' is not a number` - times on the command line are seconds (`--wait`,
+  `--timeout`, `--debounce`) unless the option says minutes or hours (`--max-minutes`, `--max-hours`).
+- `<file> does not exist` and `<path> is a folder, not a file` - paths are relative to the folder testbench runs in.
+- `` testbench: the other way round: `testbench nb build cells train.ipynb` (the folder of cell files, then the
+  notebook to write) ``
+- `no recipe 'pytst' (did you mean pytest?); the recipes are ...`, `unknown client cusor (did you mean cursor?)` and
+  `` there is no llm-ap example (did you mean llm-app?); ... To copy tiny-model into a folder named llm-ap, say so:
+  `testbench demo tiny-model llm-ap`. `` - `testbench demo DIR` still copies tiny-model into DIR, unless DIR looks
+  like a typo of an example's name.
 
 ## Start with `testbench doctor`
 
@@ -159,7 +184,11 @@ A run that started writes a report; the failure is in it, first. `testbench repo
   `error` with `the driver process exited without finishing; see driver.log` *(from the code)* - the background
   driver died (killed, out of memory, the machine rebooted). `driver.log` in the run folder says why;
   `testbench cancel <run>` also stops any remote work it left.
-- `No plan '<plan>'. Plans: <list>` and `` run '<run>' matches 0 runs; `testbench runs` lists them ``.
+- `No plan 'smok' (did you mean smoke?). Plans: <list>` - from `run`, `estimate`, `watch`, `history` and `loop start`.
+- `` No run '<run>'. Run ids look like 20261101-091612-tests (the latest; a prefix is enough, or last, last~1).
+  `testbench runs` lists them `` - and for a plan's name where a run goes, `` tests is a plan, not a run; its latest
+  run is 20261101-091612-tests (a prefix of the id is enough) ``. `` run '2026' matches 3 runs (...); give more of
+  its id `` when a prefix is not enough.
 
 `testbench verify`:
 
@@ -167,14 +196,25 @@ A run that started writes a report; the failure is in it, first. `testbench repo
   `added after the run: <file>` (exit 1) - a file under the run's `steps/` was edited, deleted or added after
   the report was written. Run the plan again for evidence you can rely on.
 - `<run> has no recorded evidence to check (it ran before agent-testbench recorded hashes, or never finished)`.
+- `testbench: --repo goes with --attestation (whose workflow should have signed the report)` - `--repo` alone would
+  check nothing more.
 
 ## Live sessions
 
-- `` No session is running. Start one with `testbench session start`. ``
-- `<n> sessions are running (<names>); name one with -s` - `exec`, `files` and `session sync|install|shell`
+- `` No session is running. Start one with `testbench session start`. `` (`testbench session stop` with none running
+  says `no running sessions, so nothing to stop` and exits 0.)
+- `<n> sessions are running (<names>); name one with -s` - `exec`, `files` and `session stop|sync|install|shell`
   pick the only running session; with more, name it: `testbench exec -s gpu "..."`.
 - `session 'main' is already running on local; stop it first or use another name`
-- `` No session named '<name>'. `testbench session list` shows them. ``
+- `` No session named 'gp' (did you mean gpu?). `testbench session list` shows them. ``
+- `` testbench: nothing to run. Give exec the code (`testbench exec "print(1)"`), a file (-f train.py), notebook cells
+  (--cells nb.ipynb:1-3) or code on stdin (`testbench exec < script.py`). `` - `exec` with no code in a terminal
+  says so rather than wait for typed input.
+- `` testbench: --params is a JSON object, e.g. '{"EPOCHS": 2}'; got '{EPOCHS: 2}' `` (quote the keys) and
+  `--params goes with --cells`.
+- `testbench: files get REMOTE [LOCAL] - got 0 path(s)`, and `<path> does not exist on the session's machine` from
+  `files ls`.
+- `(pip exited 1)` at the end of `testbench session install` - pip's own error is above it; the exit code is 1.
 - `secrets not in this environment: ACME_API_KEY - export them first` - `--secret NAME` passes a variable from
   your environment; it was not set in the shell that ran testbench.
 - `TIMEOUT: the code was interrupted; the kernel and its variables are still there` (exit 3) - the call ran past

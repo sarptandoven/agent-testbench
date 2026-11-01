@@ -93,7 +93,7 @@ class Testbench:
         """The worst case of a plan and whether it may launch now: what `testbench estimate --json` prints."""
         cfg = self._cfg()
         if plan not in cfg["plans"]:
-            raise TestbenchError(f"No plan {plan!r}. Plans: {', '.join(cfg['plans'])}")
+            raise TestbenchError(C.no_plan(cfg, plan))
         with _plain():
             ok, message, est = budget.check_launch(cfg, plan, approve)
         return {**est, "allowed": ok, "message": message}

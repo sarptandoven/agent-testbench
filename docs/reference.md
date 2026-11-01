@@ -146,8 +146,9 @@ testbench files [-s NAME] ls [PATH] | get REMOTE [LOCAL] | put LOCAL REMOTE
 `.testbench/sessions/NAME/outputs/`, and for an error the exception, the line that raised it and the end of the
 traceback. Exit codes: 0 ok, 1 error, 3 interrupted at `--timeout` (the kernel and its variables survive), 2
 refused or no such session. Notebook cells are numbered among code cells from 1, with form fields set by
-`--params`. `sync` copies the project again after local edits; variables are kept. The kernel has the headless
-`google.colab` stand-in, so Colab notebooks run as they are.
+`--params`. `sync` copies the project again after local edits; variables are kept. Every session command also takes
+the session as `-s NAME` or `--session NAME`, and with no name picks the only running one. The kernel has the
+headless `google.colab` stand-in, so Colab notebooks run as they are.
 
 Each session's start is checked against the budget like a plan (worst case = `max_minutes` of its hardware), and
 its measured cost is written to the ledger when it stops. Its folder, `.testbench/sessions/NAME/`, holds
@@ -330,3 +331,73 @@ steps/NN-name/    log.txt, result.json, executed.ipynb, cellNN_imageK.png, downl
 
 `.testbench/ledger.jsonl` records every launch (worst case) and finish (estimated cost);
 `.testbench/NOTES.md` is the lab notebook (`testbench note`), the one file there worth committing.
+
+## Commands
+
+`testbench` alone (or `testbench help`) lists the commands in these groups, with the ones to start with;
+`testbench help COMMAND` (or `testbench COMMAND --help`) shows a command's options and examples. Options are spelled
+out in full: `--appr` is not `--approve`. A mistyped command gets the closest one as a whole command line (`testbench
+rnu smoke`: did you mean `testbench run smoke`?), words in the wrong order get the right order (`testbench smoke
+run`: the command comes first), and a mistyped plan, session, recipe, client or example name gets the closest one.
+`--json` and `--format json` are the same on every command with a JSON form (`report`, `diff`, `history`,
+`estimate`, `exec`, `rescue`); every session command takes `-s NAME` (also `--session NAME`).
+
+| command | what it does | exit codes besides 2 |
+|---|---|---|
+| **try it and set up** | | |
+| `demo [NAME] [DIR]`, `demo --list` | copy an example project to a new folder and run its free plan | 0 the plan did what the example expects (the `test-suite` plan fails on purpose), 1 it did not, 3 still running |
+| `init [--recipe NAME] [--add] [--force]` | write testbench.yaml (a plan for each thing it finds) and AGENTS.md | 0 |
+| `recipes [NAME]` | ready plans for a goal, with their worst case; or print one | 0 |
+| `connect CLIENT... [--user] [--dry-run]`, `connect --list` | register the MCP server in a client's config and write AGENTS.md | 0 |
+| `doctor` | what this machine can run; each `no` line says what to do | 0, whatever it found |
+| `mcp [--http]` | serve the commands as MCP tools | 0 when it stops |
+| **plans** | | |
+| `plans` | the plans, their hardware and worst case | 0 |
+| `run PLAN [--wait SECONDS] [--detach] [--approve]` | run a plan and print its report | 0 passed, 1 failed, 3 still running after `--wait` (and always with `--detach`) |
+| `wait [RUN] [--timeout SECONDS]` | follow a run (`--wait` is the same as `--timeout`) | 0 passed, 1 failed, 3 still running |
+| `status [RUN]` | one line about a run | 0 passed, 1 failed, cancelled, error or lost, 3 still running |
+| `runs [-n N]` | recent runs | 0 |
+| `cancel [RUN]` | stop a run, here and on its remote machine | 0, also when it had already ended |
+| `watch PLAN [--max-runs N]` | run a free plan again on every change | 0 stopped, or the last of `--max-runs` passed; 1 it did not |
+| **proof** | | |
+| `report [RUN] [--format md\|json\|html\|junit] [-o FILE]` | a run's report | 0, a failed run's report too |
+| `verify [RUN] [--attestation [--repo OWNER/REPO]]` | check the evidence against its recorded sha256 | 0 it matches, 1 it does not (2: it could not be checked) |
+| `diff [A B \| PLAN \| RUN] [--json]` | what changed between two runs | 0 |
+| `history PLAN [-n N] [--json]` | a plan's runs over time | 0 |
+| `ui [--open] [--serve [--port N]]` | every run as a page, or the live dashboard | 0 |
+| `export [RUN\|all] [--to mlflow\|wandb\|csv\|jsonl]` | a run in a tracker or a file | 0, 1 a target failed |
+| **live sessions** | | |
+| `session start [NAME] [--backend B] [--gpu G] ...` | start a kernel, inside the budget | 0 |
+| `session list` | sessions, their hardware, uptime and cost | 0 |
+| `session stop [NAME\|--all]` | stop one | 0, also when none was running |
+| `session sync`, `install PKG...`, `shell "CMD"` | copy the project again, pip install, run a shell command | 0; `install`: 1 when pip fails; `shell`: 0 once the command ran (its own exit code is not passed on) |
+| `exec CODE \| -f FILE \| --cells NB[:CELLS]` | run code in the session's kernel | 0 ok, 1 the code raised, 3 interrupted at `--timeout` (the kernel and its variables are kept) |
+| `files ls\|get\|put PATH...` | files on the session's machine | 0 |
+| **loops and notifications** | | |
+| `loop start PLAN --metric FILE:KEY --budget-usd N` | start a loop and run the baseline | 0 the baseline passed, 1 it did not (the loop still started), 3 still running |
+| `loop try "WHAT"` | commit the edits as a try and run the plan | 0 kept, 1 reverted, 3 still running |
+| `loop status`, `loop stop` | the tries so far; the report | 0; `status`: 3 while a try runs |
+| `notify test` | one test message to the `notify:` webhook | 0 accepted, 1 refused by the service |
+| **money** | | |
+| `estimate PLAN [--approve] [--json]` | a plan's worst case and whether it may launch now | 0 it may (2: it may not) |
+| `spend [-n N] [--modal]` | what runs and sessions have cost | 0 |
+| `prices [--update]` | the prices behind every estimate | 0 |
+| **notebooks and the lab notebook** | | |
+| `lint NOTEBOOK... [--strict]` | Colab and headless pitfalls | 0; with `--strict`, 1 when anything is found |
+| `rescue NOTEBOOK [--fix OUT] [--no-run]` | why a notebook does not run, and what to do | 0 it ran, 1 it failed or ran out of time (`--no-run`: something blocks it) |
+| `nb split\|build\|fields` | a notebook as plain cell files | 0 |
+| `note TEXT` | a line in `.testbench/NOTES.md` | 0 |
+
+## Exit codes
+
+Every command uses the same four, and the GitHub Action and the MCP server read them:
+
+| code | means |
+|---|---|
+| `0` | passed, or done |
+| `1` | failed: the run, the check or the code did not pass |
+| `2` | refused or bad input: nothing ran and nothing was spent; the message says what to do instead |
+| `3` | still running: `testbench wait RUN` follows it (for a loop's try, then `testbench loop status`) |
+
+A command line testbench cannot read (an unknown command or option, a missing argument, a value that is not a
+number) is `2` too, with the closest command or the usage, and where the examples are.

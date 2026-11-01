@@ -767,7 +767,9 @@ def main(clients: list, user: bool = False, dry_run: bool = False, list_: bool =
         return 0
     unknown = [c for c in clients if c not in CLIENTS and c not in UNSUPPORTED]
     if unknown:
-        print(f"testbench connect: unknown client {', '.join(unknown)}; one of {', '.join(CLIENTS)}", file=sys.stderr)
+        hint = difflib.get_close_matches(unknown[0], [*CLIENTS, *UNSUPPORTED], n=1)
+        print(f"testbench connect: unknown client {', '.join(unknown)}" + (f" (did you mean {hint[0]}?)" if hint else "")
+              + f"; one of {', '.join(CLIENTS)}", file=sys.stderr)
         return 2
     code, done = 0, []
     for i, key in enumerate(dict.fromkeys(clients)):

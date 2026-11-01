@@ -52,7 +52,8 @@ def resolve(root: Path, name: str | None) -> Path:
     if name:
         sdir = sessions_dir(root) / name
         if not (sdir / "state.json").exists():
-            raise SessionError(f"No session named {name!r}. `testbench session list` shows them.")
+            raise SessionError(f"No session named {name!r}{C.near(name, [s.name for s in all_sessions(root)])}. "
+                               "`testbench session list` shows them.")
         return sdir
     active = [s for s in all_sessions(root) if read(s).get("status") in ACTIVE]
     if len(active) == 1:

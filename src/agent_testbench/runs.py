@@ -56,12 +56,20 @@ def resolve(root: Path, run: str | None) -> Path:
     back = re.fullmatch(r"(?:last|latest)~(\d{1,9})", str(run))
     if back:
         if int(back.group(1)) >= len(runs):
-            raise FileNotFoundError(f"{run} is before the first run: there are {len(runs)} runs (`testbench runs` "
-                                    "lists them)")
+            raise FileNotFoundError(f"{run} is before the first run: there {'is' if len(runs) == 1 else 'are'} "
+                                    f"{len(runs)} run{'s' * (len(runs) != 1)} (`testbench runs` lists them)")
         return runs[-1 - int(back.group(1))]
     hits = [p for p in runs if p.name == run] or [p for p in runs if p.name.startswith(run)]
-    if len(hits) != 1:
-        raise FileNotFoundError(f"run {run!r} matches {len(hits)} runs; `testbench runs` lists them")
+    if len(hits) > 1:
+        raise FileNotFoundError(f"run {run!r} matches {len(hits)} runs ({', '.join(p.name for p in hits[-3:])}"
+                                f"{', ...' if len(hits) > 3 else ''}); give more of its id. `testbench runs` lists them")
+    if not hits:
+        of_plan = [p for p in runs if p.name.split("-", 2)[-1] == run]
+        raise FileNotFoundError(
+            f"{run} is a plan, not a run; its latest run is {of_plan[-1].name} (a prefix of the id is enough). "
+            "`testbench runs` lists them" if of_plan else
+            f"No run {run!r}. Run ids look like {runs[-1].name} (the latest; a prefix is enough, or last, last~1). "
+            "`testbench runs` lists them")
     return hits[0]
 
 
@@ -79,7 +87,7 @@ def launch(root: Path, cfg: dict, plan_name: str, approve: bool = False, foregro
            origin: dict | None = None) -> Path:
     """Start a run of a plan inside the budget. origin: what started it, kept in its state (a loop: {loop, try})."""
     if plan_name not in cfg["plans"]:
-        raise LaunchRefused(f"No plan {plan_name!r}. Plans: {', '.join(cfg['plans'])}")
+        raise LaunchRefused(C.no_plan(cfg, plan_name))
     plan = cfg["plans"][plan_name]
     source = provenance.source(root)                   # the code this run proves, before anything changes it
     with budget.launching():
