@@ -1,6 +1,8 @@
 """Bugs found where the 0.2.0 features meet each other and ordinary projects: each test failed before its fix."""
 import json
 
+import pytest
+
 from conftest import cli, git, make_notebook, score
 from agent_testbench import rescue as RS
 
@@ -77,3 +79,12 @@ def test_rescue_counts_the_project_s_own_code_as_local_not_as_packages_to_pip_in
         "import nosuchpkg_xyz"])
     assert [p["import"] for p in RS.read(top)["packages"]] == []
     assert [p["import"] for p in RS.read(sub)["packages"]] == ["nosuchpkg_xyz"], "a folder of data is not code"
+
+
+def test_a_refused_tool_argument_says_why_over_mcp(plain):
+    # mcp 2 passes only a ToolError's text on to the client; any other exception is a crash, reported as "Error
+    # executing tool run_plan" alone, so the agent never learnt why its plan name was refused.
+    pytest.importorskip("mcp")
+    from agent_testbench import tools
+    out = tools.call("run_plan", {"plan": "--approve"}, project_dir=plain)
+    assert "is not a name testbench uses" in out, out

@@ -20,8 +20,10 @@ from pydantic import BaseModel, Field
 
 try:                                         # mcp >= 2
     from mcp.server.mcpserver import Context, Image, MCPServer as _Server
+    from mcp.server.mcpserver.exceptions import ToolError
 except ImportError:                          # mcp 1.x
     from mcp.server.fastmcp import Context, FastMCP as _Server, Image
+    from mcp.server.fastmcp.exceptions import ToolError
 
 from . import config as C
 from .cli import render_exec
@@ -129,10 +131,14 @@ def _progress(ctx):
     return progress
 
 
+class BadName(ToolError, ValueError):
+    """A tool argument refused as a name. A ToolError, so the client is told why (mcp 2 hides any other error's text)."""
+
+
 def _name(value: str, what: str) -> str:
     """A plan, run or session name as a tool argument. Never an option: `--approve` as a name must not approve."""
     if value and not re.fullmatch(r"[A-Za-z0-9][\w.:-]{0,80}", value):
-        raise ValueError(f"{what} {value!r} is not a name testbench uses (letters, digits, - _ . : and no leading -)")
+        raise BadName(f"{what} {value!r} is not a name testbench uses (letters, digits, - _ . : and no leading -)")
     return value
 
 
