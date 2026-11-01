@@ -5,11 +5,14 @@ Three things, all at build time; no file in the repository is changed:
 - A line `--8<-- "PATH"` in a page (the notation of pymdownx.snippets) is replaced by the file at PATH, relative
   to the repository root. `--8<-- "PATH#anchor"` takes one section of it: the part under the heading whose anchor
   is `anchor`, up to the next heading of the same or a higher level (the heading line itself is left out, so the
-  page gives the section its own heading). This is how README.md becomes the home page without being copied.
+  page gives the section its own heading). This is how README.md's sections reach the home page without being
+  copied: docs/index.md opens with a landing screen of its own, then includes README.md section by section.
 - Links are written for GitHub: relative to the file they are in, which for README.md is the repository root.
   On the site, a link to a file that is a page of the site goes to that page; a link to any other file or
   folder of the repository goes to it on GitHub; web links are kept. So README.md's `docs/docker.md` becomes
-  `docker.md`, and `src/agent_testbench/schema/report-v1.schema.json` a link to that file on GitHub.
+  `docker.md`, and `src/agent_testbench/schema/report-v1.schema.json` a link to that file on GitHub. A file
+  included whole is that page; so is a file named in HOME (README.md is the home page, `../README.md#loops`
+  goes to `index.md#loops`, so the home page keeps README.md's headings).
 - In a table, GitHub needs `\|` for a pipe inside code (`html\|junit`); Python-Markdown shows the backslash, so it
   is dropped there (Python-Markdown already keeps a pipe inside code from splitting the cell).
 
@@ -26,6 +29,7 @@ from markdown.extensions.toc import slugify
 from mkdocs.exceptions import PluginError
 
 BRANCH = "main"                                                       # what GitHub links point at
+HOME = {"README.md": "index.md"}                     # files whose page includes them section by section, not whole
 INCLUDE = re.compile(r'^[ \t]*--8<--[ \t]+"([^"#]+)(?:#([^"]+))?"[ \t]*$', re.M)
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t#]*$")
@@ -45,6 +49,9 @@ def on_files(files, config):
         for m in INCLUDE.finditer((docs / uri).read_text(encoding="utf-8")):
             if not m.group(2):
                 whole.setdefault(m.group(1), uri)
+    for path, uri in HOME.items():
+        if uri in pages:
+            whole.setdefault(path, uri)
     _site.update(root=root, docs=docs.relative_to(root).as_posix(), pages=pages, whole=whole,
                  github=config.repo_url.rstrip("/"))
     return files

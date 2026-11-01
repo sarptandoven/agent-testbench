@@ -70,9 +70,11 @@ anchor or a page left out of the nav fails it) and, on pushes to `main`, deploys
    (`site_url` in `mkdocs.yml`; change it there for a custom domain).
 3. To read it locally: `pip install -r docs/requirements.txt && mkdocs serve`.
 
-The pages are the repository's own Markdown: `docs/index.md` is README.md, and the Loops, Proof records, ssh and
-Plugins pages take their sections from README.md and docs/reference.md. `docs/hooks.py` does this at build time and
-points GitHub links at the site's pages, so edit README.md and docs/reference.md, never a copy.
+The pages are the repository's own Markdown: `docs/index.md` is a landing screen of its own followed by README.md's
+sections, and the Loops, Proof records, ssh and Plugins pages take their sections from README.md and
+docs/reference.md. `docs/hooks.py` does this at build time and points GitHub links at the site's pages (a link to
+README.md goes to the home page), so edit README.md and docs/reference.md, never a copy. A new section of README.md
+needs two lines in `docs/index.md` to appear on the site.
 
 Material for MkDocs reaches end of life on 2027-05-05; its build says so, and names Zensical, from the same team,
 as its successor (verified: printed by mkdocs-material 9.8.0). The workflow hides that banner; plan the move
