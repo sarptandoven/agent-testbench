@@ -322,6 +322,11 @@ def cmd_lint(a):
     return worst if a.strict else 0
 
 
+def cmd_rescue(a):
+    from . import rescue
+    return rescue.main(a)
+
+
 def cmd_nb(a):
     if a.nb_cmd == "split":
         files = NB.split(a.notebook, a.cells_dir)
@@ -634,6 +639,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("notebooks", nargs="+")
     p.add_argument("--strict", action="store_true", help="exit 1 when anything is found")
     p.set_defaults(fn=cmd_lint)
+    p = sub.add_parser("rescue", help="why a notebook does not run and what to do: read it, run it top to bottom here, "
+                                      "diagnose the first failure")
+    p.add_argument("notebook")
+    p.add_argument("--timeout", type=float, default=120, help="seconds the run may take (default 120)")
+    p.add_argument("--fix", metavar="OUT.ipynb", help="also write a copy with mechanical fixes only (cells never moved)")
+    p.add_argument("--json", action="store_true", help="the diagnosis as JSON")
+    p.add_argument("--no-run", action="store_true", help="only read it; run nothing (for a notebook nobody has reviewed)")
+    p.set_defaults(fn=cmd_rescue)
     p = sub.add_parser("nb", help="notebooks as plain cell files: split, build, fields")
     nsub = p.add_subparsers(dest="nb_cmd", required=True)
     q = nsub.add_parser("split", help="write a notebook's cells as NN_name.py / .md files")

@@ -26,6 +26,7 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Expectations: expectations.md
+  - Rescue a notebook: rescue.md
   - Backends:
       - Overview: backends.md
       - Docker: docker.md

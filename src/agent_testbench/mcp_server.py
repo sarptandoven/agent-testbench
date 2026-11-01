@@ -201,6 +201,19 @@ async def lint_notebook(notebook: str, project_dir: str = ".") -> str:
     return _text(*await _cli(project_dir, ["lint", notebook]))
 
 
+@server.tool(description="Find out why a notebook does not run, and what to do. Reads it (cells run out of order, "
+                         "names used before the cell that makes them, missing packages with their pip names, Colab-only "
+                         "parts, files it reads that are not there, input()), then runs it top to bottom in a fresh kernel "
+                         "on this machine within timeout_seconds and diagnoses the first failing cell. Returns the "
+                         "diagnosis and a plan to paste into testbench.yaml. fix_to writes a copy with mechanical fixes "
+                         "only (never the original); run=false only reads it.")
+async def rescue_notebook(notebook: str, project_dir: str = ".", timeout_seconds: float = 120, fix_to: str = "",
+                          run: bool = True, as_json: bool = False) -> str:
+    argv = ["rescue", notebook, "--timeout", str(timeout_seconds)] + (["--fix", fix_to] if fix_to else []) \
+        + ([] if run else ["--no-run"]) + (["--json"] if as_json else [])
+    return _text(*await _cli(project_dir, argv))
+
+
 @server.tool(description="Add a line to the project's lab notebook (.testbench/NOTES.md): what was tried and learned.")
 async def add_note(text: str, project_dir: str = ".") -> str:
     return _text(*await _cli(project_dir, ["note", text]))
