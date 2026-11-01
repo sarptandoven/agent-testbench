@@ -29,6 +29,7 @@ nav:
   - Why agent-testbench: why.md
   - Use cases: use-cases.md
   - Getting started: getting-started.md
+  - Examples: examples.md
   - Recipes: recipes.md
   - Other coding agents: clients.md
   - Expectations: expectations.md

@@ -66,3 +66,6 @@ Its answer, condensed:
 
 Checked afterwards: the only change in the repository is that line; the proof run's report records the commit
 and that uncommitted changes were part of it, which is exactly what the agent said.
+
+To try it yourself: `testbench demo test-suite` sets up a package like this one, with the same kind of bug, a plan
+for this machine and a `sandbox` plan for Docker ([examples](examples.md#test-suite)).

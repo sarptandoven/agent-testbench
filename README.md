@@ -35,6 +35,7 @@ was made, the code and Python it ran, the evidence hash, and the confusion matri
 ```bash
 pip install "agent-testbench[all]"         # or: uv tool install "agent-testbench[all]"
 testbench demo                             # a small project, run for free here - see it work in a minute
+testbench demo llm-app                     # or web-app, test-suite: your kind of project (testbench demo --list)
 cd your-project && testbench init          # looks at the project and writes plans that already check something
 testbench run <plan>                       # the report: what passed, what failed and why, what it cost
 ```
@@ -192,7 +193,9 @@ platform and packages where it ran, and the sha256 of every evidence file, in a 
 [JSON Schema](src/agent_testbench/schema/report-v1.schema.json). `testbench verify` says whether the evidence still
 matches. `report --format html` writes one page with the plots inline, `--format junit` feeds CI test reports,
 `testbench history <plan>` shows how the checked numbers moved, and `testbench ui` writes static pages for every
-run with a trend line per number. `testbench export --to mlflow|wandb|csv|jsonl` (or `export:` in testbench.yaml,
+run with a trend line per number; `testbench ui --serve` shows them live at http://127.0.0.1:8770/ - what is
+running, its log as it grows, sessions, the loop, and today's spend against your limits - read-only and for this
+machine only ([docs/dashboard.md](docs/dashboard.md)). `testbench export --to mlflow|wandb|csv|jsonl` (or `export:` in testbench.yaml,
 after every run) puts runs where you already track experiments, with the evidence attached
 ([docs/export.md](docs/export.md)).
 
@@ -268,6 +271,8 @@ plugin, which adds the `iterate` and `setup` skills.
 - [docs/clients.md](docs/clients.md), [docs/python-api.md](docs/python-api.md) - other coding agents, the Python API
   and LLM tool definitions
 - [docs/tour.md](docs/tour.md) - a five-minute tour with real screenshots, from install to a proved fix
+- [docs/examples.md](docs/examples.md) - the examples: an LLM app on a mock SDK, a web form in headless Chromium, a
+  failing test suite for your agent to fix, a Colab-style notebook
 - [docs/why.md](docs/why.md), [docs/use-cases.md](docs/use-cases.md), [docs/faq.md](docs/faq.md),
   [docs/troubleshooting.md](docs/troubleshooting.md)
 - [docs/github-action.md](docs/github-action.md) - the GitHub Action: inputs, outputs, what reviewers see

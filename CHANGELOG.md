@@ -2,6 +2,16 @@
 
 ## 0.2.0 - not yet released
 
+- `testbench demo [NAME] [DIR]` and `demo --list`: three more free examples beside tiny-model, each about a minute:
+  `llm-app` (an Anthropic SDK support bot whose tool-use loop is proved against the mock SDK, no API key),
+  `web-app` (a form filled in and checked in headless Chromium, with screenshots) and `test-suite` (a pytest suite
+  with a planted bug, judged by `junit:` here and in a Docker sandbox with no network, for your agent to fix).
+  All ship in the wheel; gallery: docs/examples.md.
+- `testbench ui --serve [--port 8770] [--open]`: a live, read-only dashboard on 127.0.0.1 - today's spend against
+  the limits, runs going now with their growing log, live sessions, the loop and its stopping rules, then each
+  run's report. Standard library only; it refuses other Host headers, serves only reports and step evidence, and
+  cannot launch, approve, cancel or spend. See docs/dashboard.md.
+- docs/tour.md: a five-minute tour with real screenshots; the README shows a real HTML report.
 - Recipes: `testbench recipes` lists starting points by goal (pytest, notebook-colab, pytorch-train, hf-finetune,
   web-app, llm-eval, docker-sandbox, ssh-gpu-box, data-pipeline), each a ladder of plans with real checks and each
   plan's worst case. `testbench init --recipe NAME` writes one (with the project's own notebook or training
