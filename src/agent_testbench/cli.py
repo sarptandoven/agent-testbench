@@ -330,15 +330,17 @@ def cmd_nb(a):
         NB.build(a.cells_dir, a.notebook)
         print(f"built {a.notebook}")
     elif a.nb_cmd == "fields":
-        import nbformat
-        nb = nbformat.read(a.notebook, as_version=4)
-        n = 0
-        for c in nb.cells:
-            if c.cell_type != "code":
-                continue
-            n += 1
-            for name, value in NB.form_fields(c.source).items():
-                print(f"cell {n}: {name} = {value}")
+        nb = NB.read(a.notebook)
+        found = NB.fields(nb)
+        for f in found:
+            kind = "Colab form field" if f["kind"] == "form" else "papermill parameter"
+            print(f"cell {f['cell']}: {f['name']} = {f['value']}  ({kind})")
+        if not found:
+            print(f"{a.notebook}: nothing params can set (no `NAME = value  #@param` form fields, no code cell tagged "
+                  "`parameters`)")
+        if NB.language(nb) != "python":
+            print(f"{a.notebook} is in {NB.language(nb)}: params are set only in Python notebooks; give it values with "
+                  "the step's env: instead")
     return 0
 
 
@@ -386,7 +388,7 @@ def _session_cmd(fn):
         from .session_backends import SessionError
         try:
             return fn(a)
-        except (SessionError, C.ConfigError, NB.ParamError) as exc:
+        except (SessionError, C.ConfigError, NB.NotebookError) as exc:
             print(f"testbench: {exc}")
             return 2
     return wrapped
@@ -630,7 +632,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-n", type=int, default=10)
     p.add_argument("--modal", action="store_true", help="also read Modal's own bill for this project's app")
     p.set_defaults(fn=cmd_spend)
-    p = sub.add_parser("lint", help="check notebooks for Colab and headless pitfalls")
+    p = sub.add_parser("lint", help="check notebooks (.ipynb, percent-format .py) for Colab and headless pitfalls")
     p.add_argument("notebooks", nargs="+")
     p.add_argument("--strict", action="store_true", help="exit 1 when anything is found")
     p.set_defaults(fn=cmd_lint)
@@ -642,7 +644,7 @@ def build_parser() -> argparse.ArgumentParser:
     q = nsub.add_parser("build", help="assemble cell files into a notebook")
     q.add_argument("cells_dir")
     q.add_argument("notebook")
-    q = nsub.add_parser("fields", help="list a notebook's Colab form fields")
+    q = nsub.add_parser("fields", help="list what params can set: Colab form fields and papermill parameters")
     q.add_argument("notebook")
     p.set_defaults(fn=cmd_nb)
     p = sub.add_parser("note", help="add a line to the project's lab notebook (.testbench/NOTES.md)")
@@ -678,7 +680,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-s", "--session")
     p.add_argument("-f", "--file", help="a .py file to run")
     p.add_argument("--cells", help="notebook cells, e.g. train.ipynb:3-5 (code cells from 1); train.ipynb alone runs all")
-    p.add_argument("--params", help='form fields for --cells, as JSON: \'{"EPOCHS": 2}\'')
+    p.add_argument("--params", help='params for --cells (form fields, papermill parameters), as JSON: \'{"EPOCHS": 2}\'')
     p.add_argument("--timeout", type=float, default=600, help="seconds per cell before it is interrupted (default 600)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_exec)
@@ -732,7 +734,7 @@ def main(argv=None):
     a = build_parser().parse_args(argv)
     try:
         sys.exit(a.fn(a))
-    except (C.ConfigError, FileNotFoundError, NB.ParamError) as exc:
+    except (C.ConfigError, FileNotFoundError, NB.NotebookError) as exc:
         print(f"testbench: {exc}", file=sys.stderr)
         sys.exit(2)
 

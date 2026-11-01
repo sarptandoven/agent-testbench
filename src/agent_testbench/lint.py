@@ -9,7 +9,7 @@ from pathlib import Path
 
 import nbformat
 
-from .notebook import PARAM
+from .notebook import PARAM, cell_tags, parameter_names, read
 
 RULES = {
     "L001": "large outputs saved in the notebook",
@@ -20,11 +20,13 @@ RULES = {
     "L006": "child Python processes inherit Colab's inline matplotlib backend",
     "L007": "form field that cannot be set",
     "L008": "hard-coded /content path",
+    "L009": "papermill parameters cell that params cannot use",
 }
 
 
 def lint(path: str | Path) -> list[dict]:
-    nb = nbformat.read(str(path), as_version=4)
+    """Findings for an .ipynb or a percent-format .py (cells numbered among code cells from 1)."""
+    nb = read(path)
     out = []
 
     def add(rule, cell, msg):
@@ -69,6 +71,13 @@ def lint(path: str | Path) -> list[dict]:
     names = [m.group("name") for _, c in code for m in PARAM.finditer(c.source)]
     for name in sorted({x for x in names if names.count(x) > 1}):
         add("L007", None, f"form field {name} is defined on {names.count(name)} lines; a plan cannot tell which to set.")
+    tagged = [n for n, (_, c) in enumerate(code, 1) if "parameters" in cell_tags(c)]
+    if len(tagged) > 1:
+        add("L009", tagged[1], f"code cells {', '.join(map(str, tagged))} are all tagged `parameters`; papermill and "
+                               f"testbench inject values after the first only (cell {tagged[0]}). Keep one.")
+    if tagged and not parameter_names(code[tagged[0] - 1][1].source):
+        add("L009", tagged[0], "this cell is tagged `parameters` but assigns nothing at its top level (NAME = value), "
+                               "so params has nothing to set. Put the defaults there, one per line.")
     return out
 
 

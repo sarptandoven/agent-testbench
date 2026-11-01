@@ -1,6 +1,7 @@
 """testbench init: look at a project and write plans that already check something.
 
-It finds notebooks (a lint step, then the notebook with its form fields listed and the files it writes expected),
+It finds notebooks, .ipynb or percent-format .py (a lint step, then the notebook with its parameters - Colab form
+fields, papermill parameters - listed and the files it writes expected),
 a pytest suite (every test must pass), a web app (a static index.html, or an npm dev/start script: opened in
 headless Chromium, checked for console errors, screenshotted) and training scripts (train.py and the like: a
 short run to fill in). What it could not know - the numbers that mean "working" - is left as a marked line to
@@ -33,14 +34,15 @@ def _slug(text: str) -> str:
 
 
 def _notebook(root: Path, nb: Path) -> tuple[str, str, str]:
-    import nbformat
-    from .notebook import form_fields
+    from . import notebook as NB
     rel = nb.relative_to(root).as_posix()
     try:
-        cells = [c.source for c in nbformat.read(str(nb), as_version=4).cells if c.cell_type == "code"]
+        parsed = NB.read(nb)
+        cells, found = [c.source for c in parsed.cells if c.cell_type == "code"], NB.fields(parsed)
     except Exception:
-        cells = []
-    fields = {k: v for src in cells for k, v in form_fields(src).items()}
+        cells, found = [], []
+    fields = {f["name"]: f["value"] for f in found}
+    forms, papermill = (sum(f["kind"] == k for f in found) for k in ("form", "parameter"))
     made = sorted({m for src in cells for m in WRITTEN.findall(src) if not m.startswith(("http", "/"))})
     name = f"{_slug(nb.stem)}-local"
     lines = [f"  {name}:", "    backend: local", f"    description: lint {rel}, then run it top to bottom on this machine",
@@ -48,7 +50,8 @@ def _notebook(root: Path, nb: Path) -> tuple[str, str, str]:
              f"      - name: {_slug(nb.stem)}", f"        notebook: {_q(rel)}", "        max_minutes: 20"]
     if fields:
         shown = ", ".join(f"{k}: {v}" for k, v in list(fields.items())[:6])
-        lines.append(f"        # params: {{{shown}}}      # its form fields; set smaller values for a quick check")
+        what = "its form fields" if not papermill else "its papermill parameters" if not forms else "its parameters"
+        lines.append(f"        # params: {{{shown}}}      # {what}; set smaller values for a quick check")
     if made:
         lines.append("        artifacts: [" + ", ".join(_q(f"**/{Path(m).name}") for m in made[:6]) + "]")
     lines.append("        expect:")
@@ -58,9 +61,22 @@ def _notebook(root: Path, nb: Path) -> tuple[str, str, str]:
     metrics = [m for m in made if m.endswith(".json")]
     where = _q(f"**/{Path(metrics[0]).name}") if metrics else "outputs/metrics.json"
     lines.append(f"          # json: {{{where}: {{accuracy: \">= 0.9\"}}}}   # FILL IN: the number that means it works")
-    found = f"notebook {rel}" + (f" ({len(fields)} form field(s)" if fields else "") + \
-        (f"{', ' if fields else ' ('}writes {', '.join(Path(m).name for m in made[:3])})" if made else (")" if fields else ""))
-    return name, "\n".join(lines) + "\n", found
+    bits = ([f"{forms} form field(s)"] if forms else []) + ([f"{papermill} papermill parameter(s)"] if papermill else []) \
+        + ([f"writes {', '.join(Path(m).name for m in made[:3])}"] if made else [])
+    return name, "\n".join(lines) + "\n", f"notebook {rel}" + (f" ({', '.join(bits)})" if bits else "")
+
+
+def _percent_notebooks(root: Path, limit: int) -> list[Path]:
+    """Percent-format .py notebooks (`# %%` cells), except those paired with an .ipynb of the same name."""
+    from .notebook import plain_python
+    out = []
+    for p in _walk(root, "*.py", 2000) if limit > 0 else []:
+        if p.with_suffix(".ipynb").exists() or p.stat().st_size > 2_000_000 or plain_python(p):
+            continue
+        out.append(p)
+        if len(out) == limit:
+            break
+    return out
 
 
 def _q(text: str) -> str:
@@ -127,7 +143,8 @@ def _trainer(root: Path) -> tuple[str, str, str] | None:
 def detect(root: Path) -> list[tuple[str, str, str]]:
     """(plan name, plan YAML, what was found) for everything init recognised, in a sensible order."""
     root = Path(root)
-    found = [_notebook(root, nb) for nb in _walk(root, "*.ipynb", 5)]
+    notebooks = _walk(root, "*.ipynb", 5)
+    found = [_notebook(root, nb) for nb in notebooks + _percent_notebooks(root, 5 - len(notebooks))]
     for probe in (_pytest, _trainer, _web):
         hit = probe(root)
         if hit:

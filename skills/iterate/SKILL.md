@@ -85,8 +85,9 @@ during a loop to make tries pass.
 ## Notebooks
 
 Edit notebooks as cell files, not JSON: `testbench nb split nb.ipynb cells/`, edit `cells/NN_*.py`,
-`testbench nb build cells/ nb.ipynb`. Colab form fields (`NAME = value  #@param`) are set with `params:` in a
-plan or `--params` in a session. `testbench lint nb.ipynb` catches what breaks on Colab. The notebook must
+`testbench nb build cells/ nb.ipynb`. Colab form fields (`NAME = value  #@param`) and papermill parameters (a
+cell tagged `parameters`) are set with `params:` in a plan or `--params` in a session; `testbench nb fields nb.ipynb`
+lists them. A percent-format `.py` (`# %%` cells) runs as a notebook too. `testbench lint nb.ipynb` catches what breaks on Colab. The notebook must
 still work on Colab for a person.
 
 ## Proof for a person
