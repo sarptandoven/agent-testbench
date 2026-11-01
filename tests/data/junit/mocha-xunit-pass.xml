@@ -1,0 +1,5 @@
+<testsuite name="Mocha Tests" tests="3" failures="0" errors="0" skipped="1" timestamp="Sun, 01 Nov 2026 08:13:10 GMT" time="0.001">
+<testcase classname="sum" name="adds 1 + 2 to equal 3" file="/tmp/tb-lang-tools/proj/mocha/test/sum.test.js" time="0"/>
+<testcase classname="sum" name="adds negatives" file="/tmp/tb-lang-tools/proj/mocha/test/sum.test.js" time="0"/>
+<testcase classname="sum" name="handles big numbers" file="/tmp/tb-lang-tools/proj/mocha/test/sum.test.js" time="0"><skipped/></testcase>
+</testsuite>

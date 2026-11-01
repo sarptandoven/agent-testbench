@@ -1,0 +1,74 @@
+# Recipe hf-finetune: a LoRA fine-tune ladder with Hugging Face - a tiny model for a few CPU steps here, then the GPU.
+#
+# Proves: finetune-smoke - the training loop, the evaluation and saving the adapter all work, with a tiny random model
+#   for a few steps on this machine's CPU (free, a minute or two); finetune-gpu-check - the real base model loads and
+#   trains on a Modal T4 with the GPU busy, its eval loss goes below where the base model starts, and the adapter is
+#   saved; finetune-full - the real fine-tune lands on the eval loss of a run you trust, within a tolerance.
+# FILL IN: finetune.py's flags (the ones below are an example; init puts the training script it finds in the project
+#   here), the base model, the eval losses that mean it works, the packages finetune.py imports (modal.pip, pinned)
+#   and the full run's GPU and max_minutes.
+# Expects finetune.py to write <output-dir>/metrics.json ({"eval_loss": ..., "train_loss": ...}) and the adapter with
+#   PEFT's save_pretrained into <output-dir>/adapter (adapter_config.json, adapter_model.safetensors).
+# Models: hf-internal-testing/tiny-random-LlamaForCausalLM is a randomly initialised Llama small enough for a CPU,
+#   built for tests like this one; use a tiny model of your base model's architecture if it is not a Llama. On Modal,
+#   HF_HOME points at the project's volume, so the base model is downloaded once. Gated models need a token: add
+#   `secrets: [HF_TOKEN]` to the step (exported in your shell for local runs, a Modal secret of that name on Modal).
+# Costs: finetune-smoke is free; finetune-gpu-check is about $0.26 at worst (10 minutes of a T4 plus start-up);
+#   finetune-full about $1.67 at worst (60 minutes of an A10), above the default ask_above_usd of $0.50, so a person
+#   approves it. `testbench recipes` prints each worst case at your project's prices.
+
+# The image for the Modal plans, built once and reused. These versions are on PyPI and their stated requirements
+# agree (checked in October 2026); install the same ones here, so the free smoke plan is where an incompatibility
+# between them shows.
+modal:
+  python: "3.11"
+  pip: [torch==2.14.1, transformers==5.20.2, peft==0.21.2, accelerate==1.15.0, datasets==5.1.0]   # FILL IN: what finetune.py imports
+  cpu: 4
+  memory_gb: 32                            # loading a base model needs room before it moves to the GPU
+
+plans:
+  finetune-smoke:
+    backend: local
+    description: a few LoRA steps of a tiny random model on this machine's CPU - train, eval and save all work (free)
+    steps:
+      - name: lora tiny
+        run: python finetune.py --model hf-internal-testing/tiny-random-LlamaForCausalLM --max-steps 20 --eval-steps 10 --max-samples 64 --batch-size 2 --lora-r 4 --output-dir outputs/finetune-smoke    # FILL IN: your flags
+        env: {CUDA_VISIBLE_DEVICES: "", HF_HUB_DISABLE_TELEMETRY: "1"}
+        max_minutes: 15
+        artifacts: [outputs/finetune-smoke/metrics.json, outputs/finetune-smoke/adapter/adapter_config.json]
+        expect:
+          files: [outputs/finetune-smoke/adapter/adapter_config.json, outputs/finetune-smoke/adapter/adapter_model.safetensors]
+          json:
+            outputs/finetune-smoke/metrics.json:
+              eval_loss: "< 15"            # a random tiny model stays near ln(its vocabulary), about 10.4; NaN, inf or no number fails
+              train_loss: "< 15"
+
+  finetune-gpu-check:
+    backend: modal
+    gpu: T4
+    description: the real base model trains on a Modal T4 for a few minutes - GPU busy, eval loss down, adapter saved (cents)
+    steps:
+      - name: lora short
+        run: HF_HOME="${TESTBENCH_CACHE:-$HOME/.cache}/huggingface" python finetune.py --model Qwen/Qwen2.5-0.5B --max-steps 100 --eval-steps 50 --max-samples 2000 --batch-size 8 --lora-r 16 --fp16 --output-dir outputs/finetune-gpu-check    # FILL IN: your base model and flags; a T4 has no bfloat16
+        max_minutes: 10
+        artifacts: [outputs/finetune-gpu-check/metrics.json]
+        expect:
+          files: [outputs/finetune-gpu-check/adapter/adapter_config.json, outputs/finetune-gpu-check/adapter/adapter_model.safetensors]
+          gpu: {busy_pct: ">= 50"}
+          json:
+            outputs/finetune-gpu-check/metrics.json: {eval_loss: "< 2.5"}   # FILL IN: below the base model's own eval loss
+
+  finetune-full:
+    backend: modal
+    gpu: A10
+    description: the full LoRA fine-tune on a Modal A10; a person approves its worst case before it starts
+    steps:
+      - name: lora full
+        run: HF_HOME="${TESTBENCH_CACHE:-$HOME/.cache}/huggingface" python finetune.py --model Qwen/Qwen2.5-0.5B --epochs 3 --eval-steps 200 --batch-size 16 --lora-r 16 --bf16 --output-dir outputs/finetune-full    # FILL IN
+        max_minutes: 60                    # FILL IN: what the run needs plus a margin; also its hard stop and its cost bound
+        artifacts: [outputs/finetune-full/metrics.json, "outputs/finetune-full/adapter/*"]    # a LoRA adapter is small: bring it back
+        expect:
+          files: [outputs/finetune-full/adapter/adapter_model.safetensors]
+          gpu: {busy_pct: ">= 70"}
+          json:
+            outputs/finetune-full/metrics.json: {eval_loss: "~= 1.35 +- 0.05"}   # FILL IN: a trusted run's eval loss, and its spread

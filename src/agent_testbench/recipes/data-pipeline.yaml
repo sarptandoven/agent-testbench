@@ -1,0 +1,47 @@
+# Recipe data-pipeline: a pipeline that writes files - checked on a sample kept in the repository, then on the full data.
+#
+# Proves: pipeline-sample - on a small sample committed next to the code, the pipeline writes every output, reads
+#   every input row, keeps as many as it should and finishes fast, so a change that drops rows or breaks a join fails
+#   in seconds; pipeline-full - on the real data the row counts are in the range they should be, and it finishes in
+#   the time it should.
+# FILL IN: the pipeline command and its outputs, the sample's exact row count, the share of rows a run may drop, the
+#   full data's path and the range of its counts.
+# Expects the pipeline to write <out>/summary.json ({"rows_in": ..., "rows_out": ..., "dropped_pct": ...}) next to its
+#   outputs: a summary like this is the cheapest way to make a pipeline checkable.
+# Costs: nothing; it runs on this machine. For data that lives elsewhere, the same plan runs on `backend: ssh` (the
+#   machine with the data; see the ssh-gpu-box recipe) or `backend: docker` with the data mounted read-only
+#   (`docker: {run_args: [-v, /srv/data:/data:ro]}`).
+
+plans:
+  pipeline-sample:
+    backend: local
+    description: the pipeline on the committed sample - every output written, every row accounted for (seconds)
+    steps:
+      - name: run on the sample
+        run: python pipeline.py --input data/sample.csv --out outputs/sample    # FILL IN: your pipeline's command
+        max_minutes: 5
+        artifacts: [outputs/sample/summary.json]
+        expect:
+          files: [outputs/sample/clean.csv, outputs/sample/summary.json]    # FILL IN: what it writes
+          json:
+            outputs/sample/summary.json:
+              rows_in: ">= 1"              # FILL IN: the sample's row count, exactly (rows_in: 1000)
+              rows_out: "> 0"
+              dropped_pct: "<= 5"          # FILL IN: the share of rows a run may drop as invalid, in %
+          duration: {seconds: "<= 60"}
+
+  pipeline-full:
+    backend: local
+    description: the pipeline on the full data - counts in range, finished in time
+    steps:
+      - name: run on the full data
+        run: python pipeline.py --input data/full --out outputs/full    # FILL IN
+        max_minutes: 60                    # FILL IN: what it needs plus a margin; the step is stopped there
+        artifacts: [outputs/full/summary.json]
+        expect:
+          files: [outputs/full/summary.json]
+          json:
+            outputs/full/summary.json:
+              rows_in: "between 900000 and 1100000"     # FILL IN: the range a normal day's data is in
+              dropped_pct: "<= 2"
+          duration: {minutes: "<= 45"}

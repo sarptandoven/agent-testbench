@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sarptandoven/agent-testbench/blob/main/src/agent_testbench/schema/report-v1.schema.json",
+  "title": "agent-testbench run report, version 1",
+  "description": "report.json of a run: what ran, on which code and machine, what passed and failed and why, what it cost, and the evidence it left. Fields may be added in later versions; readers should ignore fields they do not know.",
+  "type": "object",
+  "required": ["schema_version", "testbench_version", "run_id", "plan", "backend", "status", "started", "steps"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "testbench_version": {"type": "string"},
+    "run_id": {"type": "string", "description": "YYYYmmdd-HHMMSS-plan; the run folder's name"},
+    "plan": {"type": "string"},
+    "backend": {"type": "string", "description": "local, modal, colab, ssh, or an installed backend"},
+    "gpu": {"type": ["string", "null"]},
+    "status": {"enum": ["passed", "failed", "cancelled", "error", "running"]},
+    "started": {"type": "number", "description": "Unix time"},
+    "finished": {"type": "number"},
+    "minutes": {"type": "number"},
+    "stopped_because": {"type": ["string", "null"]},
+    "launch_error": {"type": "string"},
+    "skipped": {"type": "array", "items": {"type": "string"}, "description": "steps that never ran"},
+    "workdir": {"type": "string"},
+    "cost_usd": {"type": "number", "description": "estimated: time on the hardware x its price"},
+    "worst_case_usd": {"type": ["number", "null"], "description": "the bound checked before launch"},
+    "approved": {"type": "boolean", "description": "a person approved a cost above the threshold"},
+    "remote_stop": {"type": ["string", "null"], "description": "the hard stop on the remote side, in words"},
+    "source": {
+      "description": "the project's code at launch; null outside a git repository",
+      "type": ["object", "null"],
+      "required": ["commit", "dirty"],
+      "properties": {
+        "commit": {"type": "string"},
+        "branch": {"type": "string"},
+        "dirty": {"type": "boolean", "description": "uncommitted changes or untracked files were part of the run"},
+        "changes_sha256": {"type": ["string", "null"], "description": "sha256 of the diff against the commit and the untracked files"},
+        "untracked_files": {"type": "integer"}
+      }
+    },
+    "environment": {
+      "description": "where the plan's code ran (recorded on that machine)",
+      "type": "object",
+      "properties": {
+        "python": {"type": "string"},
+        "implementation": {"type": "string"},
+        "platform": {"type": "string"},
+        "machine": {"type": "string"},
+        "executable": {"type": "string"},
+        "packages": {"type": "integer"},
+        "packages_sha256": {"type": "string", "description": "sha256 of the sorted name==version list"},
+        "package_versions": {"type": "object", "additionalProperties": {"type": "string"},
+                             "description": "every installed package's version, by lowercase name (testbench diff names the ones that changed)"}
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "description": "every file under steps/ when the run was closed",
+      "items": {
+        "type": "object",
+        "required": ["path", "bytes", "sha256"],
+        "properties": {"path": {"type": "string"}, "bytes": {"type": "integer"}, "sha256": {"type": "string"}}
+      }
+    },
+    "evidence_sha256": {"type": "string", "description": "sha256 over every evidence path and hash, in order"},
+    "delta": {
+      "type": "object",
+      "description": "against the previous finished run of the same plan; empty for the first",
+      "properties": {
+        "previous_run": {"type": ["string", "null"]},
+        "previous_status": {"type": ["string", "null"]},
+        "fixed": {"type": "array", "items": {"type": "string"}},
+        "broke": {"type": "array", "items": {"type": "string"}},
+        "still_failing": {"type": "array", "items": {"type": "string"}},
+        "metrics_moved": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "number"}}}
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "kind", "status"],
+        "properties": {
+          "name": {"type": "string"},
+          "kind": {"enum": ["notebook", "run", "web"]},
+          "status": {"enum": ["passed", "failed", "timeout", "error"]},
+          "dir": {"type": "string", "description": "the step's folder, relative to the run folder"},
+          "minutes": {"type": "number"},
+          "exit_code": {"type": ["integer", "null"]},
+          "error": {
+            "type": ["object", "null"],
+            "properties": {
+              "cell": {"type": ["integer", "null"]},
+              "ename": {"type": ["string", "null"]},
+              "evalue": {"type": ["string", "null"]},
+              "line": {"type": ["string", "null"], "description": "the cell line that raised it, and where it was raised"},
+              "traceback_tail": {"type": "string"},
+              "source_head": {"type": "string"}
+            }
+          },
+          "expectations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["check", "ok", "detail"],
+              "properties": {"check": {"type": "string"}, "ok": {"type": "boolean"}, "detail": {"type": "string", "description": "what was found"}}
+            }
+          },
+          "cells": {"type": "array", "items": {"type": "object", "properties": {
+            "cell": {"type": "integer"}, "seconds": {"type": "number"}, "status": {"type": "string"}}}},
+          "code_cells": {"type": "integer"},
+          "images": {"type": "array", "items": {"type": "string"}},
+          "artifacts": {"type": "array", "items": {"type": "string"}},
+          "downloads": {"type": "array", "items": {"type": "string"}},
+          "stdout_tail": {"type": "string"},
+          "web": {"type": "object"},
+          "gpu": {
+            "type": ["object", "null"],
+            "properties": {"gpu": {"type": ["string", "null"]}, "busy_pct": {"type": "number"},
+                           "mean_util_pct": {"type": "number"}, "max_mem_mib": {"type": "number"},
+                           "readings": {"type": "integer", "description": "nvidia-smi samples in the step's window"}}
+          }
+        }
+      }
+    }
+  }
+}

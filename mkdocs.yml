@@ -1,0 +1,115 @@
+# The documentation site: https://sarptandoven.github.io/agent-testbench/
+# Build it:  pip install -r docs/requirements.txt && mkdocs build --strict   (or `mkdocs serve` to read it locally)
+# The pages are the Markdown files of the repository; docs/hooks.py puts README.md's sections (after the home page's
+# own landing screen) and sections of the other files into pages and points their GitHub links at the site.
+site_name: agent-testbench
+site_description: A test bench your coding agent operates - live kernels and proved runs on your machine, Docker, ssh, Modal GPUs or Colab, inside a budget.
+site_url: https://sarptandoven.github.io/agent-testbench/
+repo_url: https://github.com/sarptandoven/agent-testbench
+repo_name: sarptandoven/agent-testbench
+edit_uri: ""                          # pages are put together from several files, so an edit link would mislead
+copyright: MIT License
+
+docs_dir: docs
+exclude_docs: |
+  hooks.py
+  assets/make_screenshots.py
+  requirements.txt
+  __pycache__/
+watch:
+  - README.md
+  - CHANGELOG.md
+  - CONTRIBUTING.md
+hooks:
+  - docs/hooks.py
+
+nav:
+  - Home: index.md
+  - A five-minute tour: tour.md
+  - Why agent-testbench: why.md
+  - Use cases: use-cases.md
+  - Getting started: getting-started.md
+  - Examples: examples.md
+  - Recipes: recipes.md
+  - Other coding agents: clients.md
+  - Expectations: expectations.md
+  - Notebooks: notebooks.md
+  - Mock LLM clients: mocks.md
+  - Rescue a notebook: rescue.md
+  - Backends:
+      - Overview: backends.md
+      - Docker: docker.md
+      - ssh: ssh.md
+      - Kubernetes: kubernetes.md
+      - Plugins: plugins.md
+  - Loops: loops.md
+  - "Watch: rerun on change": watch.md
+  - Notifications: notify.md
+  - Proof records: proof-records.md
+  - Live dashboard: dashboard.md
+  - "Exports: MLflow, W&B, csv": export.md
+  - CI: github-action.md
+  - Python API and tools: python-api.md
+  - Reference: reference.md
+  - FAQ: faq.md
+  - Troubleshooting: troubleshooting.md
+  - Demos:
+      - An agent improves a model: demo-loop.md
+      - A failing suite fixed in a Docker sandbox: demo-sandbox.md
+      - An agent fixes a planted bug: demo.md
+  - Project:
+      - Changelog: changelog.md
+      - Contributing: contributing.md
+      - Publishing: publishing.md
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.details
+
+# Any link or anchor that does not resolve fails `mkdocs build --strict`, as does a page left out of the nav.
+validation:
+  omitted_files: warn
+  not_found: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn

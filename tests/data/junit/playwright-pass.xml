@@ -1,0 +1,16 @@
+<testsuites id="" name="" tests="3" failures="0" skipped="1" errors="0" time="7.414044">
+<testsuite name="home.spec.ts" timestamp="2026-11-01T08:16:40.496Z" hostname="chromium" tests="3" failures="0" skipped="1" time="1.733" errors="0">
+<testcase name="home › has title" classname="home.spec.ts" time="1.515">
+</testcase>
+<testcase name="home › button works" classname="home.spec.ts" time="0.218">
+</testcase>
+<testcase name="home › not yet" classname="home.spec.ts">
+<properties>
+<property name="skip" value="">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+</testsuites>

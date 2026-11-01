@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+	<testsuite name="sum" time="0.007848" disabled="0" errors="0" tests="2" failures="2" skipped="0" hostname="fbb175d8e077">
+		<testcase name="adds" time="0.004008" classname="test" failure="Expected values to be strictly equal:2 !== 3">
+			<failure type="testCodeFailure" message="Expected values to be strictly equal:2 !== 3">
+Error [ERR_TEST_FAILURE]: Expected values to be strictly equal:
+
+2 !== 3
+
+    at new Promise (&lt;anonymous>)
+    at Array.map (&lt;anonymous>) {
+  code: 'ERR_TEST_FAILURE',
+  failureType: 'testCodeFailure',
+  cause: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  2 !== 3
+  
+      at TestContext.&lt;anonymous> (/p/test/sum.test.js:6:31)
+      at Test.runInAsyncScope (node:async_hooks:206:9)
+      at Test.run (node:internal/test_runner/test:796:25)
+      at Test.start (node:internal/test_runner/test:702:17)
+      at node:internal/test_runner/test:1133:71
+      at node:internal/per_context/primordials:482:82
+      at new Promise (&lt;anonymous>)
+      at new SafePromise (node:internal/per_context/primordials:450:29)
+      at node:internal/per_context/primordials:482:9
+      at Array.map (&lt;anonymous>) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 3,
+    operator: 'strictEqual'
+  }
+}
+			</failure>
+		</testcase>
+		<testcase name="adds negatives" time="0.000473" classname="test" failure="Expected values to be strictly equal:1 !== -2">
+			<failure type="testCodeFailure" message="Expected values to be strictly equal:1 !== -2">
+Error [ERR_TEST_FAILURE]: Expected values to be strictly equal:
+
+1 !== -2
+
+    at async Promise.all (index 0) {
+  code: 'ERR_TEST_FAILURE',
+  failureType: 'testCodeFailure',
+  cause: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== -2
+  
+      at TestContext.&lt;anonymous> (/p/test/sum.test.js:7:41)
+      at Test.runInAsyncScope (node:async_hooks:206:9)
+      at Test.run (node:internal/test_runner/test:796:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:526:18)
+      at Test.postRun (node:internal/test_runner/test:889:19)
+      at Test.run (node:internal/test_runner/test:835:12)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1135:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:526:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: -2,
+    operator: 'strictEqual'
+  }
+}
+			</failure>
+		</testcase>
+	</testsuite>
+	<!-- tests 2 -->
+	<!-- suites 1 -->
+	<!-- pass 0 -->
+	<!-- fail 2 -->
+	<!-- cancelled 0 -->
+	<!-- skipped 0 -->
+	<!-- todo 0 -->
+	<!-- duration_ms 201.299248 -->
+</testsuites>

@@ -3,7 +3,9 @@
     python -m agent_testbench.kernelkit.launcher --workdir DIR --state-dir DIR [--shim]
 
 Writes STATE_DIR/kernel.json (the connection file), kernel.pid and ready. Exits when the kernel dies or on
-SIGTERM, shutting the kernel down. With --shim, `google.colab` in the kernel is the headless stand-in.
+SIGTERM (on Windows also a console break), shutting the kernel down. A file STATE_DIR/interrupt asks it to
+interrupt the kernel - the way that works on every system, Windows included. With --shim, `google.colab` in the
+kernel is the headless stand-in.
 """
 import argparse
 import os
@@ -42,12 +44,17 @@ def main(argv=None):
     (state / "ready").write_text(str(time.time()))
     print(f"[testbench] kernel ready in {workdir}", flush=True)
 
+    from agent_testbench.procs import on_stop
     stopping = []
-    signal.signal(signal.SIGTERM, lambda *_: stopping.append(1))
+    on_stop(lambda *_: stopping.append(1))
     signal.signal(signal.SIGINT, lambda *_: stopping.append(1))
+    request = state / "interrupt"
     try:
         while not stopping and km.is_alive():
-            time.sleep(1)
+            if request.exists():
+                request.unlink(missing_ok=True)
+                km.interrupt_kernel()
+            time.sleep(0.2)
     finally:
         try:
             km.shutdown_kernel(now=True)

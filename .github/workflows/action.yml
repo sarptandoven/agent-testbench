@@ -1,0 +1,249 @@
+name: action
+# Tests the GitHub Action in action.yml (uses: ./) the way a user's workflow runs it: plans that pass (Linux, macOS,
+# and a web plan in Chromium), a plan that fails, a plan that is refused before it starts, and the pull request
+# comment (comment: true) on this repository's own pull requests; and the attestation (attest: true) only when run
+# by hand (Actions > action > Run workflow), because every attestation of a public repository is written to
+# Sigstore's public transparency log for good - publishing one is the maintainer's decision.
+on:
+  push:
+    branches: [main]           # other branches are tested through their pull request (one run per commit, not two)
+  pull_request:
+  workflow_dispatch:
+concurrency:                   # a newer commit cancels the runs it replaces
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  passes:
+    name: passes (${{ matrix.plan }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, project: examples/tiny-model, plan: smoke, pip: "scikit-learn==1.5.2 matplotlib==3.9.2", playwright: false}
+          - {os: macos-latest, project: examples/tiny-model, plan: smoke, pip: "scikit-learn==1.5.2 matplotlib==3.9.2", playwright: false}
+          - {os: ubuntu-latest, project: examples/web-ui, plan: ui-check, pip: "", playwright: true}
+    steps:
+      - uses: actions/checkout@v4
+      - id: testbench
+        uses: ./
+        with:
+          plan: ${{ matrix.plan }}
+          project-dir: ${{ matrix.project }}
+          extra-pip: ${{ matrix.pip }}
+          playwright: ${{ matrix.playwright }}
+          artifact-name: testbench-${{ matrix.plan }}-${{ matrix.os }}
+      - name: check what the action gave back
+        env:
+          PLAN: ${{ matrix.plan }}
+          STATUS: ${{ steps.testbench.outputs.status }}
+          RUN_ID: ${{ steps.testbench.outputs.run-id }}
+          RUN_DIR: ${{ steps.testbench.outputs.run-dir }}
+          REPORT: ${{ steps.testbench.outputs.report-path }}
+          HTML: ${{ steps.testbench.outputs.html-path }}
+          JUNIT: ${{ steps.testbench.outputs.junit-path }}
+          SUMMARY: ${{ steps.testbench.outputs.summary-path }}
+          COST: ${{ steps.testbench.outputs.cost-usd }}
+          ARTIFACT_URL: ${{ steps.testbench.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          echo "status=$STATUS run=$RUN_ID cost=$COST artifact=$ARTIFACT_URL"
+          test "$STATUS" = passed
+          test -n "$RUN_ID" && test -d "$RUN_DIR"
+          for f in "$REPORT" "$HTML" "$JUNIT" "$SUMMARY"; do
+            test -s "$f" || { echo "missing or empty: $f"; exit 1; }
+          done
+          grep -q "^# PASS - plan \`$PLAN\`" "$REPORT"
+          grep -q 'failures="0"' "$JUNIT"
+          grep -q "plan \`$PLAN\` \*\*passed\*\*" "$SUMMARY"
+          grep -q "commit \`${GITHUB_SHA:0:12}\`" "$SUMMARY"
+          grep -q "^Evidence: \[testbench-$PLAN-" "$SUMMARY"
+          test "$COST" = 0.0000
+          test -n "$ARTIFACT_URL"
+          cd "$RUN_DIR/../../.."               # the project: the evidence still matches its recorded hashes
+          testbench verify "$RUN_ID"
+
+  fails:
+    name: fails (fail-on-failure false)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: a project whose plan fails, in a folder with a space in its name
+        id: project
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/failing project"
+          mkdir -p "$dir"
+          cat > "$dir/testbench.yaml" << 'EOF'
+          project: action-selftest
+          plans:
+            broken:
+              backend: local
+              steps:
+                - name: train
+                  run: python train.py
+                  max_minutes: 2
+                  expect:
+                    json: {metrics.json: {accuracy: ">= 0.9"}}
+                - name: evaluate
+                  run: echo never runs, the step before failed
+                  max_minutes: 1
+          EOF
+          printf '%s\n' 'import json' 'json.dump({"accuracy": 0.5}, open("metrics.json", "w"))' > "$dir/train.py"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+      - id: testbench
+        uses: ./
+        with:
+          plan: broken
+          project-dir: ${{ steps.project.outputs.dir }}
+          fail-on-failure: false
+      - name: check what the action gave back
+        env:
+          STATUS: ${{ steps.testbench.outputs.status }}
+          REPORT: ${{ steps.testbench.outputs.report-path }}
+          JUNIT: ${{ steps.testbench.outputs.junit-path }}
+          SUMMARY: ${{ steps.testbench.outputs.summary-path }}
+          ARTIFACT_URL: ${{ steps.testbench.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          echo "status=$STATUS artifact=$ARTIFACT_URL"
+          test "$STATUS" = failed
+          test -s "$REPORT" && grep -q '^# FAIL - plan `broken`' "$REPORT"
+          test -s "$JUNIT" && grep -q '<failure' "$JUNIT" && grep -q 'skipped="1"' "$JUNIT"
+          test -s "$SUMMARY"
+          grep -q 'plan `broken` \*\*failed\*\*' "$SUMMARY"
+          grep -q 'expected metrics.json: accuracy >= 0.9: 0.5' "$SUMMARY"
+          test -n "$ARTIFACT_URL"
+
+  refused:
+    name: refused (needs approval)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: a project whose plan needs approval (priced as a Modal T4; refused before anything starts, and no Modal token is given)
+        id: project
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/pricey"
+          mkdir -p "$dir"
+          cat > "$dir/testbench.yaml" << 'EOF'
+          project: action-selftest
+          budget: {max_run_usd: 5.00, ask_above_usd: 0.01, max_day_usd: 5.00}
+          plans:
+            pricey:
+              backend: modal
+              gpu: T4
+              steps:
+                - name: gpu
+                  run: nvidia-smi
+                  max_minutes: 30
+          EOF
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+      - id: testbench
+        uses: ./
+        continue-on-error: true
+        with:
+          plan: pricey
+          project-dir: ${{ steps.project.outputs.dir }}
+          fail-on-failure: false          # a refusal fails the step even so
+      - name: check what the action gave back
+        env:
+          OUTCOME: ${{ steps.testbench.outcome }}
+          STATUS: ${{ steps.testbench.outputs.status }}
+          RUN_ID: ${{ steps.testbench.outputs.run-id }}
+          SUMMARY: ${{ steps.testbench.outputs.summary-path }}
+          COST: ${{ steps.testbench.outputs.cost-usd }}
+        run: |
+          set -euo pipefail
+          echo "outcome=$OUTCOME status=$STATUS"
+          test "$OUTCOME" = failure
+          test "$STATUS" = refused
+          test -z "$RUN_ID"
+          grep -q 'plan `pricey` \*\*refused\*\*' "$SUMMARY"
+          grep -q 'Needs approval: plan pricey could cost up to' "$SUMMARY"
+          grep -q 'approve: true' "$SUMMARY"
+          test "$COST" = 0.0000
+
+  comment-and-attest:
+    name: comment and attestation
+    # A pull request from a fork gets a read-only token and no id-token; the action skips both there (tested
+    # locally in tests/test_action.py), so this job runs on pushes and on this repository's own pull requests.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write          # post and edit the comment
+      actions: read                 # compare with main's latest run; link this job's summary
+      id-token: write               # sign the attestation
+      attestations: write           # store it
+    concurrency:
+      group: action-comment-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - id: testbench
+        uses: ./
+        with:
+          plan: smoke
+          project-dir: examples/tiny-model
+          extra-pip: scikit-learn==1.5.2 matplotlib==3.9.2
+          artifact-name: testbench-smoke-attested
+          comment: ${{ github.event_name == 'pull_request' }}
+          attest: ${{ github.event_name == 'workflow_dispatch' }}
+      - name: check the attestation (gh attestation verify) and the comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          STATUS: ${{ steps.testbench.outputs.status }}
+          RUN_ID: ${{ steps.testbench.outputs.run-id }}
+          RUN_DIR: ${{ steps.testbench.outputs.run-dir }}
+          SUMMARY: ${{ steps.testbench.outputs.summary-path }}
+          COMMENT_URL: ${{ steps.testbench.outputs.comment-url }}
+          ATTESTATION_URL: ${{ steps.testbench.outputs.attestation-url }}
+        run: |
+          set -euo pipefail
+          echo "status=$STATUS attestation=$ATTESTATION_URL comment=$COMMENT_URL"
+          test "$STATUS" = passed
+          if [ "$EVENT" != workflow_dispatch ]; then
+            test -z "$ATTESTATION_URL"       # attest: false - nothing signed, nothing published
+          else
+          test -n "$ATTESTATION_URL" && test -s "$RUN_DIR/attestation.sigstore.json"
+          grep -q "^Attestation: \[report.json and [0-9]* evidence files\]($ATTESTATION_URL), signed by this workflow at commit \`${GITHUB_SHA:0:12}\`" "$SUMMARY"
+          workflow="$GITHUB_REPOSITORY/.github/workflows/action.yml"
+          # fetched from GitHub's attestations API; signed by this workflow, at this commit
+          gh attestation verify "$RUN_DIR/report.json" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$workflow" --source-digest "$GITHUB_SHA"
+          # from the bundle the artifact carries, and an evidence file on its own
+          gh attestation verify "$RUN_DIR/report.json" --repo "$GITHUB_REPOSITORY" \
+            --bundle "$RUN_DIR/attestation.sigstore.json" --source-digest "$GITHUB_SHA"
+          gh attestation verify "$RUN_DIR/steps/02-train-quick/artifacts/outputs/metrics.json" --repo "$GITHUB_REPOSITORY"
+          # a file that was not signed is refused
+          echo "not evidence" > "$RUNNER_TEMP/unsigned.txt"
+          if gh attestation verify "$RUNNER_TEMP/unsigned.txt" --repo "$GITHUB_REPOSITORY"; then
+            echo "an unsigned file passed gh attestation verify"; exit 1
+          fi
+          (cd "$RUN_DIR/../../.." && testbench verify "$RUN_ID" --attestation)
+          fi
+          if [ "$EVENT" = pull_request ]; then
+            test -n "$COMMENT_URL"
+            id="${COMMENT_URL##*#issuecomment-}"
+            body="$(gh api "repos/$GITHUB_REPOSITORY/issues/comments/$id" --jq .body)"
+            marker='<!-- agent-testbench comment: action/testbench-smoke-attested -->'
+            test "$(printf '%s\n' "$body" | head -n 1)" = "$marker"
+            printf '%s\n' "$body" | grep -q '^### PASS - plan `smoke`'
+            printf '%s\n' "$body" | grep -q '| ok | `train quick` | `outputs/metrics.json: accuracy >= 0.85` |'
+            if printf '%s\n' "$body" | grep -q "\[attestation\]"; then   # attest is off on pull requests
+              echo "the comment links an attestation, but attest was off"; exit 1
+            fi
+            # one comment for this plan, however many times the pull request was pushed to
+            n="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+                  --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | wc -l)"
+            test "$n" -eq 1
+          else
+            test -z "$COMMENT_URL"           # run by hand: no pull request to comment on
+          fi

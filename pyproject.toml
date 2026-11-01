@@ -1,12 +1,12 @@
 [build-system]
-requires = ["hatchling>=1.24"]
+requires = ["hatchling>=1.24", "hatch-fancy-pypi-readme>=24.1"]
 build-backend = "hatchling.build"
 
 [project]
 name = "agent-testbench"
-version = "0.1.2"
-description = "A test bench your coding agent operates: live kernels and verified runs on Modal GPUs, Colab or your machine, inside a budget."
-readme = "README.md"
+version = "0.2.0"
+description = "A test bench your coding agent operates: live kernels and proved runs on your machine, Docker, ssh, Modal GPUs or Colab, inside a budget."
+dynamic = ["readme"]                    # README.md, with its relative links made absolute for PyPI (below)
 license = "MIT"
 requires-python = ">=3.10"
 authors = [{ name = "Sarp Tandoven" }]
@@ -16,6 +16,11 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Testing",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
@@ -30,10 +35,12 @@ dependencies = [
 [project.optional-dependencies]
 modal = ["modal>=1.5"]
 web = ["playwright>=1.45"]
+mlflow = ["mlflow>=2.10"]               # testbench export --to mlflow, export: {mlflow: ...}
+wandb = ["wandb>=0.19"]                 # testbench export --to wandb, export: {wandb: ...}
 # cryptography 49+ (pulled in by mcp) has no wheels for Intel Macs; keep those on 48, which has them
 mcp = ["mcp>=1.2", "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'"]
 all = ["modal>=1.5", "playwright>=1.45", "mcp>=1.2", "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'"]
-dev = ["pytest>=8", "modal>=1.5", "playwright>=1.45", "mcp>=1.2", "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'"]
+dev = ["pytest>=8", "pytest-xdist>=3.6", "hypothesis>=6.100", "modal>=1.5", "playwright>=1.45", "mcp>=1.2", "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'"]
 
 [project.scripts]
 testbench = "agent_testbench.cli:main"
@@ -41,13 +48,46 @@ agent-testbench = "agent_testbench.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/sarptandoven/agent-testbench"
+Documentation = "https://sarptandoven.github.io/agent-testbench/"
+Changelog = "https://github.com/sarptandoven/agent-testbench/blob/main/CHANGELOG.md"
 Issues = "https://github.com/sarptandoven/agent-testbench/issues"
+
+# PyPI shows README.md as the project's description, but resolves no relative link: `docs/tour.md` would point at
+# pypi.org. These turn each relative link into one to the file on GitHub (a folder's link into a tree link), so
+# README.md keeps its relative links for GitHub and the docs site (docs/hooks.py). tests/test_release.py checks that
+# no relative link is left and that each one names a file or folder of the repository.
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]   # a folder: no dot in the last part, no anchor
+pattern = '\]\(((?:[\w.-]+/)*[\w-]+)\)'
+replacement = '](https://github.com/sarptandoven/agent-testbench/tree/main/\1)'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]   # a file, with or without an anchor
+pattern = '\]\((?!https?://|mailto:|#)([^)\s]+)\)'
+replacement = '](https://github.com/sarptandoven/agent-testbench/blob/main/\1)'
+
+# Never in a package, even when a local build runs in a folder that has them (a release builds a fresh checkout):
+# secrets, testbench state and run outputs, caches. .gitignore keeps most of these out too, but not .env files.
+[tool.hatch.build]
+exclude = [".env", ".env.*", "*.pem", ".testbench", "outputs", "__pycache__", "*.py[cod]", ".pytest_cache",
+           ".ipynb_checkpoints", ".DS_Store"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_testbench"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"examples/tiny-model" = "agent_testbench/examples/tiny-model"      # for `testbench demo [NAME]`
+"examples/llm-app" = "agent_testbench/examples/llm-app"
+"examples/web-app" = "agent_testbench/examples/web-app"
+"examples/test-suite" = "agent_testbench/examples/test-suite"
+
 [tool.hatch.build.targets.sdist]
-include = ["src/agent_testbench", "README.md", "LICENSE"]
+include = ["src/agent_testbench", "examples/tiny-model", "examples/llm-app", "examples/web-app",
+           "examples/test-suite", "README.md", "LICENSE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -55,4 +95,6 @@ markers = [
     "web: needs Playwright and a Chromium download",
     "modal: runs on Modal and costs money (opt in with TESTBENCH_TEST_MODAL=1)",
     "colab: runs on Colab and uses compute units (opt in with TESTBENCH_TEST_COLAB=1)",
+    "posix: uses POSIX tools the test itself needs (skipped on Windows)",
+    "serial: uses something the whole machine shares (the Docker daemon, a kind cluster); under `pytest -n N` these run one at a time (a lock in tests/conftest.py)",
 ]

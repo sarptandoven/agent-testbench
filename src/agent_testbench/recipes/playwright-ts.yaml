@@ -1,0 +1,35 @@
+# Recipe playwright-ts: a web app's own Playwright tests (JavaScript or TypeScript) - every one passes, in real browsers.
+#
+# Proves: e2e - the project's Playwright tests ran in this run, as its playwright.config.ts says (its projects, the
+#   webServer that starts the app), counted from Playwright's JUnit report (written now; one left over from an earlier
+#   run fails): no test failed - a failure is named with its file and title and what it expected and got
+#   (`home.spec.ts > home › has title (expect(page).toHaveTitle(expected) failed Expected: "My App" Received: ...)`) -
+#   and at least as many tests ran as you have, so a renamed folder or a --grep that matches nothing fails. Traces
+#   and screenshots of failures (test-results/) come back with the run.
+# FILL IN: `tests: ">= N"` with the number of tests you have now (`npx playwright test --list`; each project counts a
+#   test again), and your arguments (`--project=chromium`, `--grep @smoke`).
+# Needs: @playwright/test in the project, node_modules installed (`npm ci`) and its browsers
+#   (`npx playwright install chromium`). A test that passes on a retry counts as passed: add `--retries=0` to make a
+#   flaky test fail instead. This is the project's own test suite; for a quick check of a page with no Playwright
+#   tests of its own, see the web-app recipe.
+# No docker plan: browsers need dozens of system libraries, so the image to use is Playwright's own
+#   (mcr.microsoft.com/playwright:v1.64.1-noble: the browsers and their libraries, for the same version as
+#   @playwright/test). To run these tests sandboxed, build an image from it with what testbench runs in a container
+#   (Python 3.10 or newer with ipykernel, jupyter_client, nbformat, nbclient and pyyaml) and the project's
+#   node_modules, then copy this plan with `backend: docker` and a `docker:` section like the jest recipe's.
+# Costs: nothing; it runs on this machine.
+
+plans:
+  e2e:
+    backend: local
+    description: every Playwright test passes, counted from Playwright's JUnit report
+    steps:
+      - name: playwright
+        run: npx --no -- playwright test --reporter=list,junit     # FILL IN: your arguments
+        env: {PLAYWRIGHT_JUNIT_OUTPUT_NAME: junit.xml}
+        max_minutes: 20
+        artifacts: [junit.xml, "test-results/**"]
+        expect:
+          exit_code: 0                       # playwright exits 1 when a test fails; the junit check says which
+          junit: {path: junit.xml, failures: 0, errors: 0, tests: ">= 1"}    # FILL IN: ">= N", the tests you have now
+          duration: {minutes: "<= 15"}       # a suite that suddenly takes much longer is a finding too

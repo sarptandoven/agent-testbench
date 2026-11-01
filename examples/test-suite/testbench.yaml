@@ -1,0 +1,41 @@
+# agent-testbench example: a package's own test suite, judged by its JUnit report - here and in a Docker sandbox.
+# It has a planted bug, so both plans fail until the code is fixed: hand it to your agent.
+project: test-suite
+
+# The sandbox plan's containers: a pinned image, pytest built in, no network at all.
+docker:
+  image: python:3.12-slim
+  pip: [pytest==9.1.1]               # installed once, when testbench builds the image; containers can't download
+  network: none                      # only a loopback interface: the code can't reach anything
+  cpu: 2
+  memory_gb: 2
+  usd_per_hour: 0.0
+
+plans:
+  tests:
+    backend: local
+    description: the suite on this machine, counted from pytest's JUnit report (free, seconds)
+    steps:
+      - name: pytest
+        run: python -m pytest -q --junitxml=outputs/junit.xml
+        max_minutes: 5
+        artifacts: [outputs/junit.xml]
+        expect:
+          junit: {path: outputs/junit.xml, failures: 0, errors: 0, tests: ">= 5"}   # names each failing test
+
+  sandbox:
+    backend: docker
+    description: the same suite in a fresh container with no network (needs Docker; free)
+    steps:
+      - name: offline
+        run: python -c "import socket; socket.create_connection(('1.1.1.1', 443), timeout=5)"
+        max_minutes: 1
+        expect:
+          exit_code: 1                   # the connection must fail ...
+          text: {stdout: ["Network is unreachable"]}     # ... because there is no network
+      - name: pytest
+        run: python -m pytest -q --junitxml=outputs/junit.xml
+        max_minutes: 5
+        artifacts: [outputs/junit.xml]
+        expect:
+          junit: {path: outputs/junit.xml, failures: 0, errors: 0, tests: ">= 5"}

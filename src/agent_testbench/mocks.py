@@ -16,13 +16,23 @@ moment code tries a paid call nobody planned for.
         return {"video": {"url": make_test_video(arguments["duration"])}}
 
 Every accepted call is appended to $TESTBENCH_MOCK_LOG (a JSON list), so expectations can count them.
+
+For the two most used LLM SDKs there is nothing to write: `mocks: [openai, anthropic]` on a step puts the mock
+`openai` and `anthropic` packages of mock_clients/ first on its PYTHONPATH (docs/mocks.md).
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from .expect import MOCK_SDKS
+
+SDKS = MOCK_SDKS
+CLIENTS = Path(__file__).parent / "mock_clients"
+_core = None
 
 
 class UnexpectedCall(RuntimeError):
@@ -72,3 +82,32 @@ class StrictAPI:
             calls.append({"endpoint": endpoint, "arguments": arguments})
             p.write_text(json.dumps(calls, indent=1, default=str))
         return arguments
+
+
+# ---- the drop-in mock clients (docs/mocks.md) ------------------------------------------------------------------
+
+def client_core():
+    """The mock clients' shared module, loaded from its file (it is not one of this package's modules), so
+    testbench.yaml is checked by the same rules the mocks apply."""
+    global _core
+    if _core is None:
+        spec = importlib.util.spec_from_file_location("_testbench_mock", CLIENTS / "shared" / "_testbench_mock.py")
+        _core = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_core)
+    return _core
+
+
+def client_paths(names) -> list[str]:
+    """Put first on PYTHONPATH, these make `import openai` / `import anthropic` load the mocks."""
+    return [str(CLIENTS / n) for n in names] + [str(CLIENTS / "shared")]
+
+
+def client_env(mocks: dict, workdir: Path) -> dict:
+    """What the mocks read: their options as JSON, with the replies file's path made absolute."""
+    env = {}
+    for name, opts in mocks.items():
+        opts = dict(opts or {})
+        if opts.get("replies"):
+            opts["replies"] = str((Path(workdir) / opts["replies"]).resolve())
+        env[f"TESTBENCH_MOCK_{name.upper()}"] = json.dumps(opts)
+    return env

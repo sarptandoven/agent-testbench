@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="5" skipped="1">
+	<testsuite name="example.com/calc" tests="5" failures="0" errors="0" id="0" hostname="vm" skipped="1" time="0.000" timestamp="2026-11-01T08:11:22Z">
+		<testcase name="TestAdd" classname="example.com/calc" time="0.000"></testcase>
+		<testcase name="TestTable" classname="example.com/calc" time="0.000"></testcase>
+		<testcase name="TestTable/zero" classname="example.com/calc" time="0.000"></testcase>
+		<testcase name="TestTable/neg" classname="example.com/calc" time="0.000"></testcase>
+		<testcase name="TestSlow" classname="example.com/calc" time="0.000">
+			<skipped message="Skipped"><![CDATA[    calc_test.go:26: slow: run with -run TestSlow]]></skipped>
+		</testcase>
+	</testsuite>
+</testsuites>

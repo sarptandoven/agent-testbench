@@ -1,0 +1,62 @@
+# Recipe web-app: a web app's dev server (npm) in headless Chromium - the page loads clean, and the main flow works.
+#
+# Proves: ui - the dev server starts, the page answers 200, shows what it should and logs no console or page errors
+#   (an uncaught exception, a failed fetch, a React warning logged as an error); then a click-through of the main
+#   flow - fill, click, wait for the result - works the way a person would do it, with screenshots to look at.
+#   ui-build - a clean install from the lockfile and the production build both succeed and write the build's output.
+# FILL IN: the dev command and its port (Vite: `npm run dev -- --host 127.0.0.1 --port 5173 --strictPort`; Next.js:
+#   `npm run dev -- -H 127.0.0.1 -p 3000`; give the host, so the server answers on the address the check opens), the
+#   title and text the page shows, your main flow's selectors and the text it ends on, and the build's output folder.
+# Needs: `pip install "agent-testbench[web]"` and `playwright install chromium`; node_modules installed (`npm ci`) for
+#   the ui plan. If something already answers on the port, the step stops rather than test the wrong program.
+# Costs: nothing; it runs on this machine. Look at the screenshots before calling the page right: a check sees text,
+#   not layout.
+
+plans:
+  ui:
+    backend: local
+    description: the app loads in headless Chromium without errors, and its main flow works
+    steps:
+      - name: page loads
+        web:
+          serve: npm run dev -- --host 127.0.0.1 --port 5173 --strictPort    # FILL IN: your dev command and port
+          url: http://127.0.0.1:5173/
+          ready_timeout: 60                # seconds for the dev server to answer (a first Vite start bundles)
+          actions:
+            - screenshot: home
+        max_minutes: 3
+        expect:
+          web:
+            status: 200
+            title: My App                  # FILL IN: part of the page's title
+            text: ["Welcome"]              # FILL IN: what the page shows when it works
+            no_console_errors: true
+      - name: click-through
+        web:
+          serve: npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+          url: http://127.0.0.1:5173/
+          ready_timeout: 60
+          actions:                         # FILL IN: your main flow, step by step
+            - fill: {selector: "input[name=email]", text: "ada@example.com"}
+            - click: "button[type=submit]"
+            - wait_for: "text=Thanks"
+            - screenshot: after-submit
+        max_minutes: 3
+        expect:
+          web:
+            status: 200
+            text: ["Thanks"]               # FILL IN: what the page shows at the end of the flow
+            no_console_errors: true
+
+  ui-build:
+    backend: local
+    description: a clean install from the lockfile, then the production build
+    steps:
+      - name: clean install
+        run: npm ci --no-audit --no-fund
+        max_minutes: 10
+      - name: build
+        run: npm run build
+        max_minutes: 10
+        expect:
+          files: [dist/index.html]         # FILL IN: Vite writes dist/, Next.js .next/, Create React App build/

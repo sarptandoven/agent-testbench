@@ -1,0 +1,50 @@
+# Recipe notebook-colab: a Colab notebook - linted, run quickly here with small form values, then run on a Colab VM.
+#
+# Proves: notebook-smoke - the notebook has none of the pitfalls that break Colab or a headless run (unpinned
+#   installs, hard-coded /content paths, secrets with no fallback, form fields nothing can set), and it runs top to
+#   bottom on this machine with small values in its form fields, writing the files and the numbers it should;
+#   notebook-colab - the same notebook, as it is, runs on a real Colab VM and reaches the full result.
+# FILL IN: the notebook's path (`testbench init --recipe` puts the first notebook it finds in the project here), its
+#   form fields set small for the quick run (`testbench nb fields notebook.ipynb` lists them), the files it writes
+#   and the numbers that mean it works - a quick run's bar is lower than the full run's.
+# Needs: for notebook-colab, Google's Colab CLI (`uv tool install google-colab-cli`, then `colab new` once to log in).
+# Costs: notebook-smoke is free; notebook-colab is a CPU VM, about 0.1 compute units an hour, so a fraction of a cent
+#   at worst. A Colab GPU (`gpu: T4`, about 1.8 units an hour) is still cents. Colab can reclaim a VM after an hour
+#   or two even while busy: for long runs, use Modal (the pytorch-train recipe) or your own machine (ssh-gpu-box).
+
+# Packages installed on the Colab VM before the notebook runs, on top of what Colab has (numpy, pandas, torch,
+# scikit-learn, matplotlib ...). Pin them; the notebook's own `!pip install` lines should be pinned too.
+colab:
+  pip: []                                  # FILL IN: e.g. [lightgbm==4.6.0]
+
+plans:
+  notebook-smoke:
+    backend: local
+    description: lint the notebook, then run it top to bottom here with small form values (free)
+    steps:
+      - name: lint
+        run: testbench lint notebook.ipynb --strict       # --strict: any finding fails; drop it to only list them
+        max_minutes: 1
+      - name: quick run
+        notebook: notebook.ipynb
+        params: {EPOCHS: 1, SAMPLE_SIZE: 500}             # FILL IN: the notebook's own form fields, set small
+        max_minutes: 10
+        artifacts: ["outputs/*"]
+        expect:
+          no_errors: true                                 # every cell runs; the report names the cell and line that raised
+          files: [outputs/metrics.json]                   # FILL IN: what the notebook writes
+          json:
+            outputs/metrics.json: {accuracy: ">= 0.5"}    # FILL IN: what a quick run must reach
+  notebook-colab:
+    backend: colab                                        # a CPU VM; add `gpu: T4` for a GPU one
+    description: the notebook as it is, on a Colab VM, to the full result
+    steps:
+      - name: run on Colab
+        notebook: notebook.ipynb
+        max_minutes: 30                                   # FILL IN: what the full run needs; also the hard stop on the VM
+        artifacts: ["outputs/*"]
+        expect:
+          no_errors: true
+          files: [outputs/metrics.json]
+          json:
+            outputs/metrics.json: {accuracy: ">= 0.9"}    # FILL IN: what the full run must reach

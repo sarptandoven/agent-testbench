@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="5" skipped="0" failures="2" errors="0" uuid="407d7614-5dee-4ca0-b00b-0e24188f23e6" timestamp="2026-11-01T08:14:58.555+00:00" time="0.109">
+    <testsuite name="calc" tests="3" skipped="0" errors="0" failures="1">
+        <testcase name="tests::negatives" classname="calc" timestamp="2026-11-01T08:14:58.555+00:00" time="0.008"/>
+        <testcase name="tests::overflows" classname="calc" timestamp="2026-11-01T08:14:58.555+00:00" time="0.101"/>
+        <testcase name="tests::adds" classname="calc" timestamp="2026-11-01T08:14:58.555+00:00" time="0.104">
+            <failure message="thread &apos;tests::adds&apos; (29047) panicked at src/lib.rs:11:9" type="test failure with exit code 101">thread &apos;tests::adds&apos; (29047) panicked at src/lib.rs:11:9:
+assertion `left == right` failed
+  left: 3
+ right: 4
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:80:14
+   2: core::panicking::assert_failed_inner
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:439:17
+   3: core::panicking::assert_failed::&lt;i64, i64&gt;
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:394:5
+   4: calc::tests::adds
+             at ./src/lib.rs:11:9
+   5: calc::tests::adds::{closure#0}
+             at ./src/lib.rs:10:14
+   6: &lt;calc::tests::adds::{closure#0} as core::ops::function::FnOnce&lt;()&gt;&gt;::call_once
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:250:5
+   7: &lt;fn() -&gt; core::result::Result&lt;(), alloc::string::String&gt; as core::ops::function::FnOnce&lt;()&gt;&gt;::call_once
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.</failure>
+            <system-out>
+running 1 test
+test tests::adds ... FAILED
+
+failures:
+
+failures:
+    tests::adds
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.10s
+
+</system-out>
+            <system-err>
+thread &apos;tests::adds&apos; (29047) panicked at src/lib.rs:11:9:
+assertion `left == right` failed
+  left: 3
+ right: 4
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:80:14
+   2: core::panicking::assert_failed_inner
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:439:17
+   3: core::panicking::assert_failed::&lt;i64, i64&gt;
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:394:5
+   4: calc::tests::adds
+             at ./src/lib.rs:11:9
+   5: calc::tests::adds::{closure#0}
+             at ./src/lib.rs:10:14
+   6: &lt;calc::tests::adds::{closure#0} as core::ops::function::FnOnce&lt;()&gt;&gt;::call_once
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:250:5
+   7: &lt;fn() -&gt; core::result::Result&lt;(), alloc::string::String&gt; as core::ops::function::FnOnce&lt;()&gt;&gt;::call_once
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+</system-err>
+        </testcase>
+    </testsuite>
+    <testsuite name="calc::outside" tests="1" skipped="0" errors="0" failures="0">
+        <testcase name="from_outside" classname="calc::outside" timestamp="2026-11-01T08:14:58.555+00:00" time="0.008"/>
+    </testsuite>
+    <testsuite name="calc::panics" tests="1" skipped="0" errors="0" failures="1">
+        <testcase name="unwraps_none" classname="calc::panics" timestamp="2026-11-01T08:14:58.563+00:00" time="0.100">
+            <failure message="thread &apos;unwraps_none&apos; (29052) panicked at tests/panics.rs:4:7" type="test failure with exit code 101">thread &apos;unwraps_none&apos; (29052) panicked at tests/panics.rs:4:7:
+called `Option::unwrap()` on a `None` value
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:80:14
+   2: core::panicking::panic
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:150:5
+   3: core::option::unwrap_failed
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/option.rs:2248:5
+   4: &lt;core::option::Option&lt;i64&gt;&gt;::unwrap
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/option.rs:1013:21
+   5: panics::unwraps_none
+             at ./tests/panics.rs:4:7
+   6: panics::unwraps_none::{closure#0}
+             at ./tests/panics.rs:2:18
+   7: &lt;panics::unwraps_none::{closure#0} as core::ops::function::FnOnce&lt;()&gt;&gt;::call_once
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:250:5
+   8: &lt;fn() -&gt; core::result::Result&lt;(), alloc::string::String&gt; as core::ops::function::FnOnce&lt;()&gt;&gt;::call_once
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.</failure>
+            <system-out>
+running 1 test
+test unwraps_none ... FAILED
+
+failures:
+
+failures:
+    unwraps_none
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+</system-out>
+            <system-err>
+thread &apos;unwraps_none&apos; (29052) panicked at tests/panics.rs:4:7:
+called `Option::unwrap()` on a `None` value
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:80:14
+   2: core::panicking::panic
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:150:5
+   3: core::option::unwrap_failed
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/option.rs:2248:5
+   4: &lt;core::option::Option&lt;i64&gt;&gt;::unwrap
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/option.rs:1013:21
+   5: panics::unwraps_none
+             at ./tests/panics.rs:4:7
+   6: panics::unwraps_none::{closure#0}
+             at ./tests/panics.rs:2:18
+   7: &lt;panics::unwraps_none::{closure#0} as core::ops::function::FnOnce&lt;()&gt;&gt;::call_once
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:250:5
+   8: &lt;fn() -&gt; core::result::Result&lt;(), alloc::string::String&gt; as core::ops::function::FnOnce&lt;()&gt;&gt;::call_once
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+</system-err>
+        </testcase>
+    </testsuite>
+</testsuites>

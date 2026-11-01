@@ -1,0 +1,69 @@
+# Recipe jest: a JavaScript or TypeScript project's jest suite - every test passes, here and in a container offline.
+#
+# Proves: jest-tests - the suite ran in this run (jest-junit's report must be written now; one left over from an
+#   earlier run fails), no test failed and no test file failed to load (JEST_JUNIT_REPORT_TEST_SUITE_ERRORS puts a
+#   file that cannot be imported in the report as an error, named), and at least as many tests ran as you have, so a
+#   suite that silently finds nothing fails. jest-sandbox - the same suite in a fresh container with no network.
+# FILL IN: `tests: ">= N"` with the number of tests you have now (jest's summary line: `Tests: N total`), the
+#   arguments your `npm test` passes to jest, and the image's tag.
+# Needs: jest and jest-junit, its JUnit reporter, in the project (`npm install --save-dev jest jest-junit@17.0.0`) and
+#   node_modules installed (`npm ci`). `npx --no --` runs the project's own jest and never downloads one.
+# Docker (jest-sandbox): the container has no network, so node, the packages and what testbench itself runs in the
+#   container (Python with ipykernel, jupyter_client, nbformat, nbclient and pyyaml) go into an image you build once,
+#   with the network on. The official node image has no pip, so it starts from the official Python image and copies
+#   node from the official node image. Save these lines without their leading "#" and spaces as Dockerfile.testbench,
+#   then `docker build -f Dockerfile.testbench -t jest-tests .`; rebuild it when package-lock.json changes (the
+#   plan's first step fails until you do). The node_modules here is never copied in (`exclude:` leaves it out).
+#     FROM node:24-trixie-slim AS node
+#     FROM python:3.13-trixie
+#     COPY --from=node /usr/local/bin/node /usr/local/bin/node
+#     COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+#     RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+#     RUN ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+#     RUN pip install --no-cache-dir "nbformat>=5.9" "nbclient>=0.10" "ipykernel>=6.29" "jupyter_client>=8" "pyyaml>=6"
+#     WORKDIR /work/project
+#     COPY package.json package-lock.json ./
+#     COPY package-lock.json /opt/testbench/
+#     RUN npm ci --no-audit --no-fund
+# Costs: nothing; both run on this machine (usd_per_hour 0). The image build takes a few minutes, once.
+
+# The container: the image built above as it is (setup: none), no network, hard limits on CPU and memory.
+docker:
+  image: jest-tests                        # FILL IN: the tag you built Dockerfile.testbench as
+  setup: none                              # it already has node, node_modules and testbench's basics
+  network: none                            # only a loopback interface: nothing to download, nowhere to send
+  cpu: 2
+  memory_gb: 4
+  usd_per_hour: 0.0
+
+plans:
+  jest-tests:
+    backend: local
+    description: every jest test passes, counted from jest-junit's JUnit report
+    steps:
+      - name: jest
+        run: npx --no -- jest --ci --reporters=default --reporters=jest-junit     # FILL IN: your arguments
+        env: {JEST_JUNIT_OUTPUT_FILE: junit.xml, JEST_JUNIT_REPORT_TEST_SUITE_ERRORS: "true"}
+        max_minutes: 15
+        artifacts: [junit.xml]
+        expect:
+          exit_code: 0                       # jest exits 1 when a test fails; the junit check says which
+          junit: {path: junit.xml, failures: 0, errors: 0, tests: ">= 1"}    # FILL IN: ">= N", the tests you have now
+          duration: {minutes: "<= 10"}       # a suite that suddenly takes much longer is a finding too
+
+  jest-sandbox:
+    backend: docker
+    description: the jest suite in a fresh container with no network, on the image's node_modules
+    steps:
+      - name: image matches the lockfile
+        run: >-
+          cmp package-lock.json /opt/testbench/package-lock.json
+          || { echo "package-lock.json changed since the image was built: rebuild it"; exit 1; }
+        max_minutes: 1
+      - name: jest
+        run: npx --no -- jest --ci --reporters=default --reporters=jest-junit     # FILL IN: your arguments
+        env: {JEST_JUNIT_OUTPUT_FILE: junit.xml, JEST_JUNIT_REPORT_TEST_SUITE_ERRORS: "true"}
+        max_minutes: 15
+        artifacts: [junit.xml]
+        expect:
+          junit: {path: junit.xml, failures: 0, errors: 0, tests: ">= 1"}    # FILL IN: ">= N", the tests you have now
