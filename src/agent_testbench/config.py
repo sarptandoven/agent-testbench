@@ -72,6 +72,7 @@ def validate(raw: dict, root: Path) -> dict:
         if not isinstance(cfg["budget"].get(key), (int, float)) or cfg["budget"][key] < 0:
             raise ConfigError(f"`budget.{key}` must be a number of US dollars, e.g. {DEFAULTS['budget'][key]}")
     _sessions(cfg["sessions"])
+    cfg["notify"] = _notify(cfg.get("notify"))
     plans = cfg.get("plans") or {}
     if not isinstance(plans, dict):
         raise ConfigError("`plans:` must map plan names to {backend, steps}; see `testbench init` for an example")
@@ -94,6 +95,44 @@ def _sessions(s: dict) -> None:
     for key in ("idle_minutes", "max_minutes"):
         if not isinstance(s.get(key), (int, float)) or s[key] <= 0:
             raise ConfigError(f"`sessions.{key}` must be a positive number of minutes")
+
+
+NOTIFY_EVENTS = ("run_end", "loop_end", "approval_needed")
+NOTIFY_EXAMPLE = "{webhook_env: TESTBENCH_WEBHOOK, on: [run_end, loop_end, approval_needed]}"
+
+
+def _notify(n) -> dict | None:
+    """Where notifications go. The values are never repeated in a message: a webhook URL's path is its secret."""
+    if n is None:
+        return None
+    if not isinstance(n, dict):
+        raise ConfigError(f"`notify:` is a mapping, e.g. {NOTIFY_EXAMPLE}")
+    if True in n:                                  # YAML 1.1 reads a bare `on:` key as true
+        n = {("on" if k is True else k): v for k, v in n.items()}
+    for k in n:
+        if k not in ("webhook", "webhook_env", "on"):
+            raise ConfigError(f"`notify` has no {str(k)!r}; use webhook (or webhook_env) and on, e.g. {NOTIFY_EXAMPLE}")
+    url, env = n.get("webhook"), n.get("webhook_env")
+    if bool(url) == bool(env):
+        raise ConfigError("`notify` needs one of `webhook:` (the URL to POST to) or `webhook_env:` (the name of an "
+                          "environment variable that holds it, which keeps the URL's secret out of the file), e.g. "
+                          + NOTIFY_EXAMPLE)
+    if url and (not isinstance(url, str) or not re.match(r"https?://[^/\s]+", url.strip())):
+        raise ConfigError("`notify.webhook` is a URL that takes a JSON POST, starting with https:// (e.g. a Slack "
+                          "incoming webhook); or put the URL in an environment variable and name it with "
+                          "`notify.webhook_env: NAME`")
+    if env and (not isinstance(env, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", env)):
+        raise ConfigError("`notify.webhook_env` is the NAME of an environment variable that holds the webhook URL, "
+                          "e.g. TESTBENCH_WEBHOOK - not the URL itself (export TESTBENCH_WEBHOOK=https://... where "
+                          "testbench runs)")
+    on = n.get("on", list(NOTIFY_EVENTS))
+    on = [on] if isinstance(on, str) else on
+    if not isinstance(on, list) or not on or any(e not in NOTIFY_EVENTS for e in on):
+        bad = [e for e in on if e not in NOTIFY_EVENTS] if isinstance(on, list) else []
+        raise ConfigError(f"`notify.on` lists the events to send, from {', '.join(NOTIFY_EVENTS)}"
+                          + (f"; there is no {bad[0]!r}" if bad else "")
+                          + f" (default: all three), e.g. {NOTIFY_EXAMPLE}")
+    return {"webhook": url.strip() if url else None, "webhook_env": env or None, "on": list(dict.fromkeys(on))}
 
 
 def _plan(name: str, plan: dict, root: Path) -> dict:

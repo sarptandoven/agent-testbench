@@ -47,7 +47,7 @@ def drive(run_dir: Path) -> dict:
         except Exception:
             pass
         cost = backend.cost(rep)
-    return runs.finalize(root, run_dir, rep, cost)
+    return runs.finalize(root, run_dir, rep, cost, cfg)
 
 
 def _partial(run_dir: Path, meta: dict, status: str, why: str) -> dict:

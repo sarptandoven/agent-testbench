@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import budget, config as C, procs, provenance, report as R
+from . import budget, config as C, notify, procs, provenance, report as R
 
 DONE = ("passed", "failed", "cancelled", "error")
 
@@ -68,29 +68,33 @@ def previous_report(root: Path, run_dir: Path, plan: str) -> dict | None:
     return None
 
 
-def launch(root: Path, cfg: dict, plan_name: str, approve: bool = False, foreground: bool = False) -> Path:
+def launch(root: Path, cfg: dict, plan_name: str, approve: bool = False, foreground: bool = False,
+           origin: dict | None = None) -> Path:
+    """Start a run of a plan inside the budget. origin: what started it, kept in its state (a loop: {loop, try})."""
     if plan_name not in cfg["plans"]:
         raise LaunchRefused(f"No plan {plan_name!r}. Plans: {', '.join(cfg['plans'])}")
     plan = cfg["plans"][plan_name]
     source = provenance.source(root)                   # the code this run proves, before anything changes it
     with budget.launching():
         ok, message, est = budget.check_launch(cfg, plan_name, approve)
-        if not ok:
-            raise LaunchRefused(message)
-        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-        run_dir = runs_dir(root) / f"{stamp}-{plan_name}"
-        n = 1
-        while run_dir.exists():
-            n += 1
-            run_dir = runs_dir(root) / f"{stamp}-{plan_name}-{n}"
-        run_dir.mkdir(parents=True)
-        (run_dir / "plan.json").write_text(json.dumps(plan, indent=1))
-        write_state(run_dir, run_id=run_dir.name, plan=plan_name, backend=plan["backend"], gpu=plan.get("gpu"),
-                    status="queued", created=time.time(), worst_case_usd=est["worst_case_usd"],
-                    usd_per_minute=est["usd_per_minute"], approved=bool(approve), budget_message=message,
-                    source=source)
-        budget.record(root, {"event": "launch", "run": run_dir.name, "plan": plan_name, "backend": plan["backend"],
-                             "worst_case_usd": est["worst_case_usd"]})
+        if ok:
+            stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+            run_dir = runs_dir(root) / f"{stamp}-{plan_name}"
+            n = 1
+            while run_dir.exists():
+                n += 1
+                run_dir = runs_dir(root) / f"{stamp}-{plan_name}-{n}"
+            run_dir.mkdir(parents=True)
+            (run_dir / "plan.json").write_text(json.dumps(plan, indent=1))
+            write_state(run_dir, run_id=run_dir.name, plan=plan_name, backend=plan["backend"], gpu=plan.get("gpu"),
+                        status="queued", created=time.time(), worst_case_usd=est["worst_case_usd"],
+                        usd_per_minute=est["usd_per_minute"], approved=bool(approve), budget_message=message,
+                        source=source, **({"origin": origin} if origin else {}))
+            budget.record(root, {"event": "launch", "run": run_dir.name, "plan": plan_name, "backend": plan["backend"],
+                                 "worst_case_usd": est["worst_case_usd"]})
+    if not ok:                                         # told outside the launch lock, so no launch waits on it
+        notify.approval_needed(root, cfg, message, est, f"testbench run {plan_name} --approve")
+        raise LaunchRefused(message)
     _gitignore(root)
     if foreground:
         from . import driver
@@ -176,6 +180,7 @@ def wait(run_dir: Path, timeout: float, on_line=print) -> dict:
             state = read_state(run_dir)
             if state.get("status") not in DONE:
                 write_state(run_dir, status="error", error="the driver process exited without finishing; see driver.log")
+                notify.run_end(Path(run_dir).resolve().parents[2], run_dir)
                 return read_state(run_dir)
         if time.time() >= end:
             return state
@@ -198,10 +203,13 @@ def cancel(run_dir: Path) -> str:
         from . import backends
         msg = backends.get(s["backend"]).cancel_remote(s)
         write_state(run_dir, status="cancelled", error="cancelled by request" + (f"; {msg}" if msg else ""))
+        notify.run_end(Path(run_dir).resolve().parents[2], run_dir)
     return f"{run_dir.name} cancelled"
 
 
-def finalize(root: Path, run_dir: Path, rep: dict, cost_usd: float) -> dict:
+def finalize(root: Path, run_dir: Path, rep: dict, cost_usd: float, cfg: dict | None = None) -> dict:
+    """Close a run out: its report, its state, the ledgers, then the run_end notification (after the state says it
+    finished, so nothing waiting on the run waits on the notification)."""
     state = read_state(run_dir)
     rep.update(run_id=run_dir.name, plan=state["plan"], backend=state["backend"], gpu=state.get("gpu"),
                cost_usd=round(cost_usd, 4), schema_version=provenance.SCHEMA_VERSION, source=state.get("source"),
@@ -214,4 +222,5 @@ def finalize(root: Path, run_dir: Path, rep: dict, cost_usd: float) -> dict:
                 minutes=rep.get("minutes"))
     budget.record(root, {"event": "finish", "run": run_dir.name, "plan": state["plan"], "backend": state["backend"],
                          "status": rep["status"], "minutes": rep.get("minutes"), "usd": round(cost_usd, 4)})
+    notify.run_end(root, run_dir, rep, cfg)
     return rep

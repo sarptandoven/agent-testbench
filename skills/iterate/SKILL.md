@@ -82,6 +82,12 @@ plainly, and read `testbench loop status` before the next. `testbench loop stop`
 spent, and report the kept changes and the run that proves the best one. Never edit the plan's expectations
 during a loop to make tries pass.
 
+For a loop left to run on its own, give it stopping rules: `--target 0.95` (done once the best reaches it),
+`--patience 4` (no try after 4 in a row were not kept), `--max-tries 20`. When a try is refused for one of them,
+that is the loop's answer: undo the untried edits, `testbench loop stop`, and report. When `--patience` runs out,
+go on only with an idea different in kind from the ones that failed (`testbench loop try --new-direction "..."`),
+not another variation of them.
+
 ## Notebooks
 
 Edit notebooks as cell files, not JSON: `testbench nb split nb.ipynb cells/`, edit `cells/NN_*.py`,
