@@ -30,6 +30,7 @@ from . import __version__, config as C
 EVENTS = C.NOTIFY_EVENTS
 TIMEOUT = 5.0                     # seconds for one delivery, all of it (connecting, sending, the answer)
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
+TOLD = "run_end.told"                         # in a run's folder once run_end (or watch_run) was dealt with
 HOLD_ENV = "TESTBENCH_HOLD_APPROVAL_NOTICE"    # an empty file: approval_needed goes there, for the MCP server to send
                                                # only if the person it asks directly does not answer soon
 
@@ -158,9 +159,18 @@ def run_end(root: Path, run_dir: Path, rep: dict | None = None, cfg: dict | None
     """A run finished (passed, failed, cancelled, error): what it proved, what it cost, where its report is. A run
     `testbench watch` started is told only as watch_run, and only when its result differs from the run before it:
     a watch runs on every save, and a message for each would be noise. A loop's runs are told by the loop, as
-    loop_try once each is judged kept or reverted (a run's own PASSED cannot say which)."""
+    loop_try once each is judged kept or reverted (a run's own PASSED cannot say which).
+
+    Once per run, whoever closes it: a cancel that gave up waiting for the driver, then the driver finishing after
+    all, both call this. The first to create the run's TOLD file (atomically: O_EXCL) is the one that tells."""
     from . import report as R, runs
     try:
+        try:
+            fd = os.open(Path(run_dir) / TOLD, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            return
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps({"time": dt.datetime.now().isoformat(timespec="seconds"), "pid": os.getpid()}) + "\n")
         state = runs.read_state(run_dir)
         rep = rep or R.load(run_dir) or {}
         status = state.get("status") or rep.get("status")

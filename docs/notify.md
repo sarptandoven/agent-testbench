@@ -85,6 +85,8 @@ Real messages, from the test suite's stand-in for a webhook (the last two with s
 - One attempt per event, at most 5 seconds in all (a slow name lookup included), and no retries.
 - `run_end` goes out after the run's state says it finished, so `testbench wait` and the agent are not held up;
   `approval_needed` goes out after the launch lock is released, so no other launch waits on it.
+- Each run is told once, whoever closes it out: a `testbench cancel` that stopped waiting for a slow driver and
+  the driver finishing after all do not both send `run_end` (the first leaves `run_end.told` in the run's folder).
 - Nothing about a notification can fail a run, a session or a loop. Every attempt, delivered or not, is a line in
   `.testbench/notify.log`, for example:
 

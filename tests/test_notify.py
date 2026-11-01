@@ -65,6 +65,23 @@ def test_run_end_for_a_cancelled_run(repo, webhook):
     never_shown(repo, cancelled.stdout + cancelled.stderr)
 
 
+def test_run_end_is_sent_once_when_a_cancel_gives_up_on_a_slow_driver(repo, webhook, monkeypatch):
+    from agent_testbench import notify, runs
+    configure(repo, {"webhook": webhook.url})
+    assert cli(repo, "run", "score").returncode == 0
+    run_dir = runs.resolve(repo, None)
+    runs.write_state(run_dir, status="running", driver_pid=12345)          # as when `cancel` came in, not yet told
+    (run_dir / notify.TOLD).unlink()
+    webhook.bodies.clear()
+    monkeypatch.setattr(runs, "alive", lambda pid: True)                    # a driver that takes over 60 s to stop
+    monkeypatch.setattr(runs, "kill_group", lambda pid, hard=False: None)
+    monkeypatch.setattr(runs.time, "sleep", lambda s: None)
+    assert runs.cancel(run_dir).endswith("cancelled") and runs.read_state(run_dir)["status"] == "cancelled"
+    notify.run_end(repo, run_dir)                                           # ... then the driver finishes after all
+    assert [e["status"] for e in webhook.events("run_end")] == ["cancelled"], "one run, one run_end"
+    assert json.loads((run_dir / notify.TOLD).read_text())["time"]
+
+
 def test_approval_needed_for_runs_sessions_and_loops(repo, plugin, webhook):
     priced = {"backend": "fake", "gpu": "FAKE1"}
     configure(repo, {"webhook": webhook.url}, fake={"usd_per_hour": 3600},                    # $60 a minute
