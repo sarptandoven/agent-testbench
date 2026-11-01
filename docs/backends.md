@@ -14,6 +14,7 @@ session started without `--backend`, unless testbench.yaml sets `sessions: {back
 
 - [Docker](docker.md): sandboxes with no network, NVIDIA GPUs, what a container isolates and what it does not.
 - [ssh](ssh.md): any machine you reach with ssh, with the watchdog there as the hard stop.
+- [Kubernetes](kubernetes.md): plans and sessions as Jobs on a cluster's GPUs, stopped by the Job's own deadline.
 - [Plugins](plugins.md): a backend of your own, from an installed package.
 - Modal and Colab: the GPUs each takes are under [plans](reference.md#plans), their sections of testbench.yaml
   under [top level](reference.md#top-level), and how sessions run and stop there under

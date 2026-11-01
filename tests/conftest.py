@@ -160,4 +160,4 @@ def plugin(tmp_path) -> dict:
         fake = fakebench:backend
         broken = fakebench:no_such_thing
         """))
-    return {"PYTHONPATH": str(site)}
+    return {"PYTHONPATH": os.pathsep.join(filter(None, [str(site), os.environ.get("PYTHONPATH")]))}   # and the source tested

@@ -30,6 +30,7 @@ nav:
       - Overview: backends.md
       - Docker: docker.md
       - ssh: ssh.md
+      - Kubernetes: kubernetes.md
       - Plugins: plugins.md
   - Loops: loops.md
   - Proof records: proof-records.md
