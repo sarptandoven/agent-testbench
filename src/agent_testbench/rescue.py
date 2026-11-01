@@ -31,7 +31,7 @@ from pathlib import Path
 import nbformat
 
 from . import config as C
-from .notebook import form_fields
+from .notebook import fields as nb_fields
 from .scaffold import _q, _slug
 
 
@@ -822,9 +822,8 @@ def read(nb_path: str | Path, workdir: str | Path | None = None) -> dict:
         add("gpu", "info", None, f"it was saved from a Colab {meta_gpu} runtime; this machine has no NVIDIA GPU.")
     findings.sort(key=lambda f: (SEVERITY[f["severity"]], f["cell"] or 0))
     fields = {}
-    for c in cells:
-        for name, value in form_fields(c["source"]).items():
-            fields[name] = None if name in fields else value
+    for f in nb_fields(nb):                             # Colab form fields and papermill parameters, as params: sets
+        fields[f["name"]] = None if f["name"] in fields else f["value"]
     lang_info = nb.metadata.get("language_info") or {}
     return {"cells": len(cells), "findings": findings, "packages": packages, "colab": covered, "defines": defines,
             "undefined": undefined, "fields": {k: v for k, v in fields.items() if v is not None},
@@ -934,7 +933,7 @@ def classify(err: dict, info: dict, workdir: Path) -> tuple[str, str]:
     if ename == "StepTimeout":
         fields = ", ".join(info["fields"])
         return "timeout", (f"cell {n} was still running when the time limit ran out. If it trains, downloads or loops "
-                           "over data, make it do less: " + (f"set its form fields ({fields}) small in the plan's params:"
+                           "over data, make it do less: " + (f"set its parameters ({fields}) small in the plan's params:"
                                                               if fields else "fewer epochs or a sample of the data, as form "
                                                               "fields (NAME = value  #@param) a plan sets with params:")
                            + "; or give it longer: `testbench rescue NOTEBOOK --timeout 600`.")
@@ -1107,7 +1106,7 @@ def plan_yaml(nb_rel: str, info: dict, diag: dict) -> tuple[str, str]:
     params = small_params(info["fields"])
     if params:
         lines.append("        params: {" + ", ".join(f"{_q(k)}: {json.dumps(v)}" for k, v in params.items()) + "}"
-                     + "   # its form fields; the ones that count work set small")
+                     + "   # its parameters; the ones that count work set small")
     if info["secrets"]:
         lines.append(f"        secrets: [{', '.join(info['secrets'])}]          # the person exports them; never written here")
     if info["uploads"]:

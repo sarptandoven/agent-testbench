@@ -81,6 +81,20 @@ def test_rescue_counts_the_project_s_own_code_as_local_not_as_packages_to_pip_in
     assert [p["import"] for p in RS.read(sub)["packages"]] == ["nosuchpkg_xyz"], "a folder of data is not code"
 
 
+def test_rescue_sets_a_papermill_notebook_s_parameters_small_in_the_plan_it_suggests(tmp_path):
+    # Notebook steps take papermill parameters, but rescue read only Colab form fields: a notebook with a cell
+    # tagged `parameters` got a plan without params: and timeout advice to add form fields it does not need.
+    import nbformat
+    nb = make_notebook(tmp_path / "nb.ipynb", ["EPOCHS = 50\nN_SAMPLES = 10000\nNAME = 'run'", "print(EPOCHS)"])
+    book = nbformat.read(str(nb), as_version=4)
+    book.cells[0].metadata["tags"] = ["parameters"]
+    nbformat.write(book, str(nb))
+    info = RS.read(nb)
+    assert info["fields"] == {"EPOCHS": "50", "N_SAMPLES": "10000", "NAME": "'run'"}
+    _, plan = RS.plan_yaml("nb.ipynb", info, {"status": "passed", "seconds": 1})
+    assert 'params: {EPOCHS: 1, N_SAMPLES: 100, NAME: "run"}' in plan, plan
+
+
 def test_init_from_a_notebook_recipe_uses_the_project_s_percent_format_notebook(tmp_path):
     # `testbench init` finds percent-format .py notebooks, but init --recipe only looked for an .ipynb to put in
     # place of the recipe's notebook.ipynb, and refused: "there is no notebook here to use instead".
