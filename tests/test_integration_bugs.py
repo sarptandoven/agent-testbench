@@ -81,6 +81,17 @@ def test_rescue_counts_the_project_s_own_code_as_local_not_as_packages_to_pip_in
     assert [p["import"] for p in RS.read(sub)["packages"]] == ["nosuchpkg_xyz"], "a folder of data is not code"
 
 
+def test_init_from_a_notebook_recipe_uses_the_project_s_percent_format_notebook(tmp_path):
+    # `testbench init` finds percent-format .py notebooks, but init --recipe only looked for an .ipynb to put in
+    # place of the recipe's notebook.ipynb, and refused: "there is no notebook here to use instead".
+    from agent_testbench import config as C
+    (tmp_path / "analysis.py").write_text('# %%\nEPOCHS = 3  #@param {type:"integer"}\n# %%\nprint("epochs", EPOCHS)\n')
+    r = cli(tmp_path, "init", "--recipe", "notebook-colab")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "runs analysis.py, found here, where the recipe says notebook.ipynb" in r.stdout
+    assert C.load(tmp_path)["plans"]["notebook-smoke"]["steps"][1]["notebook"] == "analysis.py"
+
+
 def test_a_refused_tool_argument_says_why_over_mcp(plain):
     # mcp 2 passes only a ToolError's text on to the client; any other exception is a crash, reported as "Error
     # executing tool run_plan" alone, so the agent never learnt why its plan name was refused.

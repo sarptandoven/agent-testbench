@@ -86,10 +86,12 @@ def _find(bl: list[list], key: str) -> int | None:
 
 def stand_ins(root: Path) -> dict[str, str]:
     """The project's own files for the files recipes name, where the project has no file of that name: its first
-    notebook for notebook.ipynb, its training script for train.py and finetune.py (quoted for YAML when needed)."""
-    from ..scaffold import _q, _walk, trainer_script
+    notebook (an .ipynb, else a percent-format .py) for notebook.ipynb, its training script for train.py and
+    finetune.py (quoted for YAML when needed)."""
+    from ..scaffold import _percent_notebooks, _q, _walk, trainer_script
     root = Path(root)
-    notebook = next((p.relative_to(root).as_posix() for p in _walk(root, "*.ipynb", 1)), None)
+    notebook = next((p.relative_to(root).as_posix() for p in _walk(root, "*.ipynb", 1) or _percent_notebooks(root, 1)),
+                    None)
     trainer = trainer_script(root)
     own = {"notebook.ipynb": notebook, "train.py": trainer, "finetune.py": trainer}
     return {name: _q(path) for name, path in own.items() if path and path != name and not (root / name).is_file()}
