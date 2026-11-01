@@ -282,7 +282,7 @@ def watch(root: Path, cfg: dict, plan: str, *, approve: bool = False, interval: 
     1 when the last of max_runs runs did not pass, 2 when refused."""
     say = say or (lambda line: print(line, flush=True))
     if plan not in cfg["plans"]:
-        say(f"No plan {plan!r}. Plans: {', '.join(cfg['plans'])}")
+        say(C.no_plan(cfg, plan))
         return 2
     for name, v in (("--interval", interval), ("--debounce", debounce)):
         if not C.number(v, positive=True):

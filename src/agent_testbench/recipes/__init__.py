@@ -103,8 +103,8 @@ def load(name: str, root: Path | None = None) -> dict:
     own notebook and training script replace the files the recipe names (`swapped`: {what it named: what it runs})."""
     path = HERE / f"{name}.yaml"
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", str(name)) or not path.is_file():
-        raise RecipeError(f"no recipe {name!r}; the recipes are {', '.join(names())} (`testbench recipes` says what each "
-                          "is for)")
+        raise RecipeError(f"no recipe {name!r}{C.near(name, names())}; the recipes are {', '.join(names())} "
+                          "(`testbench recipes` says what each is for)")
     text, swapped = path.read_text(encoding="utf-8"), {}
     for stand_in, own in (stand_ins(root) if root is not None else {}).items():
         pattern = re.compile(rf"(?<![\w./-]){re.escape(stand_in)}(?![\w-]|\.\w)")

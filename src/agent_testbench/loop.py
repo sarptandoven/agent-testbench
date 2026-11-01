@@ -284,7 +284,7 @@ def start(root: Path, cfg: dict, plan: str, metric: str, budget_usd: float, goal
           max_hours: float = 8.0, min_delta: float = 0.0, approve: bool = False, target: float | None = None,
           patience: int | None = None, max_tries: int | None = None) -> dict:
     if plan not in cfg["plans"]:
-        raise LoopError(f"No plan {plan!r}. Plans: {', '.join(cfg['plans'])}")
+        raise LoopError(C.no_plan(cfg, plan))
     if goal not in ("max", "min"):
         raise LoopError("--goal is max (a higher metric is better) or min (lower is better)")
     for flag, n, what in (("--patience", patience, "tries in a row may be reverted before the loop refuses another"),

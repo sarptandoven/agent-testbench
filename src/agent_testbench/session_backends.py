@@ -89,6 +89,9 @@ class LocalSession:
 
     def ls(self, path: str) -> list[str]:
         p = self._path(path or ".")
+        if not p.exists():
+            raise SessionError(f"{path} does not exist on the session's machine (`testbench files ls` lists the "
+                               "project folder)")
         return sorted(x.name + ("/" if x.is_dir() else "") for x in p.iterdir()) if p.is_dir() else [p.name]
 
     def get(self, remote: str, local: Path) -> None:
