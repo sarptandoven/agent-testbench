@@ -60,7 +60,7 @@ This project uses agent-testbench. Change things, then prove them on real hardwa
 4. Fix one thing at a time, rerun, and record what you learned: `testbench note "..."`.
 5. Never pass `--approve` yourself: show the person the estimate and wait for a yes. Never raise `budget:` values
    or edit ~/.testbench/limits.yaml. Never print or copy secret values; refer to secrets by NAME. Paid APIs get
-   strict mocks in tests.
+   strict mocks in tests (for the openai and anthropic SDKs: `mocks: [openai, anthropic]` on the step).
 6. Done means a passing report for the plan that matters. Say which run proves it and what it cost.
 <!-- /agent-testbench -->
 """

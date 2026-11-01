@@ -26,6 +26,7 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Expectations: expectations.md
+  - Mock LLM clients: mocks.md
   - Backends:
       - Overview: backends.md
       - Docker: docker.md

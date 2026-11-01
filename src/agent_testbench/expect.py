@@ -25,6 +25,8 @@ finding ("accuracy 0.71, wanted >= 0.9") rather than a bare FAIL. A check that m
       image:
         outputs/plot.png: {like: golden/plot.png, max_diff: 0.02}
       duration: {minutes: "<= 5"}
+      mock_calls:                            # calls the step made to the mock LLM clients (mocks: on the step)
+        anthropic: {calls: "<= 5", output_tokens: "<= 2000"}       # refused: 0 unless said otherwise
 
 Any rule can also be a tolerance ("~= 0.93 +- 0.01", "~= 100 +- 5%") or an inclusive range ("between 0.8 and 0.95").
 """
@@ -43,7 +45,10 @@ RULE = re.compile(r"^\s*(>=|<=|!=|==|>|<)\s*(.+?)\s*$")
 NEAR = re.compile(r"^\s*~=\s*(\S+?)\s*(?:\+-|\+/-|±)\s*(\S+?)\s*(%?)\s*$")
 BETWEEN = re.compile(r"^\s*between\s+(\S+)\s+and\s+(\S+)\s*$", re.I)
 KINDS = ("exit_code", "no_errors", "files", "json", "text", "media", "web", "junit", "metrics", "gpu", "image",
-         "duration")
+         "duration", "mock_calls")
+MOCK_SDKS = ("anthropic", "openai")
+MOCK_KEYS = ("calls", "refused", "injected", "input_tokens", "output_tokens", "tool_calls")
+MOCK_LOG = "mock_calls.jsonl"
 MEDIA_KEYS = ("frames", "width", "height", "fps", "seconds", "audio")
 WEB_KEYS = ("status", "title", "text", "no_console_errors")
 JUNIT_KEYS = ("tests", "passed", "failures", "errors", "skipped")
@@ -266,7 +271,53 @@ def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
     for key, rule in (expect.get("duration") or {}).items():
         ok, detail = compare(None if secs is None else round(secs / 60, 3) if key == "minutes" else round(secs, 2), rule)
         add(f"duration {key} {rule}", ok, detail)
+    spec, mocked = expect.get("mock_calls") or {}, result.get("mocks") or {}
+    for sdk in [*spec, *(s for s in mocked if s not in spec)]:      # a step with mocks: on refuses no call unless said
+        _mock_calls(sdk, {**(spec.get(sdk) or {}), "refused": (spec.get(sdk) or {}).get("refused", 0)}, workdir,
+                    result, add)
     return out
+
+
+# ---- calls to the mock LLM clients (docs/mocks.md) -----------------------------------------------------------
+
+def _mock_calls(sdk: str, rules: dict, workdir: Path, result: dict, add) -> None:
+    step_dir = result.get("step_dir")
+    path = Path(step_dir) / MOCK_LOG if step_dir else workdir / MOCK_LOG
+    recs = []
+    for line in path.read_text(errors="replace").splitlines() if path.is_file() else []:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict) and rec.get("sdk") == sdk:
+            recs.append(rec)
+    kinds = [(r.get("error") or {}).get("kind") for r in recs]
+    found = {"calls": len(recs), "refused": kinds.count("refused"), "injected": kinds.count("injected"),
+             "tool_calls": sum(len((r.get("reply") or {}).get("tool_calls") or []) for r in recs)}
+    for key in ("input_tokens", "output_tokens"):
+        found[key] = sum(int((r.get("usage") or {}).get(key) or 0) for r in recs)
+    if not recs:
+        context = "no calls were logged" + (f" (is `mocks: [{sdk}]` on this step?)" if sdk not in
+                                            (result.get("mocks") or {}) else "")
+    else:
+        counts = {}
+        for r in recs:
+            label = f"{r.get('endpoint')} {r.get('model')}" + ("" if r.get("known_model", True) else
+                                                              " (not a model the mock knows)")
+            counts[label] = counts.get(label, 0) + 1
+        context = "; ".join(f"{label} x{n}" for label, n in counts.items())
+    for key, rule in rules.items():
+        ok, detail = compare(found[key], rule)
+        extra = context
+        if key in ("refused", "injected") and found[key]:
+            hits = [r for r, k in zip(recs, kinds) if k == key]
+            extra = "; ".join(f"call {r.get('call')}: {r['error'].get('type')}: {r['error'].get('message')}"[:300]
+                              for r in hits[:2]) + (f"; and {len(hits) - 2} more" if len(hits) > 2 else "")
+            if key == "injected":
+                extra += f" ({sum(bool(r['error'].get('retried')) for r in hits)} retried by the SDK itself)"
+        elif key in ("input_tokens", "output_tokens"):
+            extra = f"the mock's count (words x 1.3); {context}"
+        add(f"mock {sdk} {key} {rule}", ok, f"{detail}; {extra}")
 
 
 # ---- JUnit XML: a test suite's own report -------------------------------------------------------------------

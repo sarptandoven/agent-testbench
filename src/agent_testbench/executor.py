@@ -20,7 +20,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import __version__, expect, notebook
+from . import __version__, expect, mocks, notebook
 
 SHIM = Path(__file__).parent / "colab_shim"
 ARTIFACT_FILE_LIMIT = 200 * 1024 * 1024
@@ -124,6 +124,11 @@ def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_e
     env = dict(base_env)
     env.update({k: str(v) for k, v in step["env"].items()})
     paths = [str((workdir / p).resolve()) for p in step["pythonpath"]]
+    mocked = step.get("mocks") or {}
+    if mocked:                                                  # the mock openai / anthropic packages win the import
+        paths = mocks.client_paths(mocked) + paths
+        env.update(mocks.client_env(mocked, workdir))
+        env.pop("TESTBENCH_MOCK_CALLS", None)                    # the log goes to the step's folder, where it is read
     if step["kind"] == "notebook" and step.get("colab_shim", True):
         paths.insert(0, str(SHIM))
     env["PYTHONPATH"] = os.pathsep.join(paths + [p for p in [env.get("PYTHONPATH")] if p])
@@ -173,7 +178,8 @@ def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_e
     result["gpu"] = gpu() if gpu else None
     if result["status"] in ("passed", "failed") or step["kind"] == "run":
         seen = {**result, "stdout": text, "web": result.pop("_web_full", None) or result.get("web"),
-                "seconds": time.time() - began, "run_started": run_started}
+                "seconds": time.time() - began, "run_started": run_started, "step_dir": str(step_dir),
+                "mocks": mocked}
         checks = expect.check(step["expect"], workdir=workdir, result=seen)
         result["expectations"] = checks
         if result["status"] == "passed" and not all(c["ok"] for c in checks):
