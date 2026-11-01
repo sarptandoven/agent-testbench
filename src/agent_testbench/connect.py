@@ -580,12 +580,21 @@ def _hidden(text: str, ours: list) -> str:
     return QUOTED.sub(lambda m: m.group(0) if m.group(1) or m.group(0) in keep else '"..."', text)
 
 
+def _in_project(path: Path, project: Path) -> Path:
+    """A project file this writes, refused when it really is outside the project (a link, or in a linked folder): a
+    repository can ship .cursor/mcp.json as a link to ~/.cursor/mcp.json, whose servers' keys would be copied in."""
+    if not path.resolve().is_relative_to(project.resolve()):
+        raise Refused(f"{path.relative_to(project)} is a link to {path.resolve()}, outside the project, so this does "
+                      "not write it; replace the link with a file of the project's own, or remove it")
+    return path
+
+
 def _plan_config(client: Client, project: Path, user: bool, cmd: str, args: list) -> Change:
     if user:
         path, key = client.user()
     else:
         rel, key = client.project
-        path = project / rel
+        path = _in_project(project / rel, project)
     old = _read(path) if path.exists() else None
     entry = client.entry(cmd, args, user)
     if client.fmt == "toml":
@@ -596,6 +605,7 @@ def _plan_config(client: Client, project: Path, user: bool, cmd: str, args: list
 
 
 def _plan_text(path: Path, transform, what: str) -> Change:
+    _in_project(path, path.parent)
     old = _read(path) if path.exists() else None
     new = transform(old or "")
     return Change(path, old, new, [what if new != old else "already up to date"])
@@ -690,6 +700,8 @@ def connect(key: str, user: bool = False, dry_run: bool = False, start: Path | N
     rules = not user or has_config
     try:
         changes += _plan_rules(client, project) if rules else []
+    except Refused as exc:
+        return 2, f"testbench connect: {exc}. Nothing was changed."
     except (OSError, UnicodeDecodeError) as exc:
         return 2, f"testbench connect: could not read the rules file ({exc}). Nothing was changed."
     for ch in changes:

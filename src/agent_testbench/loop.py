@@ -170,6 +170,8 @@ def spent(state: dict) -> float:
 
 def _note(root: Path, text: str) -> None:
     notes = Path(root) / ".testbench" / "NOTES.md"
+    if not notes.resolve().is_relative_to(Path(root).resolve()):     # a link out of the project (C.own_file)
+        return
     notes.parent.mkdir(parents=True, exist_ok=True)
     with notes.open("a") as f:
         f.write(f"- {dt.datetime.now():%Y-%m-%d %H:%M}: {text}\n")
@@ -425,7 +427,7 @@ def _revert(root: Path, state: dict, n: int) -> str:
     """Back to the best commit; edits made while the try ran are stashed and put back on top, and the lab notebook
     (.testbench/NOTES.md, which may be committed) keeps what was written to it."""
     notes = Path(root) / ".testbench" / "NOTES.md"
-    kept_notes = notes.read_text() if notes.exists() else None
+    kept_notes = notes.read_text() if notes.exists() and notes.resolve().is_relative_to(Path(root).resolve()) else None
     stashed = bool(_changes(root))
     if stashed:
         _git(root, "stash", "push", "-q", "--include-untracked", "-m", f"testbench loop: edits made while try {n} ran",

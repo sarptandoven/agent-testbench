@@ -77,6 +77,34 @@ def test_connect_never_leaves_a_private_config_readable_by_others_while_writing(
     assert all(stat.S_IMODE(b.stat().st_mode) & 0o077 == 0 for b in backups), "nor are their backups"
 
 
+@pytest.mark.posix
+def test_project_files_that_link_out_of_the_project_are_never_written_through(home, capsys):
+    """A repository can ship AGENTS.md as a link to ../.bashrc, or .cursor/mcp.json as a link to the user's own
+    Cursor config: init, note and connect must neither write the file outside nor copy it into the project."""
+    proj = home.parent / "proj"
+    (home / ".bashrc").write_text("export PATH=$PATH:/opt/bin\n")
+    _configs_with_secrets(home)
+    before = {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    os.symlink("../home/.bashrc", proj / "AGENTS.md")
+    (proj / ".cursor").mkdir()
+    os.symlink("../../home/.cursor/mcp.json", proj / ".cursor" / "mcp.json")
+    r = cli(proj, "init")
+    assert r.returncode == 2 and "AGENTS.md" in r.stderr + r.stdout and "outside the project" in r.stderr + r.stdout, r
+    assert not (proj / "testbench.yaml").exists(), "nothing is written when one of the files would lead out"
+    write_config(proj, {"project": "proj", "plans": {"quick": {"steps": [{"name": "a", "run": "echo hi"}]}}})
+    (proj / ".testbench").mkdir()
+    os.symlink("../../home/.bashrc", proj / ".testbench" / "NOTES.md")
+    r = cli(proj, "note", "tried `testbench run quick --approve`")
+    assert r.returncode == 2 and "outside the project" in r.stderr + r.stdout, r
+    for clients in (["cursor"], ["codex"]):             # its config, then AGENTS.md (the rules)
+        assert K.main(clients) == 2
+    out = capsys.readouterr()
+    assert out.err.count("outside the project") == 2 and "Nothing was changed" in out.err, out.err
+    assert {p: p.read_bytes() for p in home.rglob("*") if p.is_file()} == before, "nothing outside was changed"
+    assert not (proj / ".codex").exists() and (proj / ".cursor" / "mcp.json").is_symlink()
+    assert not any(b"PLANTED" in p.read_bytes() for p in proj.rglob("*") if p.is_file() and not p.is_symlink())
+
+
 # ---- a report names its evidence; a name must not lead out of the run folder ------------------------------------
 
 def _outside_image(tmp_path):

@@ -98,6 +98,8 @@ def _print_machine_limits(machine) -> None:
 def cmd_init(a):
     root = Path.cwd()
     target = root / C.CONFIG_NAME
+    for f in [target] + ([] if a.add else [root / "AGENTS.md", root / "CLAUDE.md"]):
+        C.own_file(root, f)
     if a.add and not a.recipe:
         print("--add adds a recipe's plans to testbench.yaml: testbench init --add --recipe NAME (`testbench recipes` "
               "lists them)")
@@ -533,7 +535,7 @@ def cmd_nb(a):
 def cmd_note(a):
     root, _ = _root_cfg()
     import datetime as dt
-    notes = root / ".testbench" / "NOTES.md"
+    notes = C.own_file(root, root / ".testbench" / "NOTES.md")
     notes.parent.mkdir(parents=True, exist_ok=True)
     last = runs.all_runs(root)
     ref = f" (after run {last[-1].name})" if last else ""

@@ -181,6 +181,18 @@ NOTIFY_DEFAULT = NOTIFY_EVENTS[:3]            # watch_run (a watched run whose r
 NOTIFY_EXAMPLE = "{webhook_env: TESTBENCH_WEBHOOK, on: [run_end, loop_end, approval_needed]}"
 
 
+def own_file(root: Path, path: Path) -> Path:
+    """path, a file testbench writes in the project (testbench.yaml, AGENTS.md, CLAUDE.md, .testbench/NOTES.md),
+    refused when it really is outside it: a link, or in a linked folder. A repository can ship AGENTS.md as a link
+    to ../.bashrc, and writing it would change that file instead."""
+    real = Path(path).resolve()
+    if not real.is_relative_to(Path(root).resolve()):
+        raise ConfigError(f"{Path(path).relative_to(root)} is a link to {real}, outside the project, so testbench does "
+                          "not write it (that would change the file it leads to). Replace the link with a file of the "
+                          "project's own, or remove it, then run this again")
+    return Path(path)
+
+
 def _notify(n) -> dict | None:
     """Where notifications go. The values are never repeated in a message: a webhook URL's path is its secret."""
     if n is None:
