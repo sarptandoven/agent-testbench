@@ -29,6 +29,7 @@ def _docker_answers() -> bool:
 
 
 needs_docker = pytest.mark.skipif(not _docker_answers(), reason="needs a Docker daemon that answers `docker info`")
+pytestmark = pytest.mark.serial                      # one Docker daemon: one container test at a time
 IMAGE = os.environ.get("TESTBENCH_TEST_DOCKER_IMAGE", "mirror.gcr.io/library/python:3.11-slim")
 SECRET = f"s3cret-{uuid.uuid4().hex[:12]}"           # unique, so finding it anywhere means it leaked from this test
 
@@ -87,14 +88,16 @@ def _wait_for_step(run: Path, seconds: float = 180) -> dict:
 
 
 @pytest.fixture
-def project(tmp_path, section) -> Path:
+def project(tmp_path, section, monkeypatch) -> Path:
+    monkeypatch.setenv("TESTBENCH_DOCKER_POLL_SECONDS", "0.5")    # how often the driver asks the container (default 2)
     root = tmp_path / "proj"
     make_notebook(root / "nb.ipynb", [
         'N = 3 #@param {type:"integer"}',
         "import json, os, pathlib\npathlib.Path('out').mkdir(exist_ok=True)\nprint('token', os.environ.get('TB_TOKEN'))",
         "json.dump({'n': N}, open('out/result.json', 'w'))",
     ])
-    write_config(root, {"project": "proj", "docker": {**section, "usd_per_hour": 0.6},
+    # containers are named after the project and the run: a unique name, so a test run elsewhere here cannot clash
+    write_config(root, {"project": f"proj-{uuid.uuid4().hex[:6]}", "docker": {**section, "usd_per_hour": 0.6},
                         "budget": {"max_run_usd": 1, "ask_above_usd": 1, "max_day_usd": 5},
                         "plans": {"boxed": {"backend": "docker", "steps": [
                             {"name": "where", "run": "pwd; test -f /.dockerenv && echo in-a-container", "max_minutes": 1,
@@ -147,7 +150,8 @@ def test_network_none_is_a_sandbox_without_a_network(tmp_path, section):
     root.mkdir()
     reach = "python3 -c \"import socket; socket.create_connection(('1.1.1.1', 443), timeout=5); print('reached it')\""
     nics = "python3 -c \"import os; print('interfaces:', sorted(os.listdir('/sys/class/net')))\""
-    write_config(root, {"project": "sandbox", "docker": {**section, "network": "none"}, "plans": {"offline": {
+    name = f"sandbox-{uuid.uuid4().hex[:6]}"            # unique, as in project()
+    write_config(root, {"project": name, "docker": {**section, "network": "none"}, "plans": {"offline": {
         "backend": "docker", "steps": [
             {"name": "reach out", "run": reach, "max_minutes": 1, "continue_on_failure": True,
              "expect": {"exit_code": 1, "text": {"stdout": ["Network is unreachable"]}}},

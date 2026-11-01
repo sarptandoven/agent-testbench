@@ -400,6 +400,7 @@ def _for_this_machine(lines: list[str], ca: str | None) -> list[str]:
 
 
 @pytest.mark.posix
+@pytest.mark.serial                                      # Docker
 @pytest.mark.parametrize("name", list(DOCKER_PROJECTS))
 def test_the_sandbox_plan_runs_offline_in_the_image_its_recipe_describes(tmp_path, name):
     import test_docker as TD

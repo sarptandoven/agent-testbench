@@ -16,7 +16,8 @@ BUSY = "import time\nend = time.time() + 60\nwhile time.time() < end:\n    pass"
 def test_alive_and_stop_group(tmp_path):
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], **procs.group_kwargs())
     assert procs.alive(proc.pid) and procs.alive(proc.pid), "checking twice must not end it"
-    procs.stop_and_wait(proc.pid, grace=5)
+    threading.Thread(target=proc.wait, daemon=True).start()     # collected when it ends, as spawn() does: a zombie
+    procs.stop_and_wait(proc.pid, grace=5)                       # would look alive for all of the grace
     proc.wait(timeout=20)
     assert not procs.alive(proc.pid) and not procs.alive(None)
 
@@ -55,4 +56,4 @@ def test_the_launcher_interrupts_its_kernel_on_request(tmp_path):
         after = execute(str(state / "kernel.json"), "1 + 1", timeout=30, out_dir=str(tmp_path))
         assert after["result"] == "2", "the kernel survives the interrupt"
     finally:
-        procs.stop_and_wait(launcher.pid)
+        procs.stop_and_wait(launcher.pid, proc=launcher)      # this process's child: waited on, not its grace

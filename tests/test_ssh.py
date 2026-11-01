@@ -73,7 +73,11 @@ def test_cancel_stops_the_work_on_the_machine(project, box):
             break
         time.sleep(0.25)
     pid = json.loads((run / "state.json").read_text())["ssh_pid"]
-    time.sleep(2)
+    log = run / "steps" / "01-nap" / "log.txt"                 # the step is running there (its log comes back)
+    for _ in range(120):
+        if log.exists() and "napping" in log.read_text():
+            break
+        time.sleep(0.25)
     assert "cancelled" in cli(project, "cancel").stdout
     for _ in range(40):
         try:
@@ -83,11 +87,18 @@ def test_cancel_stops_the_work_on_the_machine(project, box):
             break
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
-    assert json.loads((run / "state.json").read_text())["status"] == "cancelled"
+    state = json.loads((run / "state.json").read_text())
+    assert state["status"] == "cancelled"
     remote = Path(box["workdir"]) / "proj" / "runs" / run.name
     assert not remote.exists(), "a cancelled run's folder there is removed too"
-    watchdogs = [d for d in Path("/proc").iterdir() if d.name.isdigit() and run.name.encode() in
-                 (d / "cmdline").read_bytes()] if Path("/proc").is_dir() else []
+    # found by its folder there, which only this test's run has; another test's run can have the same name
+    watchdogs = []
+    for d in Path("/proc").iterdir() if Path("/proc").is_dir() else ():
+        try:
+            if d.name.isdigit() and state["ssh_dir"].encode() in (d / "cmdline").read_bytes():
+                watchdogs.append(d.name)
+        except OSError:                  # a process that ended while it was looked at
+            pass
     assert not watchdogs, "and its watchdog is gone"
 
 

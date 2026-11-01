@@ -401,6 +401,7 @@ def test_the_local_plans_pass_on_a_project_made_to_the_recipe(tmp_path, name):
 
 
 @pytest.mark.posix                                      # Linux containers
+@pytest.mark.serial                                     # Docker
 def test_the_sandbox_recipe_runs_offline_in_a_container(tmp_path):
     import test_docker as TD                            # its image and build settings, so the image is built the same way
     if not TD._docker_answers():

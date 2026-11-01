@@ -8,7 +8,6 @@ import sys
 import time
 
 import pytest
-import yaml
 
 from conftest import REPO, cli, write_config
 
@@ -92,8 +91,10 @@ def test_stop_ends_the_kernel_and_records_cost(plain):
     assert "stopped after" in r.stdout
     s = state(plain, "work")
     assert s["status"] == "stopped" and s["cost_usd"] == 0
-    time.sleep(1)
     from agent_testbench.procs import alive
+    end = time.time() + 10
+    while alive(pid) and time.time() < end:
+        time.sleep(0.1)
     assert not alive(pid), "the launcher (and with it the kernel) is gone"
     r = cli(plain, "exec", "-s", "work", "1")
     assert r.returncode == 2 and "is stopped" in r.stdout

@@ -2,6 +2,9 @@
 
 ## 0.2.0 - not yet released
 
+- The test suite runs in parallel (`python -m pytest -q -n 4`; pytest-xdist is in the dev extras): about 3.5 minutes
+  instead of 13 here. `testbench cancel` no longer waits a minute for a run whose driver ended before it could
+  close it.
 - Secrets and paths: `connect --dry-run` hides other servers' values and writes configs privately; reports, the
   dashboard and `get_report` read only files inside the run; `artifacts:` with `..` stay in artifacts/; the PR
   comment escapes the report's commit and status; `rescue --fix` refuses any name of the original; loop tries never

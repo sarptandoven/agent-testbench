@@ -35,6 +35,8 @@ jobs:
           python -m pip install -e ".[dev]" scikit-learn==1.5.2 matplotlib==3.9.2
           python -m playwright install --with-deps chromium
       - name: tests
-        run: python -m pytest -q -p no:warnings
+        # in parallel: a pytest-xdist worker per vCPU (-n auto counts physical cores, which can be half of them; the
+        # tests mostly wait on processes they start); tests marked serial (Docker) still run one at a time
+        run: python -m pytest -q -p no:warnings -n logical
         env:
           PYTHONUTF8: "1"           # Windows: in-process tests too (the CLI switches itself)
