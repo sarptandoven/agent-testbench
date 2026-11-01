@@ -67,8 +67,9 @@ def test_stops_the_kernel_at_max_minutes(kernel):
 
 def test_idle_waits_out_a_running_command(kernel):
     state, launcher = kernel
-    watchdog.spawn(state, max_minutes=5, idle_minutes=0.05, env=FAST)        # 3 s idle; no --kill-group: found by
-    res = execute(str(state / "kernel.json"), "import time; time.sleep(6); 'done'", timeout=60, out_dir=str(state))
+    # 9 s idle, room for a busy machine to start the command; no --kill-group: found by their state folder
+    watchdog.spawn(state, max_minutes=5, idle_minutes=0.15, env=FAST)
+    res = execute(str(state / "kernel.json"), "import time; time.sleep(14); 'done'", timeout=90, out_dir=str(state))
     assert res["status"] == "ok" and res["result"] == "'done'", "a command longer than idle_minutes must finish"
     assert not (state / "watchdog_stopped").exists()
     assert "no command for" in _stopped(state, 30)
