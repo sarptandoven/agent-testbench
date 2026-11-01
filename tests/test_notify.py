@@ -120,7 +120,12 @@ def test_a_dead_or_slow_webhook_does_not_break_a_run(repo, monkeypatch):
     began = time.time()
     r = cli(repo, "run", "score")
     assert r.returncode == 0 and "PASS" in r.stdout and time.time() - began < 60
-    log = (repo / ".testbench" / "notify.log").read_text()
+    path = repo / ".testbench" / "notify.log"          # the driver notifies after the run is done; on Windows a
+    for _ in range(80):                                # refused connection takes a couple of seconds
+        if path.exists() and "run_end" in path.read_text():
+            break
+        time.sleep(0.25)
+    log = path.read_text()
     assert f"run_end to http://127.0.0.1:{port} (notify.webhook in testbench.yaml): not accepted" in log, log
     t = cli(repo, "notify", "test")
     assert t.returncode == 1 and "not accepted" in t.stdout and ".testbench/notify.log" in t.stdout, t.stdout

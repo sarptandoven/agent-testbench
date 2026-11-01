@@ -290,8 +290,8 @@ def test_toml_strings_are_quoted_right():
 def test_a_throwaway_environment_registers_uvx(monkeypatch):
     cmd, args = K.server_command("/home/ada/.cache/uv/archive-v0/Xy12/bin/python")
     assert cmd == "uvx" and args[:2] == ["--from", f"agent-testbench[all]=={K.__version__}"] and args[-1] == "mcp"
-    assert K.server_command("/home/ada/.venv/bin/python") == ("/home/ada/.venv/bin/python",
-                                                              ["-m", "agent_testbench", "mcp"])
+    venv = os.path.abspath("/home/ada/.venv/bin/python")      # D:\home\... on Windows
+    assert K.server_command("/home/ada/.venv/bin/python") == (venv, ["-m", "agent_testbench", "mcp"])
 
 
 def test_list_shows_each_client(proj, home, tmp_path, monkeypatch, capsys):

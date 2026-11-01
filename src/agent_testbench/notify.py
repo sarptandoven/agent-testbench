@@ -87,7 +87,11 @@ def _post(url: str, body: dict, timeout: float) -> tuple[bool, str]:
             said = exc.read(200).decode(errors="replace").strip() if exc.fp else ""
             out.append((False, f"HTTP {exc.code} {exc.reason}" + (f": {said}" if said else "")))
         except Exception as exc:
-            out.append((False, f"{type(exc).__name__}: {getattr(exc, 'reason', None) or exc}"))
+            reason = getattr(exc, "reason", None) or exc
+            if isinstance(reason, TimeoutError):           # urllib's own timeout, a moment before ours
+                out.append((False, f"no answer within {timeout:g} s"))
+            else:
+                out.append((False, f"{type(exc).__name__}: {reason}"))
 
     t = threading.Thread(target=go, daemon=True)
     t.start()
