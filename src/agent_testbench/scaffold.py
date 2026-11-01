@@ -2,9 +2,10 @@
 
 It finds notebooks, .ipynb or percent-format .py (a lint step, then the notebook with its parameters - Colab form
 fields, papermill parameters - listed and the files it writes expected),
-a pytest suite (every test must pass), a web app (a static index.html, or an npm dev/start script: opened in
-headless Chromium, checked for console errors, screenshotted) and training scripts (train.py and the like: a
-short run to fill in). What it could not know - the numbers that mean "working" - is left as a marked line to
+a pytest suite (every test must pass), test suites in other languages, judged by their own JUnit report (`npm test`
+with jest, vitest, mocha, node --test or Playwright; a Go module through gotestsum; a Rust crate through
+cargo-nextest), a web app (a static index.html, or an npm dev/start script: opened in headless Chromium, checked
+for console errors, screenshotted) and training scripts (train.py and the like: a short run to fill in). What it could not know - the numbers that mean "working" - is left as a marked line to
 fill in, and init says so.
 """
 from __future__ import annotations
@@ -122,15 +123,138 @@ def _pytest(root: Path) -> tuple[str, str, str] | None:
     return "tests", text, "a pytest suite" + (f" ({tests[0].relative_to(root).as_posix()}, ...)" if tests else "")
 
 
-def _web(root: Path) -> tuple[str, str, str] | None:
+def _package(root: Path) -> dict:
+    """package.json, or {} when there is none or it is not a JSON object (it may be anything)."""
     pkg = root / "package.json"
-    if pkg.is_file():
-        try:
-            data = json.loads(pkg.read_text())
-        except (OSError, ValueError, RecursionError):
-            data = {}
-        scripts = data.get("scripts") if isinstance(data, dict) else None
-        scripts = scripts if isinstance(scripts, dict) else {}           # package.json may be anything
+    try:
+        data = json.loads(pkg.read_text()) if pkg.is_file() else {}
+    except (OSError, ValueError, RecursionError):
+        data = {}
+    return data if isinstance(data, dict) else {}
+
+
+def _scripts(data: dict) -> dict:
+    scripts = data.get("scripts")
+    return {k: v for k, v in scripts.items() if isinstance(v, str)} if isinstance(scripts, dict) else {}
+
+
+# A JS test runner, found in what `npm test` runs or else among the packages: its plan's name, the runner's name, the
+# command that writes JUnit to junit.xml, the step's env, its artifacts and the JUnit reporter it needs installed.
+JS_TESTS = {
+    "vitest": ("vitest-tests", "vitest", "npx --no -- vitest run --reporter=default --reporter=junit "
+                                         "--outputFile.junit=junit.xml", "", "[junit.xml]", ""),
+    "jest": ("jest-tests", "jest", "npx --no -- jest --ci --reporters=default --reporters=jest-junit",
+             '{JEST_JUNIT_OUTPUT_FILE: junit.xml, JEST_JUNIT_REPORT_TEST_SUITE_ERRORS: "true"}', "[junit.xml]",
+             "jest-junit@17.0.0"),
+    "mocha": ("mocha-tests", "mocha", "npx --no -- mocha --reporter xunit --reporter-option output=junit.xml", "",
+              "[junit.xml]", ""),
+    "node": ("node-tests", "node --test", "node --test --test-reporter=spec --test-reporter-destination=stdout "
+                                         "--test-reporter=junit --test-reporter-destination=junit.xml", "",
+             "[junit.xml]", ""),
+    "playwright": ("e2e", "Playwright", "npx --no -- playwright test --reporter=list,junit",
+                   "{PLAYWRIGHT_JUNIT_OUTPUT_NAME: junit.xml}", '[junit.xml, "test-results/**"]', ""),
+}
+JS_SCRIPT = (("vitest", r"\bvitest\b"), ("jest", r"\bjest\b"), ("mocha", r"\bmocha\b"),
+             ("node", r"\bnode\b[^&|;]*\s--test\b"), ("playwright", r"\bplaywright\s+test\b"))
+JS_PACKAGES = (("vitest", "vitest"), ("jest", "jest"), ("mocha", "mocha"), ("playwright", "@playwright/test"))
+JUNIT_LINE = '          junit: {path: %s, failures: 0, errors: 0, tests: ">= 1"}    # FILL IN: ">= N", the tests you have now\n'
+
+
+def _js_kind(data: dict) -> tuple[str | None, str, set]:
+    """The runner `npm test` runs (None: it runs one init does not know), the test script, and the packages."""
+    test = _scripts(data).get("test", "").strip()
+    if "no test specified" in test:                              # npm init's placeholder
+        test = ""
+    deps = {name for key in ("dependencies", "devDependencies") if isinstance(data.get(key), dict) for name in data[key]}
+    kind = next((k for k, pattern in JS_SCRIPT if re.search(pattern, test)), None) \
+        or next((k for k, package in JS_PACKAGES if package in deps), None)
+    return kind, test, deps
+
+
+def _js_tests(root: Path) -> tuple[str, str, str] | None:
+    """`npm test` with a runner that writes JUnit (jest, vitest, mocha, node --test, Playwright), judged by its report."""
+    kind, test, deps = _js_kind(_package(root))
+    if not test:
+        return None
+    shown = " ".join(test.split())[:80]                           # in a comment, and in what init prints
+    if kind is None:
+        text = ("  js-tests:\n    backend: local\n    description: the project's npm test passes\n    steps:\n"
+                f"      - name: npm test\n        run: npm test                     # it runs: {shown}\n"
+                "        max_minutes: 15\n        expect:\n          exit_code: 0\n"
+                "          # junit: {path: junit.xml, tests: \">= 1\"}   # FILL IN: have the runner write JUnit XML there\n")
+        return "js-tests", text, f"an npm test script ({shown})"
+    return _js_plan(kind, shown, deps)
+
+
+def _playwright_tests(root: Path) -> tuple[str, str, str] | None:
+    """Playwright tests next to another runner's unit tests (`npm test` runs jest, @playwright/test is installed)."""
+    kind, test, deps = _js_kind(_package(root))
+    if "@playwright/test" not in deps or kind == "playwright" and test:
+        return None
+    script = next((f"npm run {s}" for s, cmd in _scripts(_package(root)).items() if re.search(JS_SCRIPT[-1][1], cmd)),
+                  "playwright test")
+    return _js_plan("playwright", script, deps)
+
+
+def _js_plan(kind: str, shown: str, deps: set) -> tuple[str, str, str]:
+    name, runner, run, env, artifacts, needs = JS_TESTS[kind]
+    reporter = needs.rsplit("@", 1)[0]
+    missing = bool(needs) and reporter not in deps
+    lines = [f"  {name}:", "    backend: local",
+             f"    description: every test passes, counted from {runner}'s JUnit report", "    steps:",
+             f"      - name: {_plain(runner):<29}# FILL IN: your arguments; the project runs: {shown}",
+             f"        run: {run}"]
+    lines += [f"        env: {env}"] if env else []
+    lines += [f"        # needs {reporter}, the JUnit reporter: npm install --save-dev {needs}"] if missing else []
+    lines += ["        max_minutes: 15", f"        artifacts: {artifacts}", "        expect:", "          exit_code: 0"]
+    what = f"a {runner} suite ({shown})" + (f"; it needs {reporter} (npm install --save-dev {needs})" if missing else "")
+    return name, "\n".join(lines) + "\n" + JUNIT_LINE % "junit.xml", what
+
+
+def _go_tests(root: Path) -> tuple[str, str, str] | None:
+    """A Go module with tests: gotestsum (by `go run`, pinned) runs go test and writes its JUnit report."""
+    mod = root / "go.mod"
+    if not mod.is_file() or not _walk(root, "*_test.go", 1):
+        return None
+    module = next(iter(re.findall(r"(?m)^module\s+(\S+)", _text(mod))), "")
+    text = ("  go-tests:\n    backend: local\n    description: every package builds and every test passes, counted "
+            "from gotestsum's JUnit report\n    steps:\n"
+            "      - name: go test                      # FILL IN: your packages and flags, after the --\n"
+            "        run: go run gotest.tools/gotestsum@v1.13.0 --junitfile junit.xml -- -count=1 ./...\n"
+            "        max_minutes: 15\n        artifacts: [junit.xml]\n        expect:\n          exit_code: 0\n"
+            + JUNIT_LINE % "junit.xml")
+    return "go-tests", text, f"a Go module ({module})" if module else "a Go module"
+
+
+def _cargo_tests(root: Path) -> tuple[str, str, str] | None:
+    """A Rust crate or workspace: cargo-nextest runs the tests and writes JUnit for a profile with a junit path."""
+    manifest = root / "Cargo.toml"
+    if not manifest.is_file():
+        return None
+    cargo = _text(manifest)
+    found = re.findall(r"""(?ms)^\[profile\.([\w-]+)\.junit\][^\[]*?^\s*path\s*=\s*["']([^"']+)["']""",
+                       _text(root / ".config" / "nextest.toml"))
+    profile, path = found[0] if found else ("ci", "junit.xml")
+    report = _q(f"target/nextest/{profile}/{path}")
+    setup = "" if found else (
+        "        # needs cargo-nextest (cargo install cargo-nextest --locked) and these lines in .config/nextest.toml:\n"
+        "        #   [profile.ci]\n        #   fail-fast = false\n        #   [profile.ci.junit]\n"
+        "        #   path = \"junit.xml\"\n")
+    text = ("  cargo-tests:\n    backend: local\n    description: every test passes, counted from cargo-nextest's JUnit "
+            "report\n    steps:\n      - name: nextest\n"
+            f"        run: cargo nextest run --profile {profile}       # FILL IN: your arguments (--workspace)\n"
+            f"{setup}        max_minutes: 20\n        artifacts: [{report}]\n        expect:\n          exit_code: 0\n"
+            + JUNIT_LINE % report)
+    crate = next(iter(re.findall(r'(?ms)^\[package\][^\[]*?^name\s*=\s*"([^"]+)"', cargo)), "")
+    what = "a Rust workspace" if re.search(r"(?m)^\[workspace\]", cargo) and not crate else \
+        f"a Rust crate ({crate})" if crate else "a Rust crate"
+    return "cargo-tests", text, what + ("" if not setup else "; it needs cargo-nextest and a junit profile in "
+                                                             ".config/nextest.toml, as the plan says")
+
+
+def _web(root: Path) -> tuple[str, str, str] | None:
+    if (root / "package.json").is_file():
+        scripts = _scripts(_package(root))
         script = next((s for s in ("dev", "start", "preview") if s in scripts), None)
         if script:
             text = ("  ui:\n    backend: local\n    description: open the app in a headless browser and check the page\n"
@@ -181,7 +305,7 @@ def detect(root: Path) -> list[tuple[str, str, str]]:
     root = Path(root)
     notebooks = _walk(root, "*.ipynb", 5)
     found = [_notebook(root, nb) for nb in notebooks + _percent_notebooks(root, 5 - len(notebooks))]
-    for probe in (_pytest, _trainer, _web):
+    for probe in (_pytest, _js_tests, _playwright_tests, _go_tests, _cargo_tests, _trainer, _web):
         hit = probe(root)
         if hit:
             found.append(hit)

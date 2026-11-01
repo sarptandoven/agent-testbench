@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="4" skipped="0" failures="0" errors="0" uuid="3e1975f0-bc00-4efb-8b4d-51c83150f021" timestamp="2026-11-01T08:14:57.474+00:00" time="0.093">
+    <testsuite name="calc" tests="3" skipped="0" errors="0" failures="0">
+        <testcase name="tests::negatives" classname="calc" timestamp="2026-11-01T08:14:57.474+00:00" time="0.006"/>
+        <testcase name="tests::adds" classname="calc" timestamp="2026-11-01T08:14:57.474+00:00" time="0.008"/>
+        <testcase name="tests::overflows" classname="calc" timestamp="2026-11-01T08:14:57.474+00:00" time="0.092"/>
+    </testsuite>
+    <testsuite name="calc::outside" tests="1" skipped="0" errors="0" failures="0">
+        <testcase name="from_outside" classname="calc::outside" timestamp="2026-11-01T08:14:57.474+00:00" time="0.006"/>
+    </testsuite>
+</testsuites>

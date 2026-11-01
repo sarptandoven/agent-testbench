@@ -2,6 +2,10 @@
 
 ## 0.2.0 - not yet released
 
+- Not only Python: recipes jest, vitest, go-test, cargo-test and playwright-ts, each with a local plan judged by the
+  runner's JUnit report and (all but Playwright) an offline docker plan. `testbench init` detects npm test runners,
+  Go modules and Rust crates. `junit:` reads real reports from nine runners correctly (mocha's failures, Go's
+  failing line, gotestsum's build failures, JS test names) and says how to write a missing one.
 - Fixes where the 0.2.0 features meet: `loop try` works in repositories that gitignore `.testbench/`; rescue no
   longer calls files a notebook writes (`path.open("w")`, `ZipFile(p, "w")`, archive members) or its own code
   (namespace folders, `sys.path.append`) missing, and sets papermill parameters small; `init --recipe` uses a

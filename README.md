@@ -45,7 +45,10 @@ lint, run, the files they write, every test passing, a page with no console erro
 the number only you know ("accuracy >= 0.9"). Starting from a goal instead? `testbench recipes` lists ready
 ladders of plans - pytest, a Colab notebook, PyTorch training, a LoRA fine-tune, a web app, an LLM eval, a Docker
 sandbox, your own GPU box, a data pipeline - with each plan's worst case; `testbench init --recipe pytorch-train`
-writes one, and `--add` adds one to the testbench.yaml you have ([docs/recipes.md](docs/recipes.md)).
+writes one, and `--add` adds one to the testbench.yaml you have ([docs/recipes.md](docs/recipes.md)). Not only
+Python: `init` turns `npm test` (jest, vitest, mocha, node --test, Playwright), a Go module or a Rust crate into a
+plan judged by the runner's own JUnit report, and the jest, vitest, go-test and cargo-test recipes also run the
+suite in a Docker container with no network.
 
 **Claude Code** - the plugin adds the skills and a guard hook for spending and secrets:
 

@@ -16,8 +16,8 @@ from agent_testbench import budget, config as C, recipes as RC
 from agent_testbench.cli import INIT_TEMPLATE
 from conftest import chromium_ready, cli, make_notebook
 
-NAMES = ["data-pipeline", "docker-sandbox", "hf-finetune", "llm-eval", "notebook-colab", "pytest", "pytorch-train",
-         "ssh-gpu-box", "web-app"]
+NAMES = ["cargo-test", "data-pipeline", "docker-sandbox", "go-test", "hf-finetune", "jest", "llm-eval", "notebook-colab",
+         "playwright-ts", "pytest", "pytorch-train", "ssh-gpu-box", "vitest", "web-app"]
 
 
 def fresh(project="recipes") -> str:
@@ -129,7 +129,7 @@ def test_recipes_name_prints_it_as_it_ships(tmp_path):
     r = cli(tmp_path, "recipes", "pytorch-train")
     assert r.returncode == 0 and r.stdout == (RC.HERE / "pytorch-train.yaml").read_text()
     r = cli(tmp_path, "recipes", "pytorch")
-    assert r.returncode == 2 and "no recipe 'pytorch'; the recipes are data-pipeline, docker-sandbox" in r.stdout
+    assert r.returncode == 2 and "no recipe 'pytorch'; the recipes are cargo-test, data-pipeline, docker-sandbox" in r.stdout
 
 
 def test_init_with_recipes_writes_a_config_that_loads(tmp_path):

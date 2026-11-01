@@ -184,10 +184,11 @@ written before the run started, fails instead of being read.
 
 ## junit
 
-A test suite's own JUnit XML report: pytest `--junitxml=report.xml`, jest-junit, go-junit-report, Maven
-Surefire and most others. Reports with a `<testsuites>` root and bare `<testsuite>` reports both work; the counts
-come from the `<testcase>` elements (or from a suite's totals when it has none), and failures and errors are never
-fewer than the suites' totals say (a suite that broke before its tests ran may list no test case for it).
+A test suite's own JUnit XML report: pytest `--junitxml=report.xml`, jest, vitest, mocha, `node --test`,
+Playwright, Go (gotestsum), Rust (cargo-nextest), Maven Surefire and most others ([other languages](#other-languages)
+says how each writes one). Reports with a `<testsuites>` root and bare `<testsuite>` reports both work; the counts
+come from the `<testcase>` elements (or from a suite's totals when it has none), and failures and errors together
+are never fewer than the suites' totals say (a suite that broke before its tests ran may list no test case for it).
 
 ```yaml
 junit: {path: report.xml, tests: ">= 10", skipped: "<= 2"}
@@ -215,6 +216,63 @@ The `failures` and `errors` checks name the first three failing test cases and t
 ```
 
 A report left over from an earlier run never passes for this one: a file older than the run's start is refused.
+When there is no report, the detail says how the step's runner writes one (jest, vitest, mocha, `node --test`,
+Playwright, gotestsum, cargo-nextest; pytest otherwise).
+
+A failing case is named as its runner shows it (`tests.test_math.test_sub`, `sum.test.js > sum > adds`,
+`example.com/calc.TestAdd`, `calc.tests::adds`), with its message - or, when the message says nothing (Go's
+`Failed`), the first line of the failure's own text - and the values it compared (`Expected:` / `Received:`,
+`left:` / `right:`).
+
+### Other languages
+
+These are the commands the recipes ([jest, vitest, go-test, cargo-test, playwright-ts](recipes.md)) and `testbench
+init` use. Each was run for a real report, passing and failing, and those reports are in
+[tests/data/junit/](../tests/data/junit), where a test checks
+what `junit:` reads from each: the counts and the name and message of every failing case.
+
+- **jest** (jest-junit 17): `npx --no -- jest --ci --reporters=default --reporters=jest-junit`, with
+  `env: {JEST_JUNIT_OUTPUT_FILE: junit.xml, JEST_JUNIT_REPORT_TEST_SUITE_ERRORS: "true"}`. Without the second
+  variable a test file that fails to load is left out of the report, and only the exit code and a lower `tests`
+  count show it; with it, the file is an error named after it (jest-junit lists it twice, as an error and a failure).
+- **vitest** (5): `npx --no -- vitest run --reporter=default --reporter=junit --outputFile.junit=junit.xml`. A file
+  that fails to import is a failed test named after the file.
+- **mocha** (12): `npx --no -- mocha --reporter xunit --reporter-option output=junit.xml`, mocha's own reporter. Its
+  suite totals call every failure an error and leave out skips and hooks, so the counts come from its test cases; a
+  `before` hook that throws is a failure of its own. (mocha-junit-reporter 2.2.1 does not run under mocha 12.)
+- **node --test** (Node 22): `node --test --test-reporter=spec --test-reporter-destination=stdout
+  --test-reporter=junit --test-reporter-destination=junit.xml`. A file that fails to load is a failed test named
+  after the file.
+- **Playwright** (1.64): `npx --no -- playwright test --reporter=list,junit` with
+  `env: {PLAYWRIGHT_JUNIT_OUTPUT_NAME: junit.xml}`. A test that passed on a retry counts as passed (`--retries=0`
+  makes it fail); each project (browser) runs, and counts, a test again.
+- **Go** (gotestsum 1.13): `go run gotest.tools/gotestsum@v1.13.0 --junitfile junit.xml -- -count=1 ./...`. `go test`
+  writes no JUnit; gotestsum converts its `-json` output, and `go run ...@version` pins it with no install (with no
+  network, run an installed `gotestsum`: `go run` asks the module proxy whether the module is deprecated). A package
+  that does not build fails as `<package> > TestMain`, a panic as the test that panicked, and a parent test fails with
+  its failing subtest (both count). go-junit-report 2.1 (`go test -json ./... | go-junit-report -parser gojson`)
+  works too, but leaves a panic's message out of its case.
+- **Rust** (cargo-nextest 0.9): `cargo nextest run --profile ci`, with this in `.config/nextest.toml`; the report is
+  `target/nextest/ci/junit.xml`. `cargo test` writes no JUnit. Ignored tests are left out (`skipped` stays 0), and
+  nextest does not run doc tests.
+
+  ```toml
+  [profile.ci]
+  fail-fast = false        # run every test, so the report names every failure
+
+  [profile.ci.junit]
+  path = "junit.xml"
+  ```
+
+`npx --no --` runs the project's own runner and never downloads one: plain `npx jest` in a project without jest
+fetches the latest jest from the registry, and `npx --no jest --ci` hands `--ci` to npx, not to jest.
+
+```
+- expected junit.xml: failures 0: 1 (wanted == 0) of 2 tests; failed: sum.test.js > sum > adds (expected 3 to be 4 // Object.is equality)
+- expected junit.xml: failures 0: 1 (wanted == 0) of 2 tests; failed: example.com/calc.TestAdd (calc_test.go:7: Add(1, 2) = 3, want 4)
+- expected target/nextest/ci/junit.xml: failures 0: 1 (wanted == 0) of 2 tests; failed: calc.tests::adds (thread 'tests::adds' (2817) panicked at src/lib.rs:11:9: assertion `left == right` failed left: 3 right: 4)
+- expected target/nextest/ci/junit.xml: JUnit report: file missing: the test command wrote no report there (cargo-nextest writes it only for a profile with a junit path: ...)
+```
 
 ## gpu
 

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="3" failures="0" errors="0" time="0.004945026">
+    <testsuite name="sum.test.js" timestamp="2026-11-01T08:12:58.595Z" hostname="vm" tests="3" failures="0" errors="0" skipped="1" time="0.004945026">
+        <testcase classname="sum.test.js" name="sum &gt; adds 1 + 2 to equal 3" time="0.00283694">
+        </testcase>
+        <testcase classname="sum.test.js" name="sum &gt; adds negatives" time="0.000334505">
+        </testcase>
+        <testcase classname="sum.test.js" name="sum &gt; handles big numbers" time="0">
+            <skipped/>
+        </testcase>
+    </testsuite>
+</testsuites>
