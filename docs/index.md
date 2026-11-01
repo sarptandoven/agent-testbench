@@ -37,7 +37,12 @@ $ testbench verify
 ```
 
 That is the project `testbench demo` sets up, with a bad learning rate planted in it, run on a Linux machine on
-2026-11-01 (abridged where a line says `...`). A passing report says:
+2026-11-01 (abridged where a line says `...`). `testbench report --format html` makes a report a page; this is the
+failing run's, from the same steps run again for this screenshot ([the five-minute tour](tour.md) has the rest):
+
+[![Screenshot of the HTML report of the failing run: a red FAIL badge for plan smoke, stopped because step 2 (train quick) failed; facts - local, $0.000, worst case $0.00, the commit plus uncommitted changes, Python 3.13.17, 11 evidence files; FAIL: train quick, expected outputs/metrics.json: accuracy >= 0.85: 0.1711 (wanted >= 0.85); compared with the previous run (passed): Broke: train quick, accuracy 0.9756 -> 0.1711; steps: lint PASS, train quick FAIL with 4 of 5 checks.](assets/report-fail.png)](assets/report-fail.png)
+
+A passing report says:
 
 - **it ran, start to finish**: in a fresh process and kernel started by testbench, not in the agent's own session,
   with every cell, command or page action recorded;
@@ -55,7 +60,7 @@ What it does not prove, and how it compares with CI, papermill or calling Modal 
 -   **Try it in a minute**
 
     `pip install "agent-testbench[all]"`, then `testbench demo`: a small notebook project, run for free here.
-    [Getting started](getting-started.md)
+    [Getting started](getting-started.md), or [the tour](tour.md) with screenshots
 
 -   **See it used**
 

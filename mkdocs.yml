@@ -13,6 +13,7 @@ copyright: MIT License
 docs_dir: docs
 exclude_docs: |
   hooks.py
+  assets/make_screenshots.py
   requirements.txt
   __pycache__/
 watch:
@@ -24,6 +25,7 @@ hooks:
 
 nav:
   - Home: index.md
+  - A five-minute tour: tour.md
   - Why agent-testbench: why.md
   - Use cases: use-cases.md
   - Getting started: getting-started.md

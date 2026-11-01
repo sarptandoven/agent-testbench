@@ -24,6 +24,12 @@ REVERTED try 3: accuracy 0.9689 is not better than the best 0.9689. The branch i
 That is a real run: Claude Code, given only this plugin, took a model from 0.86 to 0.9756 accuracy in six tries,
 four kept and two reverted by testbench, in 78 seconds - [docs/demo-loop.md](docs/demo-loop.md).
 
+<img src="https://raw.githubusercontent.com/sarptandoven/agent-testbench/main/docs/assets/report-pass.png" width="640"
+alt="The HTML report of a fixed run: PASS, accuracy 0.1711 to 0.9756 since the failing run before it, every check that
+was made, the code and Python it ran, the evidence hash, and the confusion matrix plot inline">
+
+*`testbench report --format html` for the demo's fixed run - a real report, unedited ([the tour](docs/tour.md)).*
+
 ## Quick start
 
 ```bash
@@ -261,6 +267,7 @@ plugin, which adds the `iterate` and `setup` skills.
   notifications, exports to MLflow and W&B
 - [docs/clients.md](docs/clients.md), [docs/python-api.md](docs/python-api.md) - other coding agents, the Python API
   and LLM tool definitions
+- [docs/tour.md](docs/tour.md) - a five-minute tour with real screenshots, from install to a proved fix
 - [docs/why.md](docs/why.md), [docs/use-cases.md](docs/use-cases.md), [docs/faq.md](docs/faq.md),
   [docs/troubleshooting.md](docs/troubleshooting.md)
 - [docs/github-action.md](docs/github-action.md) - the GitHub Action: inputs, outputs, what reviewers see
