@@ -6,6 +6,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
@@ -130,6 +131,51 @@ def test_a_cost_above_the_threshold_is_asked_of_the_person(tmp_path, plugin):
     assert "approved this cost when asked" in text and "# PASS - plan `on-fake`" in text, text
     asked, text = asyncio.run(run(False))
     assert "asked directly and said no" in text and "PASS" not in text
+
+
+class Person:
+    """An MCP context whose client can ask the person: they answer `answer` after `delay` seconds (or it raises)."""
+
+    def __init__(self, answer, delay=0.0):
+        import types
+        self.client_capabilities = types.SimpleNamespace(elicitation=object())
+        self.answer, self.delay, self.asked = answer, delay, []
+
+    async def elicit(self, message, schema):
+        import types
+        self.asked.append(message)
+        await asyncio.sleep(self.delay)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return types.SimpleNamespace(action="accept", data=schema(approve=self.answer))
+
+
+def test_a_person_asked_directly_is_notified_only_if_they_do_not_answer(tmp_path, plugin, monkeypatch, webhook):
+    from agent_testbench import backends, mcp_server
+    root = _priced(tmp_path)
+    (root / "testbench.yaml").write_text((root / "testbench.yaml").read_text() + f"notify: {{webhook: '{webhook.url}'}}\n")
+    for p in reversed(plugin["PYTHONPATH"].split(os.pathsep)):
+        monkeypatch.syspath_prepend(p)                     # the server reads testbench.yaml too, as the CLI does
+    monkeypatch.setattr(backends, "_loaded", None)
+    monkeypatch.setenv("PYTHONPATH", plugin["PYTHONPATH"])
+    monkeypatch.setattr(mcp_server, "ASK_NOTICE_AFTER_S", 1.0)
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))      # where the held notice waits
+    launch = ["run", "on-fake", "--detach"]
+
+    code, out = asyncio.run(mcp_server._with_approval(Person(False), str(root), launch))
+    assert code == 2 and "asked directly and said no" in out, out
+    assert not webhook.events(), "the person answered at once: there is nothing to tell them"
+
+    person = Person(False, delay=4)
+    code, out = asyncio.run(mcp_server._with_approval(person, str(root), launch))
+    assert "said no" in out and len(person.asked) == 1
+    [sent] = webhook.events("approval_needed")
+    assert sent["text"].endswith("or no. The agent's client is asking you too.") and sent["plan"] == "on-fake", sent
+
+    code, out = asyncio.run(mcp_server._with_approval(Person(RuntimeError("no dialog here")), str(root), launch))
+    assert "could not be asked directly: no dialog here" in out
+    assert len(webhook.events("approval_needed")) == 2 and webhook.events()[-1]["text"].endswith("or no.")
+    assert not list(tmp_path.glob("testbench-approval-*")) and not webhook.events("run_end"), "nothing ran"
 
 
 def test_without_elicitation_it_says_what_needs_approval(tmp_path, plugin, monkeypatch):

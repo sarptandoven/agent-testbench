@@ -30,6 +30,8 @@ from . import __version__, config as C
 EVENTS = C.NOTIFY_EVENTS
 TIMEOUT = 5.0                     # seconds for one delivery, all of it (connecting, sending, the answer)
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
+HOLD_ENV = "TESTBENCH_HOLD_APPROVAL_NOTICE"    # an empty file: approval_needed goes there, for the MCP server to send
+                                               # only if the person it asks directly does not answer soon
 
 
 def log_path(root: Path) -> Path:
@@ -202,7 +204,9 @@ def run_end(root: Path, run_dir: Path, rep: dict | None = None, cfg: dict | None
 
 def approval_needed(root: Path, cfg: dict, message: str, est: dict, how: str) -> None:
     """A launch was refused until a person approves it: what, on what hardware, the worst case, how to say yes.
-    Other refusals (over a hard limit) are not a question for the person, so they are not sent."""
+    Other refusals (over a hard limit) are not a question for the person, so they are not sent. When the MCP server
+    is about to ask the person directly (HOLD_ENV), it is held for the server, which sends it only if that question
+    goes unanswered for a while (or cannot be asked): a person who answered at once needs no message."""
     if not str(message).startswith("Needs approval"):
         return
     hw = (est.get("backend") or "?") + (f" {est['gpu']}" if est.get("gpu") else "")
@@ -210,7 +214,24 @@ def approval_needed(root: Path, cfg: dict, message: str, est: dict, how: str) ->
     said = str(message).split(":", 1)[1].split(" Ask a person", 1)[0].strip()
     text = (f"needs your approval: {said} On {hw}. The agent was told to wait for a person's yes: tell it yes to let "
             f"it go ahead (`{how}`), or no.")
-    send(root, cfg, "approval_needed", text, {
-        "what": est.get("what"), "plan": est.get("plan"), "backend": est.get("backend"), "gpu": est.get("gpu"),
-        "status": "waiting for approval", "worst_case_usd": worst, "max_minutes": est.get("max_minutes"),
-        "message": message, "approve_with": how})
+    fields = {"what": est.get("what"), "plan": est.get("plan"), "backend": est.get("backend"), "gpu": est.get("gpu"),
+              "status": "waiting for approval", "worst_case_usd": worst, "max_minutes": est.get("max_minutes"),
+              "message": message, "approve_with": how}
+    held = os.environ.get(HOLD_ENV)
+    if held and Path(held).is_file() and not Path(held).stat().st_size:
+        try:                                             # the MCP server asks the person first; it sends this if
+            Path(held).write_text(json.dumps({"root": str(root), "text": text, "fields": fields}))  # nobody answers
+            return
+        except OSError:
+            pass
+    send(root, cfg, "approval_needed", text, fields)
+
+
+def send_held(held: Path, note: str = "") -> tuple[bool | None, str]:
+    """Send the approval_needed a launch left in `held` (see HOLD_ENV), with `note` after its text. Never raises."""
+    try:
+        data = json.loads(Path(held).read_text() or "null")
+        root, text, fields = Path(data["root"]), str(data["text"]), dict(data["fields"])
+    except (OSError, ValueError, TypeError, KeyError):
+        return None, "no approval was needed"
+    return send(root, None, "approval_needed", text + (f" {note}" if note else ""), fields)
