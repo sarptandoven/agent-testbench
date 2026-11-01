@@ -170,6 +170,11 @@ $ testbench verify 20261101-065034-smoke
 **What the report shows:** each kept change with what it moved and the run that proves it, each reverted try and
 why, and the branch to review. Merging is yours to decide. Every verdict is testbench's, not the agent's.
 
+`testbench ui` puts the loop next to every run, with a trend line per checked number. A screenshot from a shorter
+loop on the same project, [the tour](tour.md)'s:
+
+[![The testbench ui index for the tiny-model project: a plans table where smoke has 6 runs, 83% passed, and a trend line for accuracy that dips once (a planted bug) and ends at 0.98; a runs table, newest first, with each run's commit; and the loop: stopped, best accuracy 0.98, 2 tries, 1 kept, with a link to its report.](assets/ui-index.png)](assets/ui-index.png)
+
 **Overnight on a GPU** (not run for this page): the same commands on a plan with `backend: modal` and a `gpu:`,
 with a real budget - `testbench loop start gpu-check --metric outputs/metrics.json:accuracy --budget-usd 5
 --max-hours 8`. One budget covers every run of the loop; if it is above `ask_above_usd`, a person approves the
@@ -413,6 +418,11 @@ $ testbench run ui-check
 **What the report shows:** the page error (once per click), the text that was missing, and screenshots after the
 actions and of the whole page at the end - `testbench report --format html` puts them on one page. If something
 already answers on the URL before `serve:` starts, the step stops rather than test the wrong program.
+
+Part of that page, from the same two runs made again for this screenshot (the screenshot of the whole page at the
+end is the same picture, so the page shows it once):
+
+[![Part of the HTML report of the failing ui-check run: the checks table - page status 200 ok, page shows 'Count: 2' missed (not found), title contains 'Counter' ok, no console or page errors missed (updateTotal is not defined, twice) - then the evidence to look at: the screenshot taken after the two clicks, the Counter page still showing Count: 0 above its Add one button.](assets/web-report.png)](assets/web-report.png)
 
 (This page's runs used port 8994, because other work on the machine could have been using 8971. Web steps need
 `playwright install chromium`; see [troubleshooting](troubleshooting.md#plan-runs) if Chromium does not start.)

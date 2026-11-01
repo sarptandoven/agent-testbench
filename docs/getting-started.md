@@ -104,6 +104,13 @@ Code outside git; Python 3.13.17 on x86_64; evidence sha256 `c9e3b3ce5acafee6` (
 The worst case was priced before the run started ($0.00 here: it ran on this machine). A failing run leads with
 what failed and why, and from the second run on the report says what changed since the last one. The run's folder,
 `.testbench/runs/<run id>/`, holds the report, the executed notebook, the plots and the files the notebook wrote.
+
+??? example "What a failing run prints: a picture of the real output, not shortened, for the demo project's `smoke` plan with a bad learning rate planted in it"
+
+    [![The full terminal output of testbench run smoke with the planted bug: progress lines for both steps and every cell, the cell 3 metrics with accuracy 0.1711 and learning_rate 1.0, then the report - FAIL, plan smoke on local; stopped because step 2 (train quick) failed; code with uncommitted changes; expected accuracy >= 0.85: 0.1711 (wanted >= 0.85); the last output; compared with the previous run: Broke: train quick, accuracy 0.9756 -> 0.1711; the steps table; the evidence to look at; the passed check.](assets/terminal-fail.png)](assets/terminal-fail.png)
+
+    The runs behind it, and the fix, are in [the five-minute tour](tour.md).
+
 Then:
 
 ```
@@ -112,6 +119,11 @@ $ testbench verify
 $ testbench report --format html          # one page with the plots inline
 $ testbench history tiny-model-local      # each run, and how the checked numbers moved
 ```
+
+The page `report --format html` writes, here a screenshot for the demo project's `smoke` plan, run again after a
+fix ([the tour](tour.md)):
+
+[![The HTML report of a passing run of the smoke plan: a green PASS badge; facts - local, $0.000, worst case $0.00, the commit, Python 3.13.17, 11 evidence files; compared with the previous run (failed): Fixed: train quick, accuracy 0.1711 -> 0.9756; steps: lint and train quick PASS; checks: all six ok, accuracy 0.9756 (wanted >= 0.85); evidence to look at: the notebook's confusion matrix plot, titled accuracy 0.976.](assets/report-pass.png)](assets/report-pass.png)
 
 In a git repository the report also names the commit it ran; see [proof records](proof-records.md).
 
