@@ -35,7 +35,10 @@ testbench run <plan>                       # the report: what passed, what faile
 
 `testbench init` finds notebooks, a pytest suite, training scripts and web apps, and writes a plan for each -
 lint, run, the files they write, every test passing, a page with no console errors - with a `FILL IN` line for
-the number only you know ("accuracy >= 0.9").
+the number only you know ("accuracy >= 0.9"). Starting from a goal instead? `testbench recipes` lists ready
+ladders of plans - pytest, a Colab notebook, PyTorch training, a LoRA fine-tune, a web app, an LLM eval, a Docker
+sandbox, your own GPU box, a data pipeline - with each plan's worst case; `testbench init --recipe pytorch-train`
+writes one, and `--add` adds one to the testbench.yaml you have ([docs/recipes.md](docs/recipes.md)).
 
 **Claude Code** - the plugin adds the skills and a guard hook for spending and secrets:
 
@@ -47,13 +50,23 @@ claude plugin install agent-testbench@agent-testbench
 Then ask in plain words: *"get training working and prove it with the smoke plan"*, or *"use testbench loop to
 raise accuracy, budget $2"*.
 
-**Cursor, Codex, Claude Desktop or any MCP client** (nothing to install with [uv](https://docs.astral.sh/uv/)):
+**Cursor, VS Code, Codex, Gemini CLI**: `testbench connect cursor` (or `vscode`, `codex`, `gemini`, `claude`;
+`--user` for every project, `--list` to see what is set up) registers the MCP server in the client's own config
+and writes the working rules into AGENTS.md; [docs/clients.md](docs/clients.md) says which guardrails hold
+outside Claude Code.
+
+**Any other MCP client** (nothing to install with [uv](https://docs.astral.sh/uv/)):
 
 ```json
 { "mcpServers": { "agent-testbench": { "command": "uvx", "args": ["--from", "agent-testbench[all]", "testbench", "mcp"] } } }
 ```
 
 **In CI**: `uses: sarptandoven/agent-testbench@v1` with `plan: smoke` ([docs/github-action.md](docs/github-action.md)).
+
+**Your own agent or a notebook**: `from agent_testbench import Testbench` runs plans and live sessions from Python,
+and `agent_testbench.tools` gives the same tools to the Anthropic or OpenAI API (`tools.anthropic_tools()`,
+`tools.call(name, input)`), inside the same budget, approvals and machine limits
+([docs/python-api.md](docs/python-api.md), [examples/agent-loop](examples/agent-loop)).
 
 **Any other agent** reads the working rules `testbench init` writes into `AGENTS.md`.
 
@@ -66,6 +79,11 @@ raise accuracy, budget $2"*.
   thresholds and tolerances, the project's own test suite, numbers in the log, files, video frames, a page's text,
   GPU use, a plot that should look like a known-good one. The report leads with what failed and says what changed
   since the last run.
+- **Rescue a notebook** that no longer runs: `testbench rescue nb.ipynb` reads it and runs it top to bottom, then
+  says which cell fails and why - a missing package and its pip name, cells that only worked in another order, a
+  Colab-only path, a file downloaded by hand, a GPU this machine lacks - with a plan that proves it once fixed.
+- **Test LLM apps for free**: `mocks: [openai, anthropic]` on a step swaps in strict mock SDKs - no key, no network,
+  the same answer every time, and the SDK's own `BadRequestError` for a request the real API would refuse.
 - **Improve it** with a loop: each idea is committed, proved by a run, and kept only if the number got better.
 - **Stay inside a budget**: worst case priced before every launch, approvals above a threshold, machine-wide limits
   a project cannot raise, and a hard stop on the machine doing the work.
@@ -79,6 +97,7 @@ raise accuracy, budget $2"*.
 | `local` | this one, in the project folder | this machine's supervisor | free |
 | `docker` | a fresh container here; `network: none` for a sandbox, `gpus: all` for NVIDIA GPUs | a watchdog inside the container | [docs/docker.md](docs/docker.md) |
 | `ssh` | any machine `ssh` reaches: a GPU box, a university server, a rented instance | a watchdog on that machine | [reference](docs/reference.md#the-ssh-backend) |
+| `kubernetes` | a Job on your cluster's GPU or CPU nodes, through kubectl | the Job's `activeDeadlineSeconds`, and a watchdog in the pod | [docs/kubernetes.md](docs/kubernetes.md) |
 | `modal` | a [Modal](https://modal.com) Sandbox or function with any GPU (T4 ... B200) | Modal's own timeouts | your Modal account |
 | `colab` | a [Colab](https://colab.research.google.com) VM through Google's Colab CLI | a watchdog on the VM, which releases it | your compute units |
 | plugins | anything a package registers (`agent_testbench.backends` entry point) | the backend's own | [reference](docs/reference.md#backends) |
@@ -138,8 +157,10 @@ plans:
           gpu: {busy_pct: ">= 50"}     # an idle GPU fails the step
 ```
 
-Steps are `notebook:`, `run:` (a shell command) or `web:` (a page driven in headless Chromium: click, fill, wait,
-screenshot). Every expectation and what its failure looks like: [docs/expectations.md](docs/expectations.md). Every
+Steps are `notebook:` (an `.ipynb` or a percent-format `.py`; `params:` sets Colab form fields and papermill
+parameters - [docs/notebooks.md](docs/notebooks.md)), `run:` (a shell command) or `web:` (a page driven in headless
+Chromium: click, fill, wait, screenshot). `mocks: [openai, anthropic]` gives a step mock LLM SDKs, and
+`mock_calls: {anthropic: {calls: "<= 5"}}` bounds what the code asked for ([docs/mocks.md](docs/mocks.md)). Every expectation and what its failure looks like: [docs/expectations.md](docs/expectations.md). Every
 field of testbench.yaml: [docs/reference.md](docs/reference.md).
 
 ```
@@ -165,7 +186,9 @@ platform and packages where it ran, and the sha256 of every evidence file, in a 
 [JSON Schema](src/agent_testbench/schema/report-v1.schema.json). `testbench verify` says whether the evidence still
 matches. `report --format html` writes one page with the plots inline, `--format junit` feeds CI test reports,
 `testbench history <plan>` shows how the checked numbers moved, and `testbench ui` writes static pages for every
-run with a trend line per number.
+run with a trend line per number. `testbench export --to mlflow|wandb|csv|jsonl` (or `export:` in testbench.yaml,
+after every run) puts runs where you already track experiments, with the evidence attached
+([docs/export.md](docs/export.md)).
 
 ## Loops
 
@@ -180,6 +203,11 @@ far; otherwise the branch goes back to the best commit, keeping edits made meanw
 check reads (`FILE:KEY`) or any check's number (`check:val_loss`). One budget covers every run of the loop, approved
 once; each run is still checked against the per-run and daily limits. The report lists each kept change, what it
 moved and the run that proves it; merging is yours to decide.
+
+Left to run, a loop stops itself: `--target 0.95` (done), `--patience 4` (four tries in a row not kept) or
+`--max-tries 20` refuse the next try and say what to do instead. With `notify: {webhook_env: TESTBENCH_WEBHOOK}`
+in testbench.yaml you hear when runs and loops end, or when a launch waits for your yes - a Slack webhook or any
+JSON POST ([docs/loops.md](docs/loops.md), [docs/notify.md](docs/notify.md)).
 
 ## Guardrails
 
@@ -203,7 +231,8 @@ moved and the run that proves it; merging is yours to decide.
 
 Tools: `session_start`, `session_exec`, `session_files`, `session_sync`, `session_install`, `session_shell`,
 `session_list`, `session_stop`, `plans`, `run_plan`, `wait_run`, `get_report`, `list_runs`, `cancel_run`, `spend`,
-`lint_notebook`, `add_note`, `loop_start`, `loop_try`, `loop_status`, `loop_stop`. They run side by side (stop a
+`lint_notebook`, `rescue_notebook`, `recipes`, `export_run`, `add_note`, `loop_start`, `loop_try`, `loop_status`,
+`loop_stop`. They run side by side (stop a
 session while a long cell runs), return plots and screenshots as images, and pass on progress. `testbench mcp --http`
 serves streamable HTTP on 127.0.0.1. In Claude Code: `claude mcp add agent-testbench -- testbench mcp`, or the
 plugin, which adds the `iterate` and `setup` skills.
@@ -212,20 +241,28 @@ plugin, which adds the `iterate` and `setup` skills.
 
 | | |
 |---|---|
-| `testbench demo` / `init` / `doctor` / `mcp [--http]` | try it, set up, check this machine, serve MCP |
+| `testbench demo` / `init [--recipe]` / `recipes` / `connect` / `doctor` / `mcp [--http]` | try it, set up, check this machine, serve MCP |
 | `testbench session start/list/stop/sync/install/shell`, `exec`, `files` | live kernels |
 | `testbench plans` / `run` / `wait` / `runs` / `cancel` | plans |
-| `testbench report [--format html\|junit]` / `verify` / `history` / `ui` | proof |
-| `testbench loop start/try/status/stop` | improvement loops |
+| `testbench report [--format html\|junit]` / `verify` / `history` / `ui` / `export` | proof |
+| `testbench loop start/try/status/stop` / `notify test` | improvement loops, notifications |
 | `testbench estimate` / `spend [--modal]` / `prices [--update]` | money |
-| `testbench lint` / `nb split/build/fields` / `note` | notebooks and the lab notebook |
+| `testbench lint` / `rescue` / `nb split/build/fields` / `note` | notebooks and the lab notebook |
 
 ## Documentation
 
 - [docs/reference.md](docs/reference.md) - every field of testbench.yaml, sessions, plans, steps, loops, proof
   records, prices, the ssh backend, machine limits, writing a backend plugin
 - [docs/expectations.md](docs/expectations.md) - every expectation, with what its failure looks like
-- [docs/docker.md](docs/docker.md) - the docker backend: sandboxes, GPUs, the hard stop
+- [docs/recipes.md](docs/recipes.md), [docs/notebooks.md](docs/notebooks.md), [docs/rescue.md](docs/rescue.md),
+  [docs/mocks.md](docs/mocks.md) - starting points, what notebook steps accept, rescuing notebooks, mock LLM SDKs
+- [docs/docker.md](docs/docker.md), [docs/kubernetes.md](docs/kubernetes.md) - the docker and kubernetes backends
+- [docs/loops.md](docs/loops.md), [docs/notify.md](docs/notify.md), [docs/export.md](docs/export.md) - loops,
+  notifications, exports to MLflow and W&B
+- [docs/clients.md](docs/clients.md), [docs/python-api.md](docs/python-api.md) - other coding agents, the Python API
+  and LLM tool definitions
+- [docs/why.md](docs/why.md), [docs/use-cases.md](docs/use-cases.md), [docs/faq.md](docs/faq.md),
+  [docs/troubleshooting.md](docs/troubleshooting.md)
 - [docs/github-action.md](docs/github-action.md) - the GitHub Action: inputs, outputs, what reviewers see
 - [docs/demo-loop.md](docs/demo-loop.md), [docs/demo-sandbox.md](docs/demo-sandbox.md) and
   [docs/demo.md](docs/demo.md) - real agent runs, with what they did
@@ -237,6 +274,8 @@ plugin, which adds the `iterate` and `setup` skills.
 - **Colab**: `uv tool install google-colab-cli`, then log in once (`colab new`). Uses your compute units.
 - **ssh**: `ssh HOST true` must work with keys; `ssh: {host: HOST, usd_per_hour: 0}` in testbench.yaml.
 - **Docker**: a running Docker (or podman); `docker: {network: none}` for no network.
+- **Kubernetes**: kubectl with a context for your cluster; `kubernetes: {usd_per_hour: {cpu: 0, A100: 2.5}}`.
+- **Trackers**: `pip install "agent-testbench[mlflow]"` or `[wandb]` for exports.
 - **Web steps**: `playwright install chromium`.
 
 `testbench doctor` shows what this machine can run.

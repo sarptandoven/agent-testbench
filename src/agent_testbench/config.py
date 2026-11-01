@@ -15,6 +15,7 @@ import yaml
 CONFIG_NAME = "testbench.yaml"
 STEP_KINDS = ("notebook", "run", "web")
 
+NEVER_COPIED = [".testbench", ".env", ".env.*"]    # secrets go by name (`secrets:`), never in a copy of the project
 DEFAULTS = {
     "exclude": [".git", ".testbench", "__pycache__", "*.pyc", ".venv", "venv", "node_modules", ".ipynb_checkpoints",
                 ".DS_Store"],
@@ -70,6 +71,10 @@ def validate(raw: dict, root: Path) -> dict:
     if not project or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,40}", str(project)):
         raise ConfigError("`project:` must be a short name of letters, digits, - or _ (it names the Modal app and volume)")
     cfg["root"] = str(root)
+    if not isinstance(cfg.get("exclude"), list) or not all(isinstance(x, str) for x in cfg["exclude"]):
+        raise ConfigError("`exclude:` is a list of file patterns left out of copies of the project, e.g. [data/raw, "
+                          "\"*.ckpt\"]")
+    cfg["exclude"] = list(dict.fromkeys(cfg["exclude"] + NEVER_COPIED))
     for key in ("max_run_usd", "ask_above_usd", "max_day_usd"):
         if not number(cfg["budget"].get(key)):
             raise ConfigError(f"`budget.{key}` must be a number of US dollars, e.g. {DEFAULTS['budget'][key]}")

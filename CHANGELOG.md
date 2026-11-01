@@ -2,6 +2,46 @@
 
 ## 0.2.0 - not yet released
 
+- Recipes: `testbench recipes` lists starting points by goal (pytest, notebook-colab, pytorch-train, hf-finetune,
+  web-app, llm-eval, docker-sandbox, ssh-gpu-box, data-pipeline), each a ladder of plans with real checks and each
+  plan's worst case. `testbench init --recipe NAME` writes one (with the project's own notebook or training
+  script); `--add` appends its plans to an existing testbench.yaml without changing a line. See docs/recipes.md.
+- Mock LLM clients: `mocks: [openai, anthropic]` on a step swaps in strict, deterministic stand-ins for both Python
+  SDKs (no key, no network). They refuse what the API would refuse with the SDK's own error, answer from a replies
+  file (text, JSON, tool calls), fail chosen calls, and log every call to the step's `mock_calls.jsonl`;
+  `expect: {mock_calls: {anthropic: {calls: "<= 5"}}}` checks the calls, and a refused call fails the step.
+  See docs/mocks.md.
+- `testbench rescue NOTEBOOK`: why a notebook does not run and what to do. It reads it (cells run out of order,
+  names used before the cell that makes them, missing packages with their pip names, Colab-only parts, missing
+  files), runs it top to bottom in a fresh kernel, names the first failing cell and why, and suggests a plan that
+  proves it once fixed; `--fix OUT.ipynb` (mechanical fixes only), `--json`, `--no-run`. See docs/rescue.md.
+- Notebook steps take papermill parameters (a cell tagged `parameters`), percent-format `.py` notebooks (`# %%`;
+  jupytext when installed, a built-in reader otherwise), and the kernel the notebook names (a missing non-Python
+  kernel is named with how to install it). See docs/notebooks.md.
+- Loops left overnight: `testbench loop start --target/--patience/--max-tries` refuse further tries once a rule
+  fires, saying what to do (`--new-direction` after patience). A `notify:` webhook (`webhook_env: NAME` keeps the
+  URL out of the file) hears `run_end`, `loop_end` and `approval_needed`, never slowing or breaking a run;
+  `testbench notify test`. See docs/loops.md and docs/notify.md.
+- `testbench export RUN|latest|all --to mlflow|wandb|csv|jsonl`, and `export:` in testbench.yaml for every finished
+  run: status, cost, commit, params and every checked number as metrics, the report and evidence as artifacts.
+  Exporting again updates the run. Trackers are optional (`agent-testbench[mlflow]`, `[wandb]`) and export in the
+  background. See docs/export.md.
+- `backend: kubernetes`: plans and live sessions as Jobs on your cluster, GPUs priced by name in
+  `kubernetes.usd_per_hour` (nothing unpriced launches). The project and evidence go over `kubectl exec`, with no
+  shared storage; the hard stop is the Job's own `activeDeadlineSeconds`, plus a watchdog in the pod. Checked on a
+  real kind cluster. See docs/kubernetes.md.
+- `testbench connect CLIENT [--user] [--dry-run]` and `--list`: set agent-testbench up in Claude Code, Cursor, VS Code
+  (Copilot), Codex or Gemini CLI - the MCP server merged into the client's own config (backed up, idempotent) and
+  the working rules in a delimited AGENTS.md section; it says which guardrails hold outside Claude Code.
+- Python API (`agent_testbench.Testbench`: runs, sessions, spend, verify) and `agent_testbench.tools`: the MCP tools
+  as Anthropic and OpenAI tool definitions with a `call()` dispatcher, inside the same budget and approvals; an
+  example agent loop in examples/agent-loop. See docs/python-api.md.
+- Proof: `files:`, `json:`, `text:` and `media:` checks no longer pass on a file last written before the run
+  started (an old result); `junit:`, `metrics:` and `image:` already refused one.
+- `.env` and `.env.*` files never go into a copy of the project (Modal, Colab, ssh, docker, kubernetes, local
+  copies), whatever `exclude:` says; secrets go by name (`secrets:`).
+- The documentation site has a landing page, a fair comparison with the alternatives (docs/why.md), use cases, an
+  FAQ and a troubleshooting page built from the real messages in the code.
 - Guardrails hardened after an adversarial review. A budget, price or time limit that is not a real number (NaN,
   infinity) is refused when testbench.yaml, limits.yaml or a command line is read, and the budget check refuses
   any estimate or limit that is not one - before, a NaN budget in testbench.yaml let any launch past every limit,

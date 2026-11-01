@@ -12,7 +12,7 @@ to write instead.
 | `budget.ask_above_usd` | `0.5` | above this, `testbench run` needs `--approve` (a person's yes) |
 | `budget.max_day_usd` | `10.0` | refuse a run that would take today's committed total over this |
 | | | each budget value is capped by this machine's `~/.testbench/limits.yaml`, if set (see below) |
-| `exclude` | `.git`, `.testbench`, `__pycache__`, `*.pyc`, `.venv`, `venv`, `node_modules`, ... | files never shipped to Modal or Colab |
+| `exclude` | `.git`, `.testbench`, `__pycache__`, `*.pyc`, `.venv`, `venv`, `node_modules`, ... | files left out of every copy of the project (remote backends, `workdir: copy`); setting it replaces this list. `.testbench`, `.env` and `.env.*` are always left out |
 | `modal.python` | `"3.11"` | Python of the Modal image |
 | `modal.pip` | `[]` | packages for the Modal image (pin them) |
 | `modal.requirements` | none | a requirements file for the Modal image |
@@ -26,7 +26,7 @@ to write instead.
 | `pricing.modal_cpu_core_per_s`, `pricing.modal_mem_gib_per_s` | built in | |
 | `pricing.colab_units_per_hour` | built in (approximate) | `{CPU: 0.1, T4: 1.8, A100: 5.4, ...}`; check `colab usage` |
 | `pricing.colab_usd_per_unit` | `0.10` | |
-| `sessions.backend` | `local` | where `testbench session start` puts its kernel by default: `local`, `modal` or `colab` |
+| `sessions.backend` | `local` | where `testbench session start` puts its kernel by default: `local`, `docker`, `ssh`, `kubernetes`, `modal`, `colab` or a plugin's |
 | `sessions.gpu` | none | default GPU for sessions on that backend |
 | `sessions.idle_minutes` | `10` | a session stops itself after this long without use |
 | `sessions.max_minutes` | `60` | and after this long in any case; its worst-case cost is this many minutes of its hardware (Modal: up to 1440) |
@@ -76,7 +76,8 @@ testbench bounds the work, not the machine: a rented instance that bills while i
 
 ## Backends
 
-A backend is where plans and sessions run. Built in: `local`, `modal`, `colab`; `testbench doctor` lists every
+A backend is where plans and sessions run. Built in: `local`, `docker`, `ssh`, `kubernetes`, `modal`, `colab`
+([docker.md](docker.md), [kubernetes.md](kubernetes.md)); `testbench doctor` lists every
 backend this machine has and whether each is set up. Other backends come from installed packages: a package
 declares an entry point in the `agent_testbench.backends` group that names an instance of
 `agent_testbench.backends.Backend`, and its name can then be used as `backend:` in plans and sessions.
@@ -132,6 +133,7 @@ notebook: run code or cells, look at the values and plots, fix, run again, witho
 | `colab` | a Colab VM through Google's Colab CLI | copied to `/content` | the VM's own watchdog (max minutes + 10, idle minutes + 10; it releases the VM) and the supervisor (idle / max minutes) |
 | `ssh` | any machine `ssh` reaches (keys, no password) | copied to `<ssh.workdir>/<project>/sessions/NAME/project` | the machine's own watchdog (max minutes + 2, idle minutes + 10) and the supervisor (idle / max minutes) |
 | `docker` | a fresh container on this machine ([docker.md](docker.md)) | copied in with `docker cp` | a watchdog inside the container (max minutes + 2, idle minutes + 10) and the supervisor |
+| `kubernetes` | a Job's pod on your cluster ([kubernetes.md](kubernetes.md)) | copied in with `kubectl exec` | the Job's `activeDeadlineSeconds`, a watchdog in the pod, and the supervisor |
 
 ```
 testbench session start [NAME] [--backend B] [--gpu G] [--idle-minutes N] [--max-minutes N] [--secret NAME] [--approve]
@@ -165,7 +167,7 @@ sooner, at `idle_minutes` / `max_minutes`, while this machine is awake.
 ```yaml
 plans:
   <name>:
-    backend: local | modal | colab     # default local
+    backend: local | docker | ssh | kubernetes | modal | colab   # default local; or a plugin's
     gpu: T4                            # modal: T4 L4 A10 L40S A100-40GB A100-80GB H100 H200 B200 B300 RTX-PRO-6000
                                        #        (append :N for N GPUs, e.g. H100:2); colab: T4 L4 G4 A100 H100
     cpu: 4                             # modal only; overrides modal.cpu

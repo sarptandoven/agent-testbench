@@ -173,9 +173,13 @@ def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
         err = result.get("error")
         add("every cell ran without an error", not err,
             "all cells ran" if not err else f"cell {err.get('cell')}: {err.get('ename')}: {str(err.get('evalue'))[:300]}")
+    since = result.get("run_started")
     for pattern in expect.get("files", []):
         hits = sorted(glob.glob(str(workdir / pattern), recursive=True))
-        add(f"file {pattern}", hits, f"{len(hits)} found" if hits else "missing")
+        fresh = [h for h in hits if not _stale(Path(h), since)]
+        add(f"file {pattern}", fresh, f"{len(fresh)} found" if fresh else
+            f"{len(hits)} found, all last written before this run started: old results, not this run's" if hits
+            else "missing")
     for path, rules in (expect.get("json") or {}).items():
         f = workdir / path
         if any(c in str(path) for c in "*?["):           # a pattern, e.g. **/metrics.json: it must name one file
@@ -188,13 +192,18 @@ def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
                 continue
             f = Path(hits[0])
         try:
-            data = json.loads(f.read_text())
+            stale = _stale(f, since)
+            data = None if stale else json.loads(f.read_text())
         except FileNotFoundError:
             for key in rules:
                 add(f"{path}: {key}", False, "file missing")
             continue
         except json.JSONDecodeError as exc:
             add(f"{path}", False, f"not valid JSON: {exc}")
+            continue
+        if stale:
+            for key in rules:
+                add(f"{path}: {key}", False, stale)
             continue
         for key, rule in rules.items():
             try:
@@ -203,18 +212,15 @@ def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
                 ok, detail = False, f"no {key!r} in the file"
             add(f"{path}: {key} {rule}", ok, detail)
     for source, needles in (expect.get("text") or {}).items():
-        if source == "stdout":
-            text = result.get("stdout", "")
-        else:
-            f = workdir / source
-            text = f.read_text(errors="replace") if f.is_file() else None
+        text, why = _read(source, workdir, result)
         for needle in ([needles] if isinstance(needles, str) else needles):
             if text is None:
-                add(f"{source} contains {needle!r}", False, "file missing")
+                add(f"{source} contains {needle!r}", False, why)
             else:
                 add(f"{source} contains {needle!r}", needle in text, "found" if needle in text else "not found")
     for path, rules in (expect.get("media") or {}).items():
-        info = probe_media(workdir / path)
+        stale = (workdir / path).is_file() and _stale(workdir / path, since)
+        info = {"error": stale} if stale else probe_media(workdir / path)
         for key, rule in rules.items():
             if "error" in info:
                 add(f"{path}: {key}", False, info["error"])
