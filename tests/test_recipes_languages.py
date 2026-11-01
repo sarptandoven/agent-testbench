@@ -364,7 +364,8 @@ def test_node_s_own_test_runner_through_init(tmp_path):
     assert r.returncode == 0 and "# PASS - plan `node-tests` on local" in r.stdout, r.stdout
     (root / "sum.js").write_text(SUM_CJS.replace("a + b", "a * b"))
     r = cli(root, "run", "node-tests", "--wait", "300")
-    assert r.returncode == 1 and "failures 0: 2 (wanted == 0) of 2 tests; failed: sum > adds (" in r.stdout, r.stdout
+    assert r.returncode == 1 and "failures 0: 2 (wanted == 0) of 2 tests; failed: " in r.stdout, r.stdout
+    assert re.search(r"failed: (sum > )?adds", r.stdout), r.stdout    # node 22 names the suite too; others do not
 
 
 # ---- the docker plans: the image the recipe describes, built and run offline (opt in) -----------------------------

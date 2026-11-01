@@ -726,7 +726,7 @@ def cmd_notify(a):
     ok, what = N.send(root, cfg, "test", f"a test message from `testbench notify test`. Notifications for "
                       f"{', '.join(cfg['notify']['on'])} go here.", {"status": "test"}, force=True)
     print(f"Test message {what}." + ("" if ok else " Check the URL and that the service takes a JSON POST; every "
-                                                     f"attempt is in {N.log_path(root).relative_to(root)}."))
+                                                     f"attempt is in {N.log_path(root).relative_to(root).as_posix()}."))
     if ok and cfg["notify"]["webhook"]:
         print("The URL is written in testbench.yaml; if that file is committed or copied to other machines, so is "
               "the webhook's secret. `webhook_env: NAME` reads it from an environment variable instead.")

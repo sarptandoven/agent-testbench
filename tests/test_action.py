@@ -633,7 +633,7 @@ def test_attest_refuses_evidence_that_no_longer_matches_its_report(tmp_path, mon
     run_dir = tmp_path / "20261101-120000-good"
     (run_dir / "steps" / "01-train").mkdir(parents=True)
     log = run_dir / "steps" / "01-train" / "log.txt"
-    log.write_text("trained\n")
+    log.write_bytes(b"trained\n")                         # bytes: no CRLF on Windows
     evidence = [{"path": "steps/01-train/log.txt", "bytes": 8, "sha256": hashlib.sha256(b"trained\n").hexdigest()}]
     (run_dir / "report.json").write_text(json.dumps({"run_id": run_dir.name, "evidence": evidence}))
     for k, v in {"RUN_DIR": str(run_dir), "WORK": str(tmp_path), "GITHUB_OUTPUT": str(tmp_path / "out"),
@@ -643,7 +643,7 @@ def test_attest_refuses_evidence_that_no_longer_matches_its_report(tmp_path, mon
     monkeypatch.delenv("SUMMARY_FILE", raising=False)
     assert GA.main(["attest-subjects"]) == 0
     assert "\ntrue\n" in (tmp_path / "out").read_text() and (tmp_path / "attestation-subjects.txt").exists()
-    log.write_text("trained, trust me\n")
+    log.write_bytes(b"trained, trust me\n")
     (tmp_path / "out").write_text("")
     assert GA.main(["attest-subjects"]) == 1
     said = capsys.readouterr().out

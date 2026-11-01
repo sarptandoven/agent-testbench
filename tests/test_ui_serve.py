@@ -238,7 +238,7 @@ def test_names_are_escaped_and_secrets_never_shown(hostile, serve):
     assert "patience 3" in overview and "at most 5 tries" in overview, "the loop's stopping rules"
     assert "FAIL" in seen["/runs/20260101-000000-p/"][1] and "has ended" in seen["/runs/20260101-000000-p/"][1]
     live = json.loads(seen["/live/runs/20260101-000001-p?step=&offset=-1"][1])
-    assert live["done"] and live["text"] == f"said {HOSTILE}\n"
+    assert live["done"] and live["text"].replace("\r\n", "\n") == f"said {HOSTILE}\n"   # echo ends in CRLF on Windows
     for path in links("/runs/20260101-000000-p/", seen["/runs/20260101-000000-p/"][1]):
         seen[path] = get(port, path)[1:]
     for path, (kind, body) in seen.items():

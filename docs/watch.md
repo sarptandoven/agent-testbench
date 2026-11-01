@@ -70,7 +70,9 @@ one ends and covers every change made meanwhile - never more than one waiting. R
 
 Ctrl-C stops watching. A run that is still going is cancelled first (its driver and everything it started are
 stopped, and its report says it was cancelled), so nothing is left running. SIGTERM, and a console break on Windows,
-do the same. `--max-runs N` stops after N runs (exit 0 if the last passed, 1 if not); a refused plan exits 2.
+do the same - though on Windows stopping a watch has not been checked yet (its tests are skipped there; use
+`--max-runs` to be sure it ends). `--max-runs N` stops after N runs (exit 0 if the last passed, 1 if not); a refused
+plan exits 2.
 
 ## Notifications
 

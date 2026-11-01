@@ -10,6 +10,7 @@ plans:
         web:
           serve: python -m http.server 8971 --bind 127.0.0.1 -d site
           url: http://127.0.0.1:8971/
+          ready_timeout: 90             # python's http.server can take ~30 s to start on macOS (host name lookup)
           actions:
             - click: "#increment"
             - click: "#increment"

@@ -3,6 +3,7 @@
     python app.py 8974          # then open http://127.0.0.1:8974/
 """
 import json
+import socketserver
 import sys
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,6 +11,12 @@ from pathlib import Path
 
 STATIC = Path(__file__).parent / "static"
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css"}
+
+
+class Server(ThreadingHTTPServer):
+    def server_bind(self):                 # no host name lookup: it can hold the start up ~30 s on macOS
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "127.0.0.1", self.server_address[1]
 
 
 def split(total: str, people: str, tip_pct: str) -> dict:
@@ -57,4 +64,4 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8974
     print(f"serving http://127.0.0.1:{port}/", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+    Server(("127.0.0.1", port), Handler).serve_forever()

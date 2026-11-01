@@ -285,7 +285,9 @@ def test_detect_on_odd_projects_writes_yaml_that_loads(tmp_path):
     (tmp_path / "package.json").unlink()
     (tmp_path / "loop").symlink_to(tmp_path)
     nb = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell("x = 1 #@param")])
-    for name in ("weird name: #1 {x}.ipynb", "😀 émoji.ipynb", "true.ipynb", "a'b\"c.ipynb"):
+    odd = ["😀 émoji.ipynb", "true.ipynb"] + (["weird name #1 {x}.ipynb", "a'b.ipynb"] if os.name == "nt" else
+                                             ["weird name: #1 {x}.ipynb", "a'b\"c.ipynb"])   # Windows forbids : and "
+    for name in odd:
         nbformat.write(nb, str(tmp_path / name))
     (tmp_path / "int.ipynb").write_text(json.dumps({"cells": [{"cell_type": "code", "source": 5, "metadata": {},
                                                     "outputs": [], "execution_count": None}], "nbformat": 4,
@@ -294,7 +296,7 @@ def test_detect_on_odd_projects_writes_yaml_that_loads(tmp_path):
     raw = yaml.safe_load("project: p\nplans:\n" + "".join(text for _, text, _ in found))
     cfg = C.validate(raw, tmp_path)
     notebooks = {s["notebook"] for p in cfg["plans"].values() for s in p["steps"] if s["kind"] == "notebook"}
-    assert {"weird name: #1 {x}.ipynb", "😀 émoji.ipynb", "true.ipynb", "a'b\"c.ipynb", "int.ipynb"} <= notebooks
+    assert {*odd, "int.ipynb"} <= notebooks
 
 
 def test_detect_skips_files_it_cannot_read(tmp_path, monkeypatch):

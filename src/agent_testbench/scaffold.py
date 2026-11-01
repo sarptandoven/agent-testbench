@@ -271,6 +271,7 @@ def _web(root: Path) -> tuple[str, str, str] | None:
             text = ("  ui:\n    backend: local\n    description: open the page in a headless browser and check it\n"
                     "    steps:\n      - name: page loads\n        web:\n"
                     f"          serve: python -m http.server 8971 --bind 127.0.0.1 -d {d}\n"
+                    "          ready_timeout: 90             # its start can take ~30 s on macOS (host name lookup)\n"
                     "          url: http://127.0.0.1:8971/\n          actions:\n            - screenshot: home\n"
                     "        max_minutes: 2\n        expect:\n          web:\n            status: 200\n"
                     "            no_console_errors: true\n"

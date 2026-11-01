@@ -270,7 +270,8 @@ def test_verify_finds_any_changed_added_or_removed_file(files, data):
 
 # ---- testbench init, prices, form fields, loops --------------------------------------------------------------------
 
-names = joined(list("ab1 :#{}[]'\",&*!|>%@`-_.ü😀") + ["true", "null", "lint", "- ", "? ", "0x1"], 8)
+NAME_CHARS = "ab1 #{}[]',&!%@`-_.ü😀" + ("" if os.name == "nt" else ':"*|>')   # Windows forbids :"*|> in names
+names = joined(list(NAME_CHARS) + ["true", "null", "lint", "- ", "0x1"] + ([] if os.name == "nt" else ["? "]), 8)
 
 
 @fast(40)

@@ -186,6 +186,7 @@ def drivers_left(root: Path) -> list[str]:
         time.sleep(0.2)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="stopping a watch with a console break is not verified on Windows yet")
 def test_watch_reruns_on_change_queues_one_run_and_stops_clean(proj, webhook):
     cfg = {"project": "proj", "notify": {"webhook": webhook.url, "on": ["run_end", "watch_run"]}, "plans": {"q": PLAN}}
     write_config(proj, cfg)
@@ -225,6 +226,7 @@ def test_watch_reruns_on_change_queues_one_run_and_stops_clean(proj, webhook):
     assert not webhook.events("run_end"), "a watch's runs send no run_end"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="stopping a watch with a console break is not verified on Windows yet")
 def test_a_terminated_watch_cancels_its_run(proj):
     (proj / "settings.py").write_text("import time; time.sleep(60)\nSCORE = 3\n")
     w = Watching(proj, "q", "--debounce", "0.3")

@@ -76,7 +76,8 @@ def run(spec: dict, *, workdir: Path, out_dir: Path, env: dict, deadline: float,
         died = proc is not None and proc.poll() is not None     # whatever answered then is not the app
         if died or (proc is not None and status is None):
             why = f"the serve command exited with code {proc.returncode}" if died else \
-                f"nothing answered at {spec['url']} within {spec.get('ready_timeout', 30)} s"
+                (f"nothing answered at {spec['url']} within {spec.get('ready_timeout', 30)} s (a server that is slow "
+                 "to start - Python's http.server can take ~30 s on macOS - needs a longer `ready_timeout:`)")
             result["setup_error"] = f"The app did not come up: {why}. See the step log."
             return result
         with sync_playwright() as p:
