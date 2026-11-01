@@ -21,9 +21,10 @@ from conftest import REPO, write_config
 @pytest.fixture
 def priced(tmp_path, plugin, monkeypatch) -> Path:
     """A project on the fake plugin backend ($6/h): a 4-minute plan's worst case is $0.50, above ask_above_usd."""
-    site = plugin["PYTHONPATH"]
-    monkeypatch.syspath_prepend(site)                      # this process prices it ...
-    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(p for p in (site, os.environ.get("PYTHONPATH")) if p))
+    paths = plugin["PYTHONPATH"]                           # the fake package's folder, then any PYTHONPATH set
+    for p in reversed(paths.split(os.pathsep)):
+        monkeypatch.syspath_prepend(p)                     # this process prices it ...
+    monkeypatch.setenv("PYTHONPATH", paths)
     monkeypatch.setattr(backends, "_loaded", None)         # ... and the driver it starts runs it
     root = tmp_path / "priced"
     root.mkdir()

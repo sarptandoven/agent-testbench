@@ -201,15 +201,21 @@ IMAGE_LIMIT = 1_500_000
 IMAGES_TOTAL = 12_000_000
 
 
-def page(title: str, body: str) -> str:
+def page(title: str, body: str, head: str = "") -> str:
     import html
     return _encodable(f"<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width="
-                      f"device-width,initial-scale=1'><title>{html.escape(title)}</title><style>{CSS}</style></head><body>"
-                      f"<main>{body}</main></body></html>\n")
+                      f"device-width,initial-scale=1'><title>{html.escape(title)}</title><style>{CSS}</style>{head}"
+                      f"</head><body><main>{body}</main></body></html>\n")
 
 
 def render_html(report: dict, run_dir: Path) -> str:
     """The report as one self-contained page: what failed and why, the evidence images inline, what it ran on."""
+    r = report
+    return page(f"{ICON.get(r['status'], r['status'])} {r.get('plan')} {r.get('run_id')}", html_body(report, run_dir))
+
+
+def html_body(report: dict, run_dir: Path) -> str:
+    """What render_html's page holds (the live dashboard shows it under its own header)."""
     import base64
     import html
     e = html.escape
@@ -301,7 +307,7 @@ def render_html(report: dict, run_dir: Path) -> str:
     if src or env:
         out += ["<h2>Provenance</h2><pre>" + e(json.dumps({"source": src, "environment": env,
                                                            "evidence_sha256": r.get("evidence_sha256")}, indent=1)) + "</pre>"]
-    return page(f"{ICON.get(r['status'], r['status'])} {r.get('plan')} {r.get('run_id')}", "\n".join(out))
+    return "\n".join(out)
 
 
 def render_junit(report: dict) -> str:

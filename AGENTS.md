@@ -15,7 +15,9 @@
   module (`backends/local.py`, `modal_backend.py`, `colab_backend.py`, `ssh_backend.py`, `docker_backend.py`,
   `kubernetes_backend.py`) owns its GPUs, prices and plan runner.
 - Proof: `provenance.py` (source, environment, evidence hashes; `schema/report-v1.schema.json`), `report.py`
-  (md, html, junit, history), `ui.py` (static pages). Prices: `prices.py` and `pricing/catalog.json` (keep them equal
+  (md, html, junit, history), `ui.py` (static pages), `dashboard.py` (`testbench ui --serve`: live and read-only on
+  127.0.0.1, Host header checked, serves only reports and step evidence from .testbench - never state.json or
+  plan.json; nothing on it may launch, approve, cancel or spend). Prices: `prices.py` and `pricing/catalog.json` (keep them equal
   to the backends' built-in tables; a test checks).
 - Processes: `procs.py` (start, check and stop background work and lock files - the same on Linux, macOS and
   Windows; never `os.kill(pid, 0)` on Windows, it ends the process). `scaffold.py`: what `testbench init` writes.
