@@ -11,7 +11,9 @@ testbench rescue analysis.ipynb --json                # the diagnosis as JSON
 testbench rescue analysis.ipynb --no-run              # only read it: run nothing
 ```
 
-It needs no `testbench.yaml`. Exit code 0 means it ran top to bottom; 1 means it failed or ran out of time (with
+It reads an `.ipynb` or a percent-format `.py` notebook (`# %%` cells, as jupytext, VS Code and Spyder write them;
+a `.py` without `# %%` markers is refused as a plain script). It needs no `testbench.yaml`. Exit code 0 means it ran
+top to bottom; 1 means it failed or ran out of time (with
 `--no-run`: something that blocks it was found); 2 means it could not start (no such notebook, or `--fix` pointed at
 the original).
 
@@ -139,6 +141,10 @@ the code it ran.
 It never moves cells (a cell to move is a decision about what the notebook means), never changes paths or code, and
 never writes the original. The code cells after the new one are numbered one higher. Then run
 `testbench rescue OUT.ipynb` to see what is next.
+
+For a percent-format `.py` notebook, `--fix OUT.py` makes the same fixes on its text, so its header, comments and
+cell titles stay as they were (the new cell's `%pip` is written `# %pip`, as jupytext writes magics); `--fix
+OUT.ipynb` writes it as an `.ipynb` instead. An `.ipynb`'s fixed copy is an `.ipynb`.
 
 ## From an agent
 

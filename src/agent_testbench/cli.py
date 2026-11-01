@@ -1024,7 +1024,8 @@ def build_parser() -> argparse.ArgumentParser:
                                       "diagnose the first failure")
     p.add_argument("notebook")
     p.add_argument("--timeout", type=_number, default=120, help="seconds the run may take (default 120)")
-    p.add_argument("--fix", metavar="OUT.ipynb", help="also write a copy with mechanical fixes only (cells never moved)")
+    p.add_argument("--fix", metavar="OUT.ipynb", help="also write a copy with mechanical fixes only (cells never moved); "
+                   "for a percent-format .py notebook, OUT.py keeps it a .py")
     p.add_argument("--json", action="store_true", help="the diagnosis as JSON")
     p.add_argument("--no-run", action="store_true", help="only read it; run nothing (for a notebook nobody has reviewed)")
     p.set_defaults(fn=cmd_rescue)

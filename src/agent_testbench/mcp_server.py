@@ -283,9 +283,10 @@ async def lint_notebook(notebook: str, project_dir: str = ".") -> str:
     return _text(*await _cli(project_dir, ["lint", "--", notebook]))
 
 
-@server.tool(description="Find out why a notebook does not run, and what to do. Reads it (cells run out of order, "
-                         "names used before the cell that makes them, missing packages with their pip names, Colab-only "
-                         "parts, files it reads that are not there, input()), then runs it top to bottom in a fresh kernel "
+@server.tool(description="Find out why a notebook (.ipynb or percent-format .py) does not run, and what to do. Reads "
+                         "it (cells run out of order, names used before the cell that makes them, missing packages with "
+                         "their pip names, Colab-only parts, files it reads that are not there, input()), then runs it "
+                         "top to bottom in a fresh kernel "
                          "on this machine within timeout_seconds and diagnoses the first failing cell. Returns the "
                          "diagnosis and a plan to paste into testbench.yaml. fix_to writes a copy with mechanical fixes "
                          "only (never the original); run=false only reads it.")
