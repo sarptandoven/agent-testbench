@@ -99,7 +99,15 @@ def _own(root: Path) -> list[str]:
         pass
     paths = [p.split(")", 1)[1] for p in out]
     ignored = set(_git(root, "check-ignore", "--", *paths, check=False).splitlines())
-    return [p for p, path in zip(out, paths) if path not in ignored]
+    return [p for p, path in zip(out, paths) if path not in ignored] + _env_files(root)
+
+
+def _env_files(root: Path) -> list[str]:
+    """Pathspecs that leave out the untracked .env and .env.* files the repository does not ignore: they hold
+    secrets, which never go into a try's commit (as they never go into a copy of the project), nor into a stash."""
+    found = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z", "--", ":(glob)**/.env",
+                            ":(glob)**/.env.*"], cwd=root, capture_output=True, text=True, timeout=300).stdout
+    return [":(exclude,literal)" + p for p in found.split("\0") if p]
 
 
 def _changes(root: Path, where: str = ".") -> list[str]:
@@ -163,6 +171,8 @@ def spent(state: dict) -> float:
 
 def _note(root: Path, text: str) -> None:
     notes = Path(root) / ".testbench" / "NOTES.md"
+    if not notes.resolve().is_relative_to(Path(root).resolve()):     # a link out of the project (C.own_file)
+        return
     notes.parent.mkdir(parents=True, exist_ok=True)
     with notes.open("a") as f:
         f.write(f"- {dt.datetime.now():%Y-%m-%d %H:%M}: {text}\n")
@@ -421,7 +431,7 @@ def _revert(root: Path, state: dict, n: int) -> str:
     """Back to the best commit; edits made while the try ran are stashed and put back on top, and the lab notebook
     (.testbench/NOTES.md, which may be committed) keeps what was written to it."""
     notes = Path(root) / ".testbench" / "NOTES.md"
-    kept_notes = notes.read_text() if notes.exists() else None
+    kept_notes = notes.read_text() if notes.exists() and notes.resolve().is_relative_to(Path(root).resolve()) else None
     stashed = bool(_changes(root))
     if stashed:
         _git(root, "stash", "push", "-q", "--include-untracked", "-m", f"testbench loop: edits made while try {n} ran",

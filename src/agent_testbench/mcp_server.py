@@ -224,11 +224,14 @@ async def get_report(run: str = "", project_dir: str = ".", images: bool = True)
     try:
         rep = json.loads(raw)
         run_dir = C.find_root(Path(project_dir).expanduser()) / ".testbench" / "runs" / rep["run_id"]
+        if Path(rep["run_id"]).name != rep["run_id"] or rep["run_id"] in (".", ".."):
+            raise ValueError("a run id is a folder name")
     except Exception:
         return _text(code, out)
+    from .report import inside
     paths = [run_dir / s["dir"] / name for s in rep.get("steps", []) if s.get("dir")
              for name in s.get("images", []) + (s.get("web") or {}).get("screenshots", [])]
-    shown = _images(paths)
+    shown = _images([p for p in paths if inside(run_dir, p)])      # only the run's files, whatever its report names
     return [_text(code, out), *shown] if shown else _text(code, out)
 
 

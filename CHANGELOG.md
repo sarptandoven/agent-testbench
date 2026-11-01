@@ -2,6 +2,11 @@
 
 ## 0.2.0 - not yet released
 
+- Secrets and paths: `connect --dry-run` hides other servers' values and writes configs privately; reports, the
+  dashboard and `get_report` read only files inside the run; `artifacts:` with `..` stay in artifacts/; the PR
+  comment escapes the report's commit and status; `rescue --fix` refuses any name of the original; loop tries never
+  commit an untracked `.env`; report.md code blocks cannot be closed by output; `init`, `note` and `connect` refuse
+  project files that link out of the project.
 - Rough edges: `init --add` no longer adds a recipe's `sessions:` (it prints it); `params:`/`cells:`/`uploads:`/
   `colab_shim:` on a step that is not a notebook, and `cells:` that skip where a param is set, are refused instead
   of ignored. Notifications: `loop_rule` (a rule fired, the loop is still open) apart from `loop_end` (stopped); an

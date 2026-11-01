@@ -557,10 +557,38 @@ class Change:
     old: str | None            # None: the file is new
     new: str
     what: list
+    ours: list | None = None   # a client's config: the only values a dry run shows (the others can be secrets)
 
     @property
     def changed(self) -> bool:
         return self.old != self.new
+
+
+def _strings(v) -> list:
+    if isinstance(v, dict):
+        return [s for k, x in v.items() for s in (str(k), *_strings(x))]
+    if isinstance(v, list):
+        return [s for x in v for s in _strings(x)]
+    return [v] if isinstance(v, str) else []
+
+
+QUOTED = re.compile(r""""(?:[^"\\\n]|\\.)*"(\s*:)?|'[^'\n]*'""")     # a quoted value, or a JSON key (before :)
+
+
+def _hidden(text: str, ours: list) -> str:
+    """text with every quoted value shown as "..." but the ones this adds: the other servers in a client's config
+    can hold secrets (an API key in their env, args or headers), which a dry run must never print. Keys stay."""
+    keep = {q(s) for s in ours for q in (json.dumps, toml_str, lambda x: json.dumps(x, ensure_ascii=False))}
+    return QUOTED.sub(lambda m: m.group(0) if m.group(1) or m.group(0) in keep else '"..."', text)
+
+
+def _in_project(path: Path, project: Path) -> Path:
+    """A project file this writes, refused when it really is outside the project (a link, or in a linked folder): a
+    repository can ship .cursor/mcp.json as a link to ~/.cursor/mcp.json, whose servers' keys would be copied in."""
+    if not path.resolve().is_relative_to(project.resolve()):
+        raise Refused(f"{path.relative_to(project)} is a link to {path.resolve()}, outside the project, so this does "
+                      "not write it; replace the link with a file of the project's own, or remove it")
+    return path
 
 
 def _plan_config(client: Client, project: Path, user: bool, cmd: str, args: list) -> Change:
@@ -568,17 +596,18 @@ def _plan_config(client: Client, project: Path, user: bool, cmd: str, args: list
         path, key = client.user()
     else:
         rel, key = client.project
-        path = project / rel
+        path = _in_project(project / rel, project)
     old = _read(path) if path.exists() else None
     entry = client.entry(cmd, args, user)
     if client.fmt == "toml":
         new, what = merge_toml(path, old or "", key, entry)
     else:
         new, what = merge_json(path, old or "", key, entry, gemini=client.key == "gemini")
-    return Change(path, old, new, what)
+    return Change(path, old, new, what, ours=[key, SERVER, "context", "fileName", "AGENTS.md", *_strings(entry)])
 
 
 def _plan_text(path: Path, transform, what: str) -> Change:
+    _in_project(path, path.parent)
     old = _read(path) if path.exists() else None
     new = transform(old or "")
     return Change(path, old, new, [what if new != old else "already up to date"])
@@ -598,16 +627,24 @@ def _plan_rules(client: Client, project: Path) -> list:
     return changes
 
 
+def _new_file(path: Path, data: bytes, private: bool) -> None:
+    """data in a new file at path; private: readable by this user only until the caller copies the old file's mode
+    onto it (a client's config can hold API keys, and its copies are never readable by others, even for a moment)."""
+    path.unlink(missing_ok=True)
+    with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600 if private else 0o666), "wb") as f:
+        f.write(data)
+
+
 def _write(change: Change) -> str | None:
     """Write the change: the old file kept as <file>.bak first, then the new one put in place at once."""
     change.path.parent.mkdir(parents=True, exist_ok=True)
     backup = None
     if change.old is not None:
         backup = change.path.with_name(change.path.name + ".bak")
-        shutil.copy2(change.path, backup)
+        _new_file(backup, change.path.read_bytes(), private=True)
+        shutil.copystat(change.path, backup)
     tmp = change.path.with_name(change.path.name + ".testbench-tmp")
-    with open(tmp, "w", encoding="utf-8", newline="") as f:
-        f.write(change.new)
+    _new_file(tmp, change.new.encode("utf-8"), private=change.old is not None)
     if change.old is not None:
         shutil.copymode(change.path, tmp)
     os.replace(tmp, change.path)
@@ -665,6 +702,8 @@ def connect(key: str, user: bool = False, dry_run: bool = False, start: Path | N
     rules = not user or has_config
     try:
         changes += _plan_rules(client, project) if rules else []
+    except Refused as exc:
+        return 2, f"testbench connect: {exc}. Nothing was changed."
     except (OSError, UnicodeDecodeError) as exc:
         return 2, f"testbench connect: could not read the rules file ({exc}). Nothing was changed."
     for ch in changes:
@@ -673,7 +712,8 @@ def connect(key: str, user: bool = False, dry_run: bool = False, start: Path | N
             out.append(f"  {label}: {'; '.join(ch.what)}; nothing to change")
         elif dry_run:
             out.append(f"  would change {label}: {'; '.join(ch.what)}")
-            out.append(_diff(ch, label).rstrip("\n"))
+            diff = _diff(ch, label)
+            out.append((diff if ch.ours is None else _hidden(diff, ch.ours)).rstrip("\n"))
         else:
             try:
                 backup = _write(ch)

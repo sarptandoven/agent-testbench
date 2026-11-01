@@ -1129,11 +1129,20 @@ def plan_yaml(nb_rel: str, info: dict, diag: dict) -> tuple[str, str]:
 PIP_BANG = r"^(\s*)!\s*(?:pip3?|python3? -m pip)\s+install\b"
 
 
+def _same(a: Path, b: Path) -> bool:
+    """One file under both names: the same path, or another name for it (a hard link, or the name in another case
+    where the file system ignores case, as macOS and Windows do)."""
+    try:
+        return Path(a).resolve() == Path(b).resolve() or (Path(a).exists() and os.path.samefile(a, b))
+    except OSError:
+        return False
+
+
 def write_fix(nb_path: Path, out: Path, info: dict, failure: dict | None) -> list[str]:
     """A copy with mechanical fixes only: `%pip install` for `!pip install`, and a first cell that installs the missing
     packages rescue is sure of and adds standard imports nothing in the notebook makes. Nothing is moved. A
     percent-format .py notebook's copy can be a .py (the fixes made on its text) or an .ipynb."""
-    if out.resolve() == nb_path.resolve():
+    if _same(out, nb_path):
         raise RescueError(f"--fix {out} is the notebook itself; rescue never writes the original. Give another path.")
     percent = out.suffix.lower() == ".py"
     if percent and nb_path.suffix.lower() != ".py":
@@ -1238,7 +1247,7 @@ def rescue(notebook: str | Path, *, timeout: float = 120, fix: str | Path | None
         raise RescueError(f"{notebook} is not a notebook: rescue reads an .ipynb, or a percent-format .py (`# %%` cells)")
     if NB.plain_python(nb_path):
         raise RescueError(NB.plain_python(nb_path))
-    if fix and Path(fix).expanduser().resolve() == nb_path:
+    if fix and _same(Path(fix).expanduser(), nb_path):
         raise RescueError(f"--fix {fix} is the notebook itself; rescue never writes the original. Give another path.")
     workdir = nb_path.parent
     try:
