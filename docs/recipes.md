@@ -66,9 +66,16 @@ Worst cases at the built-in prices (`testbench prices`); start-up minutes are pr
 | [docker-sandbox](#docker-sandbox) | `sandbox-tests`, `sandbox-run` | docker, no network | free |
 | [ssh-gpu-box](#ssh-gpu-box) | `box-smoke`, `box-check`, `box-full` | local, your GPU machine | free at `usd_per_hour: 0` |
 | [data-pipeline](#data-pipeline) | `pipeline-sample`, `pipeline-full` | local | free |
+| [jest](#jest) | `jest-tests`, `jest-sandbox` | local, docker, no network | free |
+| [vitest](#vitest) | `vitest-tests`, `vitest-sandbox` | local, docker, no network | free |
+| [go-test](#go-test) | `go-tests`, `go-sandbox` | local, docker, no network | free |
+| [cargo-test](#cargo-test) | `cargo-tests`, `cargo-sandbox` | local, docker, no network | free |
+| [playwright-ts](#playwright-ts) | `e2e` | local | free |
 
 The plan names differ between recipes, so any of them combine, except that pytorch-train and ssh-gpu-box are the
-same ladder on different machines.
+same ladder on different machines. A testbench.yaml has one `docker:` section: combine docker-sandbox or two of the
+language recipes and the first one's image is kept (init prints the other's), so the second's sandbox plan needs
+an image with both.
 
 ### pytest
 
@@ -204,6 +211,72 @@ elsewhere, run the same plan on `backend: ssh`, or `backend: docker` with the da
 
 **Costs** nothing.
 
+### Test suites in other languages
+
+The jest, vitest, go-test, cargo-test and playwright-ts recipes are the [pytest](#pytest) recipe for other runners:
+a local plan judged by the runner's own JUnit report - written by this run, no failures or errors (the report names
+the first failing tests and why), and at least as many tests as you have (`tests: ">= N"`, to fill in) - then, but
+for Playwright, the same suite in a fresh container with `network: none`. [Other
+languages](expectations.md#other-languages) has each runner's command and what its report holds. `testbench init`
+writes the same local plan when it finds a `test` script in package.json, a go.mod with tests or a Cargo.toml.
+
+**How the packages get into a container with no network.** testbench's executor runs inside the container, so
+the image needs Python 3.10 or newer with ipykernel, jupyter_client, nbformat, nbclient and pyyaml; the official
+node, golang and rust images have no pip, and the docker backend's own `setup: build` only adds pip packages to an
+image. So each recipe's header holds a Dockerfile.testbench that starts from the official Python image, copies the
+toolchain from the official image for the language (pinned: `node:24-trixie-slim`, `golang:1.26-trixie`,
+`rust:1.97-slim-trixie`, all on the same Debian as `python:3.13-trixie`), installs testbench's basics and the test
+runner, and fetches the dependencies while the network is on: `npm ci` into `/work/project/node_modules` (where the
+project copy lands; this machine's node_modules is never copied in), `go mod download` with `GOPROXY=off` after
+it, `cargo fetch` with `CARGO_NET_OFFLINE=true`. You build it once - `docker build -f Dockerfile.testbench -t
+go-tests .` - and the plan uses it as it is (`setup: none`). When the lockfile changes, rebuild it: Go and cargo
+then fail naming the module they cannot fetch, and the node plans' first step compares package-lock.json with the
+one the image was built from and says to rebuild.
+
+### jest
+
+**Proves**, in `jest-tests`, that jest's suite passes, counted by jest-junit, including a test file that fails to
+load (`JEST_JUNIT_REPORT_TEST_SUITE_ERRORS`, or it would be missing from the report); `jest-sandbox` runs it offline
+in the image. **Adapt it**: `tests: ">= N"`, your jest arguments, the image tag; install `jest-junit@17.0.0`.
+**Costs** nothing.
+
+### vitest
+
+**Proves**, in `vitest-tests`, that `vitest run` passes, counted by vitest's built-in junit reporter (a file that
+fails to import is a failed test named after it); `vitest-sandbox` runs it offline in the image, whose node_modules
+holds the Linux builds of vite's and esbuild's native parts. **Adapt it**: `tests: ">= N"`, your vitest arguments
+(`--project`, `--config`), the image tag. **Costs** nothing.
+
+### go-test
+
+**Proves**, in `go-tests`, that every package builds and every test passes (`-count=1`: run now, not a cached
+pass), counted by gotestsum: `go run gotest.tools/gotestsum@v1.13.0` pins it with no install. gotestsum because
+`go test` writes no JUnit and gotestsum is the converter Go CI uses: a package that does not build fails as
+`<package> > TestMain`, a panic as the test that panicked. `go-sandbox` runs it offline in the image, with the
+gotestsum the image installed (offline, `go run ...@version` fails: it asks the module proxy whether the module is
+deprecated). **Adapt it**:
+`tests: ">= N"` (gotestsum's `DONE N tests`; subtests and their parents count), packages and flags, the image tag.
+**Costs** nothing.
+
+### cargo-test
+
+**Proves**, in `cargo-tests`, that every test binary's tests pass, counted by cargo-nextest
+(`target/nextest/ci/junit.xml`): a failure is named with its binary, the panic and the values compared.
+`cargo-sandbox` compiles and runs them offline in the image. **Adapt it**: add the `[profile.ci.junit]` lines to
+.config/nextest.toml (the header has them), `cargo install cargo-nextest --locked`, set `tests: ">= N"` and your
+arguments (`--workspace`), and `exclude: [.git, target]` so the build folder is not copied into containers. Doc
+tests need a `cargo test --doc` step of their own. Without nextest, `cargo test` can be checked by its exit code
+only. **Costs** nothing; building nextest into the image takes a few minutes, once.
+
+### playwright-ts
+
+**Proves**, in `e2e`, that the project's own Playwright tests pass as its playwright.config.ts runs them (projects,
+webServer), counted by Playwright's junit reporter, with traces and screenshots of failures (`test-results/`) in the
+run. **Adapt it**: `tests: ">= N"` (`npx playwright test --list`), your arguments; `--retries=0` if a pass on retry
+should fail. It has no docker plan: the browsers need Playwright's own image (`mcr.microsoft.com/playwright`), and
+the header says what to add to it. For a page with no Playwright tests of its own, use [web-app](#web-app).
+**Costs** nothing.
+
 ## How the recipes are tested
 
 `tests/test_recipes.py` loads every recipe as a config under init's header and checks that the costs its header
@@ -212,3 +285,9 @@ and runs every plan that runs on this machine - `tests`, `notebook-smoke`, `smok
 `eval-quick`, `eval-full`, `pipeline-sample`, `ui`, and the docker sandbox's two plans - on a tiny project made to
 each recipe's contract, plus an improvement loop on `eval-quick`'s score. The Modal, Colab and ssh plans are checked
 as configuration only.
+
+`tests/test_recipes_languages.py` checks that each language recipe's Dockerfile starts from pinned official images
+and installs what testbench needs in a container, and that init's plan for each language runs its runner the way
+the recipe does; reads a real report from each runner; and, where the toolchain is on the machine, runs `jest-tests`,
+`vitest-tests`, `go-tests` and `cargo-tests` on a tiny project - passing, then failing with the broken test named.
+With `TESTBENCH_TEST_DOCKER_LANGS=1` it builds each recipe's image and runs its sandbox plan offline.

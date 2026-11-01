@@ -201,7 +201,7 @@ def _read(source: str, workdir: Path, result: dict) -> tuple[str | None, str | N
 
 def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
     """result: the step's outcome (kind, exit_code, stdout, notebook error, web observations, gpu window, seconds
-    it ran, run_started)."""
+    it ran, run_started, the command it ran)."""
     out = []
     add = lambda name, ok, detail: out.append({"check": name, "ok": bool(ok), "detail": detail})
     kind = result.get("kind")
@@ -374,12 +374,37 @@ def junit_specs(spec) -> list[dict]:
     return [{"path": x} if isinstance(x, str) else x for x in items]
 
 
+# How each runner writes JUnit XML, for a step whose command ran one and wrote no report where it should.
+JUNIT_HOW = (
+    (r"\bcargo\b.*\bnextest\b", "cargo-nextest writes it only for a profile with a junit path: `[profile.ci.junit]` "
+                                "`path = \"junit.xml\"` in .config/nextest.toml, then `cargo nextest run --profile ci` "
+                                "writes target/nextest/ci/junit.xml"),
+    (r"\bgotestsum\b", "gotestsum: --junitfile {path}"),
+    (r"\bgo\s+test\b", "Go: `go run gotest.tools/gotestsum@v1.13.0 --junitfile {path} -- ./...` in place of go test"),
+    (r"\bvitest\b", "vitest: --reporter=default --reporter=junit --outputFile.junit={path}"),
+    (r"\bplaywright\b", "Playwright: --reporter=list,junit with PLAYWRIGHT_JUNIT_OUTPUT_NAME={path} in the step's env"),
+    (r"\bjest\b", "jest: --reporters=default --reporters=jest-junit, with jest-junit installed; it writes junit.xml in "
+                  "the working directory, or JEST_JUNIT_OUTPUT_FILE"),
+    (r"\bmocha\b", "mocha: --reporter xunit --reporter-option output={path}"),
+    (r"\bnode\b.*--test\b", "node --test: --test-reporter=junit --test-reporter-destination={path}"),
+    (r"\bcargo\s+test\b", "cargo test writes no JUnit: cargo-nextest does (`cargo nextest run --profile ci`, with "
+                          "`[profile.ci.junit]` `path = \"junit.xml\"` in .config/nextest.toml)"),
+    (r"\bnpm\s+(?:run\s+)?test\b", "npm test: run its test runner with a JUnit reporter instead - jest with jest-junit, "
+                                   "vitest --reporter=junit, mocha --reporter xunit"),
+)
+
+
+def _junit_how(command: str | None, path: str) -> str:
+    how = next((h for pattern, h in JUNIT_HOW if command and re.search(pattern, command)), "pytest: add --junitxml={path}")
+    return how.replace("{path}", path)
+
+
 def _junit(spec: dict, workdir: Path, result: dict, add) -> None:
     path = str(spec.get("path"))
     f = workdir / path
     if not f.is_file():
-        add(f"{path}: JUnit report", False, f"file missing: the test command wrote no report there (pytest: add "
-                                            f"--junitxml={path})")
+        add(f"{path}: JUnit report", False, f"file missing: the test command wrote no report there "
+                                            f"({_junit_how(result.get('command'), path)})")
         return
     try:
         got = _stale(f, result.get("run_started")) or read_junit(f)
@@ -400,12 +425,14 @@ def _junit(spec: dict, workdir: Path, result: dict, add) -> None:
 
 def read_junit(path: Path) -> dict:
     """tests, passed, failures, errors, skipped and the failing cases of a JUnit XML report (pytest --junitxml,
-    jest-junit, go-junit-report, ...): <testsuites> or a bare <testsuite>."""
+    jest-junit, vitest, mocha's xunit, node --test, Playwright, gotestsum, go-junit-report, cargo-nextest, ...):
+    <testsuites> or a bare <testsuite>. tests/data/junit/ holds a real report from each of those."""
     import xml.etree.ElementTree as ET
     root = ET.parse(path).getroot()
     if root.tag not in ("testsuites", "testsuite"):
         raise ValueError(f"the root element is <{root.tag}>, not <testsuites> or <testsuite>")
     out = {"tests": 0, "passed": 0, "failures": 0, "errors": 0, "skipped": 0, "failing": [], "erroring": []}
+    parent = {child: el for el in root.iter() for child in el}
     cases = list(root.iter("testcase"))
     suites = [s for s in root.iter("testsuite") if s.find("testsuite") is None] or [root]
     for s in suites:
@@ -423,12 +450,24 @@ def read_junit(path: Path) -> dict:
             el = case.find(tag)
             if el is not None:
                 out[key] += 1
-                out[names].append(f"{_case_name(case)} ({_case_why(el)})")
+                out[names].append(f"{_case_name(case, _suite_names(case, parent))} ({_case_why(el)})")
+    more = {"failures": 0, "errors": 0}                          # e.g. a suite that failed before its cases ran
+    for s in suites:
+        listed = s.findall(".//testcase")
+        if not listed:                                           # its totals are counted above
+            continue
+        said = {key: _int(s.get(key)) for key in more}
+        got = {"failures": sum(c.find("failure") is not None for c in listed),
+               "errors": sum(c.find("error") is not None for c in listed)}
+        extra = sum(said.values()) - sum(got.values())           # the two together: mocha's xunit counts its
+        if extra > 0:                                            # failures as errors, and is right about the total
+            failures = min(extra, max(0, said["failures"] - got["failures"]))
+            more["failures"] += failures
+            more["errors"] += extra - failures
     for key, names in (("failures", "failing"), ("errors", "erroring")):
-        said = sum(_int(s.get(key)) for s in suites)             # e.g. a suite that failed before its cases ran
-        if said > out[key]:
-            out[names].append(f"{said - out[key]} more in the suites' totals than among their test cases")
-            out[key] = said
+        if more[key]:
+            out[names].append(f"{more[key]} more in the suites' totals than among their test cases")
+            out[key] += more[key]
     return out
 
 
@@ -439,15 +478,60 @@ def _int(x) -> int:
         return 0
 
 
-def _case_name(case) -> str:
+def _suite_names(case, parent: dict) -> list[str]:
+    """The names of the <testsuite>s around a test case, outermost first."""
+    out, el = [], parent.get(case)
+    while el is not None:
+        if el.tag == "testsuite" and el.get("name"):
+            out.insert(0, el.get("name"))
+        el = parent.get(el)
+    return out
+
+
+JS_FILE = re.compile(r"\.[cm]?[jt]sx?$")                          # vitest's and Playwright's classname: the test file
+
+
+def _case_name(case, suites: list[str] | None = None) -> str:
+    """pytest's tests.test_math.test_add, Go's example.com/calc.TestAdd, Rust's calc.tests::adds; a file or a describe
+    title before a test's title the way JS runners show it (sum.test.js > sum > adds). A case with no classname (or
+    node --test's constant "test") is named after its suites, such as the package of gotestsum's TestMain."""
     cls, name = case.get("classname") or "", case.get("name") or "?"
-    return name if not cls or name == cls or name.startswith(cls + " ") else f"{cls}.{name}"
+    if cls in ("", "test"):
+        return " > ".join([*(suites or []), name])
+    if name == cls or name.startswith(cls + " "):
+        return name
+    words = re.search(r"\s", cls) or re.search(r"\s", name.split("[", 1)[0])
+    return f"{cls} > {name}" if words or JS_FILE.search(cls) else f"{cls}.{name}"
+
+
+GENERIC_WHY = {"failed", "failure", "error", "build error"}         # gotestsum's and go-junit-report's messages
+RUNNER_LINE = re.compile(r"(?:=== (?:RUN|PAUSE|CONT|NAME)\b|--- (?:FAIL|PASS|SKIP):|●\s)")    # Go's and jest's own lines
+MORE_LINE = re.compile(r"(?:left|right|Expected|Received):")        # assert_eq!'s and expect()'s values, which follow
 
 
 def _case_why(el) -> str:
-    text = el.get("message") or next((ln for ln in (el.text or "").splitlines() if ln.strip()), "") \
-        or el.get("type") or "no message"
-    return " ".join(text.split())[:200]
+    """Why a case failed, in a line: the message, unless it says nothing (Go's "Failed"), else the first line of the
+    text that is not the runner's own; with the lines that finish it (after a colon) and the values it compared."""
+    message = " ".join((el.get("message") or "").split())
+    text = (el.text or "").strip()
+    if text.startswith("{"):                                       # jest-junit: a suite's error as a JSON object
+        try:
+            data = json.loads(text)
+            text = str(data.get("message") or data.get("_originalMessage") or text) if isinstance(data, dict) else text
+        except (ValueError, RecursionError):                       # not JSON after all: the text as it is
+            pass
+    lines = [" ".join(ln.split()) for ln in text.splitlines()]
+    lines = [ln for ln in lines if ln and not RUNNER_LINE.match(ln)]
+    head = message if message.lower() not in GENERIC_WHY else ""
+    at = next((i for i, ln in enumerate(lines) if head and head in ln), None) if head else (0 if lines else None)
+    if at is not None:
+        if not head or lines[at].startswith(head):
+            head = lines[at]                                       # nextest: the message is its first line, cut short
+        for ln in lines[at + 1:]:
+            if len(head) >= 200 or not (head.endswith(":") or MORE_LINE.match(ln)):
+                break
+            head += " " + ln
+    return (head or message or el.get("type") or "no message")[:200]
 
 
 # ---- images and media -----------------------------------------------------------------------------------------

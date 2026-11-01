@@ -153,9 +153,10 @@ def test_junit_formats(tmp_path):
     (tmp_path / "totals.xml").write_text(TOTALS_XML)
     got = checks({"junit": ["go.xml", {"path": "jest.xml"}, {"path": "totals.xml", "failures": 1, "tests": 8,
                                                               "skipped": 1, "passed": 6}]}, tmp_path)
-    assert got["go.xml: failures 0"]["detail"] == "1 (wanted == 0) of 2 tests; failed: pkg.TestB (Failed)"
+    assert got["go.xml: failures 0"]["detail"] == ("1 (wanted == 0) of 2 tests; failed: pkg.TestB "
+                                                   "(pkg_test.go:12: got 3, want 4)"), "Go's message is only 'Failed'"
     assert got["jest.xml: failures 0"]["detail"] == ("1 (wanted == 0) of 2 tests; failed: math subtracts "
-                                                     "(Error: expect(received).toBe(expected))")
+                                                     "(Error: expect(received).toBe(expected) Expected: 1 Received: 2)")
     assert got["go.xml: errors 0"]["ok"] and got["jest.xml: errors 0"]["ok"]
     assert all(got[f"totals.xml: {k}"]["ok"] for k in ("failures 1", "tests 8", "skipped 1", "passed 6", "errors 0"))
     cases = "".join(f'<testcase classname="t" name="test_{i}"><failure message="boom {i}"/></testcase>' for i in range(5))

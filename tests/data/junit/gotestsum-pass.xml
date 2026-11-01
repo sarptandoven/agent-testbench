@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="5" failures="0" errors="0" time="0.004076">
+	<testsuite tests="5" failures="0" skipped="1" time="0.004000" name="example.com/calc" timestamp="2026-11-01T08:11:22Z">
+		<properties>
+			<property name="go.version" value="go1.24.7 linux/amd64"></property>
+		</properties>
+		<testcase classname="example.com/calc" name="TestSlow" time="0.000000">
+			<skipped message="=== RUN   TestSlow&#xA;    calc_test.go:26: slow: run with -run TestSlow&#xA;--- SKIP: TestSlow (0.00s)&#xA;"></skipped>
+		</testcase>
+		<testcase classname="example.com/calc" name="TestAdd" time="0.000000"></testcase>
+		<testcase classname="example.com/calc" name="TestTable/zero" time="0.000000"></testcase>
+		<testcase classname="example.com/calc" name="TestTable/neg" time="0.000000"></testcase>
+		<testcase classname="example.com/calc" name="TestTable" time="0.000000"></testcase>
+	</testsuite>
+</testsuites>

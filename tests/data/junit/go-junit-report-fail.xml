@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="8" errors="1" failures="4" skipped="1">
+	<testsuite name="example.com/calc/broken" tests="1" failures="0" errors="1" id="0" hostname="vm" time="0.000" timestamp="2026-11-01T08:11:23Z">
+		<testcase name="[build failed]" classname="example.com/calc/broken" time="0.000">
+			<error message="Build error"><![CDATA[broken/broken.go:3:26: undefined: undefinedThing]]></error>
+		</testcase>
+	</testsuite>
+	<testsuite name="example.com/calc" tests="5" failures="3" errors="0" id="1" hostname="vm" skipped="1" time="0.009" timestamp="2026-11-01T08:11:23Z">
+		<testcase name="TestAdd" classname="example.com/calc" time="0.000">
+			<failure message="Failed"><![CDATA[    calc_test.go:7: 1 + 2 is not 3]]></failure>
+		</testcase>
+		<testcase name="TestTable" classname="example.com/calc" time="0.000">
+			<failure message="Failed"></failure>
+		</testcase>
+		<testcase name="TestTable/zero" classname="example.com/calc" time="0.000"></testcase>
+		<testcase name="TestTable/neg" classname="example.com/calc" time="0.000">
+			<failure message="Failed"><![CDATA[    calc_test.go:19: Add(-1, 1) = 0, want 5]]></failure>
+		</testcase>
+		<testcase name="TestSlow" classname="example.com/calc" time="0.000">
+			<skipped message="Skipped"><![CDATA[    calc_test.go:26: slow: run with -run TestSlow]]></skipped>
+		</testcase>
+	</testsuite>
+	<testsuite name="example.com/calc/panics" tests="2" failures="1" errors="0" id="2" hostname="vm" time="0.004" timestamp="2026-11-01T08:11:23Z">
+		<testcase name="TestFine" classname="example.com/calc/panics" time="0.000"></testcase>
+		<testcase name="TestPanics" classname="example.com/calc/panics" time="0.000">
+			<failure message="Failed"></failure>
+		</testcase>
+		<system-out><![CDATA[panic: assignment to entry in nil map [recovered]
+	panic: assignment to entry in nil map
+
+goroutine 19 [running]:
+testing.tRunner.func1.2({0x54fea0, 0x6a0810})
+	/usr/local/go1.24.7/src/testing/testing.go:1734 +0x21c
+testing.tRunner.func1()
+	/usr/local/go1.24.7/src/testing/testing.go:1737 +0x35e
+panic({0x54fea0?, 0x6a0810?})
+	/usr/local/go1.24.7/src/runtime/panic.go:792 +0x132
+example.com/calc/panics.TestPanics(0xc000082a80?)
+	/tmp/tb-lang-tools/proj/go-fail/panics/panics_test.go:9 +0x28
+testing.tRunner(0xc000082a80, 0x584390)
+	/usr/local/go1.24.7/src/testing/testing.go:1792 +0xf4
+created by testing.(*T).Run in goroutine 1
+	/usr/local/go1.24.7/src/testing/testing.go:1851 +0x413]]></system-out>
+	</testsuite>
+</testsuites>

@@ -179,7 +179,7 @@ def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_e
     if result["status"] in ("passed", "failed") or step["kind"] == "run":
         seen = {**result, "stdout": text, "web": result.pop("_web_full", None) or result.get("web"),
                 "seconds": time.time() - began, "run_started": run_started, "step_dir": str(step_dir),
-                "mocks": mocked}
+                "mocks": mocked, "command": step.get("run")}
         checks = expect.check(step["expect"], workdir=workdir, result=seen)
         result["expectations"] = checks
         if result["status"] == "passed" and not all(c["ok"] for c in checks):

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="3" failures="1" errors="1" time="0.279">
+  <testsuite name="sum" errors="0" failures="1" skipped="1" timestamp="2026-11-01T08:14:10" time="0.117" tests="3">
+    <testcase classname="sum adds 1 + 2 to equal 3" name="sum adds 1 + 2 to equal 3" time="0.005">
+      <failure>Error: expect(received).toBe(expected) // Object.is equality
+
+Expected: 4
+Received: 3
+    at Object.toBe (/tmp/tb-lang-tools/proj/jest/sum.test.js:5:23)
+    at Promise.finally.completed (/tmp/tb-lang-tools/proj/jest/node_modules/jest-circus/build/jestAdapterInit.js:1834:28)
+    at new Promise (&lt;anonymous&gt;)
+    at callAsyncCircusFn (/tmp/tb-lang-tools/proj/jest/node_modules/jest-circus/build/jestAdapterInit.js:1774:10)
+    at _callCircusTest (/tmp/tb-lang-tools/proj/jest/node_modules/jest-circus/build/jestAdapterInit.js:1167:40)
+    at _runTestInContext (/tmp/tb-lang-tools/proj/jest/node_modules/jest-circus/build/jestAdapterInit.js:1103:3)
+    at runTestWithContext (/tmp/tb-lang-tools/proj/jest/node_modules/jest-circus/build/jestAdapterInit.js:996:5)
+    at _runTestsForDescribeBlockOnce (/tmp/tb-lang-tools/proj/jest/node_modules/jest-circus/build/jestAdapterInit.js:1008:11)
+    at _runTestsForDescribeBlock (/tmp/tb-lang-tools/proj/jest/node_modules/jest-circus/build/jestAdapterInit.js:824:5)
+    at _runTestsForDescribeBlockOnce (/tmp/tb-lang-tools/proj/jest/node_modules/jest-circus/build/jestAdapterInit.js:1003:11)
+    at _runTestsForDescribeBlock (/tmp/tb-lang-tools/proj/jest/node_modules/jest-circus/build/jestAdapterInit.js:824:5)
+    at run (/tmp/tb-lang-tools/proj/jest/node_modules/jest-circus/build/jestAdapterInit.js:789:3)
+    at runAndTransformResultsToJestFormat (/tmp/tb-lang-tools/proj/jest/node_modules/jest-circus/build/jestAdapterInit.js:2300:21)
+    at jestAdapter (/tmp/tb-lang-tools/proj/jest/node_modules/jest-circus/build/runner.js:111:19)
+    at runTestInternal (/tmp/tb-lang-tools/proj/jest/node_modules/jest-runner/build/index.js:247:16)
+    at runTest (/tmp/tb-lang-tools/proj/jest/node_modules/jest-runner/build/index.js:315:7)</failure>
+    </testcase>
+    <testcase classname="sum adds negatives" name="sum adds negatives" time="0.001">
+    </testcase>
+    <testcase classname="sum handles big numbers" name="sum handles big numbers" time="0">
+      <skipped/>
+    </testcase>
+  </testsuite>
+  <testsuite name="broken.test.js" errors="1" failures="0" skipped="0" timestamp="1970-01-01T00:00:00" time="0" tests="0">
+    <testcase classname="Test suite failed to run" name="broken.test.js" time="0">
+      <error>  ● Test suite failed to run
+
+    Cannot find module &apos;./does-not-exist&apos; from &apos;broken.test.js&apos;
+
+    &gt; 1 | require(&quot;./does-not-exist&quot;);
+        | ^
+      2 |
+      3 | test(&quot;never runs&quot;, () =&gt; {});
+      4 |
+
+      at Resolver._throwModNotFoundError (node_modules/jest-resolve/build/index.js:1031:11)
+      at Object.require (broken.test.js:1:1)
+</error>
+    </testcase>
+    <testcase classname="Test suite failed to run" name="broken.test.js" time="0">
+      <failure>{&quot;code&quot;:&quot;MODULE_NOT_FOUND&quot;,&quot;hint&quot;:&quot;&quot;,&quot;requireStack&quot;:[&quot;/tmp/tb-lang-tools/proj/jest/broken.test.js&quot;],&quot;siblingWithSimilarExtensionFound&quot;:false,&quot;moduleName&quot;:&quot;./does-not-exist&quot;,&quot;_originalMessage&quot;:&quot;Cannot find module &apos;./does-not-exist&apos; from &apos;broken.test.js&apos;&quot;}</failure>
+    </testcase>
+  </testsuite>
+</testsuites>

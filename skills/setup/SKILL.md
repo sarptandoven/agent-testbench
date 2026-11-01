@@ -10,12 +10,13 @@ description: Set up agent-testbench in a project - install it, write testbench.y
    `uv tool install google-colab-cli` and one login; web steps need `playwright install chromium`.
    Never ask the person to paste a token into the chat - they run the login commands themselves.
 2. **Start the config.** In the project folder: `testbench init`. It writes `testbench.yaml` with a plan for each
-   notebook, test suite, training script and web app it finds - already checking what it can - and the working
-   rules in `AGENTS.md` (read by Codex and others; `CLAUDE.md` points to it). Lines marked FILL IN need the number
-   only the person knows ("accuracy >= 0.9"): ask, do not guess.
-   **When the person's goal matches a recipe, start from it**: `testbench recipes` lists them (pytest,
-   notebook-colab, pytorch-train, hf-finetune, web-app, llm-eval, docker-sandbox, ssh-gpu-box, data-pipeline) with
-   each plan's worst case. `testbench init --recipe NAME` writes that ladder of plans plus what init detects;
+   notebook, test suite (pytest; `npm test` with jest, vitest, mocha, node --test or Playwright; Go; Rust - judged
+   by the runner's JUnit report), training script and web app it finds - already checking what it can - and the
+   working rules in `AGENTS.md` (read by Codex and others; `CLAUDE.md` points to it). Lines marked FILL IN need the
+   number only the person knows ("accuracy >= 0.9", "tests >= 120"): ask, do not guess.
+   **When the person's goal matches a recipe, start from it**: `testbench recipes` lists them (pytest, jest,
+   vitest, go-test, cargo-test, playwright-ts, notebook-colab, pytorch-train, hf-finetune, web-app, llm-eval,
+   docker-sandbox, ssh-gpu-box, data-pipeline) with each plan's worst case. `testbench init --recipe NAME` writes that ladder of plans plus what init detects;
    `testbench init --add --recipe NAME` adds it to an existing testbench.yaml without changing anything already
    there. Then adapt its FILL IN lines to the project with the person.
 3. **Ask the person** for what only they can decide: the budget (`max_run_usd`, `ask_above_usd`,

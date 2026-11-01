@@ -1,0 +1,24 @@
+<testsuite name="Mocha Tests" tests="3" failures="0" errors="2" skipped="0" timestamp="Sun, 01 Nov 2026 08:13:11 GMT" time="0.006">
+<testcase classname="with a broken hook" name="&#x22;before all&#x22; hook for &#x22;never runs&#x22;" file="/tmp/tb-lang-tools/proj/mocha/test/hooks.test.js" time="0"><failure>setup failed
+Error: setup failed
+    at Context.&#x3C;anonymous&#x3E; (test/hooks.test.js:2:24)
+    at process.processImmediate (node:internal/timers:485:21)</failure></testcase>
+<testcase classname="sum" name="adds 1 + 2 to equal 3" file="/tmp/tb-lang-tools/proj/mocha/test/sum.test.js" time="0.001"><failure>Expected values to be strictly equal:
+
+3 !== 4
+
+
+      + expected - actual
+
+      -3
+      +4
+      
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+3 !== 4
+
+    at Context.&#x3C;anonymous&#x3E; (test/sum.test.js:6:12)
+    at process.processImmediate (node:internal/timers:485:21)</failure></testcase>
+<testcase classname="sum" name="adds negatives" file="/tmp/tb-lang-tools/proj/mocha/test/sum.test.js" time="0"/>
+<testcase classname="sum" name="handles big numbers" file="/tmp/tb-lang-tools/proj/mocha/test/sum.test.js" time="0"><skipped/></testcase>
+</testsuite>

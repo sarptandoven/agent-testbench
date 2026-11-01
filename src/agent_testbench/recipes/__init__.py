@@ -196,9 +196,14 @@ def compose(text: str, recipes: list[dict], fresh: bool = False) -> tuple[str, l
     return _text(bl), notes
 
 
+RUNNERS = (("jest", r"\bjest\b"), ("vitest", r"\bvitest\b"), ("mocha", r"\bmocha\b"),    # other languages' suites
+           ("node-test", r"\bnode\b.*\s--test\b"), ("playwright", r"\bplaywright\s+test\b"),
+           ("go-test", r"\bgotestsum\b|\bgo\s+test\b"), ("cargo-test", r"\bcargo\s+(?:nextest|test)\b"))
+
+
 def subjects(plans: dict) -> set[tuple[str, str]]:
-    """What plans exercise - each notebook and Python script, a pytest suite, a web page - so init can leave out a plan
-    it detected when a recipe's plans already cover the same thing."""
+    """What plans exercise - each notebook and Python script, a pytest suite or another test runner's suite, a web
+    page - so init can leave out a plan it detected when a recipe's plans already cover the same thing."""
     out = set()
     for plan in plans.values():
         for step in (plan or {}).get("steps") or []:
@@ -212,6 +217,7 @@ def subjects(plans: dict) -> set[tuple[str, str]]:
             out |= {("script", f) for f in re.findall(r"[\w./-]+\.py\b", run)}
             if re.search(r"\bpytest\b", run):
                 out.add(("pytest", ""))
+            out |= {(kind, "") for kind, pattern in RUNNERS if re.search(pattern, run)}
     return out
 
 
