@@ -5,14 +5,16 @@
 
 Providers change prices between releases. A price that went up makes every estimate too low, which is the
 dangerous direction, so a fetched catalog may raise a price above the built-in one or add a price for hardware
-this version does not know; it cannot lower one (that comes with a release). A tampered or stale catalog can
-therefore only make estimates more cautious. A project's `pricing:` overrides both, and the guard hook asks the
+this version does not know - at no less than the dearest hardware it does know, so a catalog cannot make
+costly hardware cheap under a new name; it cannot lower a price (that comes with a release). A tampered or stale
+catalog can therefore only make estimates more cautious. A project's `pricing:` overrides both, and the guard hook asks the
 person before an agent changes it. Nothing is fetched unless asked.
 """
 from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import urllib.request
 from pathlib import Path
 
@@ -38,14 +40,20 @@ def cached() -> dict:
 
 
 def _price(v) -> bool:
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
 
 
 def raised(built_in: dict, fetched) -> dict:
-    """built_in with each fetched price that is higher, and fetched prices for names it does not have."""
+    """built_in with each fetched price that is higher, and fetched prices for names it does not have - each at
+    least the dearest built-in price, since nothing says what the new name really is."""
     out = dict(built_in)
+    floor = max(built_in.values(), default=0.0)
     for name, value in (fetched or {}).items() if isinstance(fetched, dict) else ():
-        if _price(value) and value > out.get(name, -1):
+        if not _price(value):
+            continue
+        if name not in built_in:
+            out[name] = max(float(value), floor)
+        elif value > out[name]:
             out[name] = float(value)
     return out
 
@@ -57,6 +65,8 @@ def raised_value(built_in: float, fetched) -> float:
 def source(name: str, built_in: dict, fetched, overrides: dict | None) -> str:
     if name in (overrides or {}):
         return "testbench.yaml pricing:"
+    if name not in built_in and isinstance(fetched, dict) and _price(fetched.get(name)):
+        return f"catalog {cached().get('version', '?')}, not below the dearest built-in price"
     if isinstance(fetched, dict) and _price(fetched.get(name)) and fetched[name] > built_in.get(name, -1):
         return f"catalog {cached().get('version', '?')}"
     return "built in"

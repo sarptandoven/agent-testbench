@@ -44,6 +44,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from .. import config as C
 from ..config import ConfigError
 from . import Backend, project_files
 
@@ -551,10 +552,10 @@ class DockerBackend(Backend):
                               "NVIDIA's Container Toolkit); leave it out for no GPU")
         for key, flag in (("cpu", "--cpus"), ("memory_gb", "--memory")):
             v = d.get(key)
-            if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0):
+            if v is not None and not C.number(v, positive=True):
                 raise ConfigError(f"`docker.{key}` is a positive number (docker's {flag}), or leave it out for no limit")
         v = d.get("usd_per_hour")
-        if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
+        if not C.number(v):
             raise ConfigError("`docker.usd_per_hour` is what the machine costs you per hour while it works (0 for your "
                               "own)")
         if not isinstance(d.get("python"), str) or not d["python"].strip():

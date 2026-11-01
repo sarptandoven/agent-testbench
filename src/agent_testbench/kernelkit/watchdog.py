@@ -15,6 +15,7 @@ $TBE_RUNTIME_ADDR. If the release fails, nothing testbench started is left runni
 Standard library only, so it can be copied to a machine on its own and started before anything is installed.
 """
 import argparse
+import math
 import os
 import signal
 import subprocess
@@ -60,8 +61,11 @@ def spawn(state_dir, *, max_minutes: float, idle_minutes: float | None = None, k
 
 
 def _log(state_dir: Path, text: str) -> None:
-    with open(state_dir / "watchdog.log", "a") as f:
-        f.write(f"{time.strftime('%H:%M:%S')} {text}\n")
+    try:
+        with open(state_dir / "watchdog.log", "a") as f:
+            f.write(f"{time.strftime('%H:%M:%S')} {text}\n")
+    except OSError:                  # the work may have broken the log; stopping it matters more than the log
+        pass
 
 
 def _commands():
@@ -92,7 +96,7 @@ def _ours(state_dir: Path) -> list[int]:
     so are watchdogs."""
     me = os.getpid()
     marks = {str(Path(state_dir)).encode(), str(Path(state_dir).resolve()).encode()}   # /tmp is /private/tmp on macOS
-    return [pid for pid, cmd in _commands() if pid != me and b"watchdog" not in cmd
+    return [pid for pid, cmd in _commands() if pid != me and b"agent_testbench.kernelkit.watchdog" not in cmd
             and any(m + end in cmd for m in marks for end in (b"/", b"\x00", b" "))]
 
 
@@ -186,6 +190,11 @@ def watch(state_dir, max_minutes: float, idle_minutes: float | None = None, kill
     state_dir.mkdir(parents=True, exist_ok=True)
     began = time.time()
     tick = float(os.environ.get("TESTBENCH_WATCHDOG_SECONDS", 15))
+    if not (math.isfinite(max_minutes) and max_minutes >= 0):
+        _log(state_dir, f"max_minutes {max_minutes!r} is not a number of minutes: stopping at once")
+        max_minutes = 0.0
+    if idle_minutes is not None and not (math.isfinite(idle_minutes) and idle_minutes > 0):
+        idle_minutes = None
     _log(state_dir, f"watching: stop at {max_minutes:g} min" + (f" or {idle_minutes:g} idle" if idle_minutes else ""))
     was_ready = False
     while True:
@@ -207,7 +216,10 @@ def watch(state_dir, max_minutes: float, idle_minutes: float | None = None, kill
         if reason:
             break
         time.sleep(tick)
-    (state_dir / "watchdog_stopped").write_text(reason + "\n")
+    try:
+        (state_dir / "watchdog_stopped").write_text(reason + "\n")
+    except OSError:
+        pass
     _log(state_dir, f"stopping: {reason}")
     end_processes(state_dir, kill_group, interrupt_pid)
     if release == "colab":

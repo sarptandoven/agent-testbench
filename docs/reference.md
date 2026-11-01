@@ -305,8 +305,9 @@ testbench ui [--open]                      # .testbench/ui/index.html: plans, tr
 `testbench prices` lists every price estimates use and where it comes from: the table built into this version, a
 fetched catalog, or the project's `pricing:`. `testbench prices --update [--url URL]` fetches `pricing/catalog.json`
 from the repository into `~/.testbench/prices.json`. A catalog can raise a price above the built-in one or add
-hardware this version does not know (a new GPU becomes allowed); it never lowers a price - that comes with a
-release - so a stale or tampered catalog only makes estimates more cautious. A project's `pricing:` overrides
+hardware this version does not know (a new GPU becomes allowed, priced at no less than the dearest hardware this
+version knows); it never lowers a price - that comes with a release - so a stale or tampered catalog only makes
+estimates more cautious. The guard hook asks before `--update --url` or an edit of `~/.testbench/prices.json`. A project's `pricing:` overrides
 both. Nothing is fetched unless asked.
 
 ## Run folder

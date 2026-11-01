@@ -81,8 +81,12 @@ def start(root: Path, cfg: dict, name: str = "main", backend: str | None = None,
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,30}", name):
         raise SessionError("session names use letters, digits, - or _ (up to 31 characters)")
     hw = hardware(cfg, backend, gpu)
-    idle = float(idle_minutes or cfg["sessions"]["idle_minutes"])
-    longest = float(max_minutes or cfg["sessions"]["max_minutes"])
+    idle = idle_minutes or cfg["sessions"]["idle_minutes"]
+    longest = max_minutes or cfg["sessions"]["max_minutes"]
+    for what, v in (("idle_minutes", idle), ("max_minutes", longest)):
+        if not C.number(v, positive=True):
+            raise SessionError(f"{what} must be a positive number of minutes, not {v!r}")
+    idle, longest = float(idle), float(longest)
     most = B.get(hw["backend"]).max_session_minutes
     if most and longest > most:
         raise SessionError(f"a {hw['backend']} session can last at most {most / 60:g} hours (max_minutes <= {most:g})")

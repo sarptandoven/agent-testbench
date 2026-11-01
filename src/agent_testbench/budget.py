@@ -75,7 +75,7 @@ def user_limits() -> dict:
     out = {}
     for key in LIMIT_KEYS:
         if key in raw:
-            if not isinstance(raw[key], (int, float)) or isinstance(raw[key], bool) or raw[key] < 0:
+            if not C.number(raw[key]):
                 raise C.ConfigError(f"`{key}` in {p} must be a number of US dollars; nothing can launch until a "
                                     "person fixes it")
             out[key] = float(raw[key])
@@ -97,7 +97,7 @@ def limits(cfg: dict) -> dict:
     out = {}
     for key in LIMIT_KEYS:
         own = float(cfg["budget"][key])
-        if key in machine and machine[key] < own:
+        if key in machine and not own <= machine[key]:              # NaN in the project: the machine's limit
             out[key] = (machine[key], f"{key} ${machine[key]:.2f} in {limits_path()} (this machine's limit, which "
                                       "a project cannot raise)")
         else:
@@ -132,9 +132,24 @@ def record(root: Path, entry: dict) -> None:
 
 
 def _read(p: Path) -> list[dict]:
+    """A ledger's entries. One that cannot be read refuses every launch: what was spent is unknown."""
     if not p.exists():
         return []
-    return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+    rows = []
+    for n, line in enumerate(p.read_text().splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            row = None
+        cost = row.get("worst_case_usd" if row.get("event") == "launch" else "usd", 0) if isinstance(row, dict) else None
+        if not isinstance(row, dict) or not isinstance(row.get("time"), str) or not C.number(cost) or (
+                row.get("event") in ("launch", "finish") and not isinstance(row.get("run"), str)):
+            raise C.ConfigError(f"{p} line {n} is not a ledger entry testbench wrote ({line[:80]!r}); what was spent "
+                                "cannot be counted, so nothing can launch until a person fixes or removes that line")
+        rows.append(row)
+    return rows
 
 
 def entries(root: Path) -> list[dict]:
@@ -172,6 +187,9 @@ def check(cfg: dict, est: dict, approve: bool, how_to_lower: str) -> tuple[bool,
     person said yes. Each limit is the project's, capped by the machine's limits."""
     lim = limits(cfg)
     cost, what = est["worst_case_usd"], est["what"]
+    if not C.number(cost) or not all(C.number(v) for v, _ in lim.values()):
+        return False, (f"Refused: the worst case of {what} is not a number of dollars (${cost}); a price, a "
+                       "max_minutes or a budget in testbench.yaml or the backend is not a real number. Fix it."), est
     most, where = lim["max_run_usd"]
     if cost > most:
         return False, (f"Refused: {what} could cost up to ${cost:.2f} ({est['max_minutes']:.0f} min at "

@@ -2,6 +2,17 @@
 
 ## 0.2.0 - not yet released
 
+- Guardrails hardened after an adversarial review. A budget, price or time limit that is not a real number (NaN,
+  infinity) is refused when testbench.yaml, limits.yaml or a command line is read, and the budget check refuses
+  any estimate or limit that is not one - before, a NaN budget in testbench.yaml let any launch past every limit,
+  the machine's included. A ledger line testbench did not write refuses launches instead of being miscounted.
+  GPUs are `NAME` or `NAME:COUNT` exactly (`"H100: 8"` was priced as one GPU). Hardware that only a fetched
+  catalog knows is priced at no less than the dearest built-in hardware. Options cannot be abbreviated (`--appr`
+  was `--approve`), and MCP tool arguments can no longer become options (a session named `--approve`). The guard
+  hook now asks about `--approve` anywhere in a testbench command and outside projects, MCP approvals outside
+  projects, lowered ssh/docker prices, a loosened docker sandbox, `prices --update --url` and edits of
+  ~/.testbench/prices.json. Ssh plans are stopped from this machine shortly after their limit if the work there
+  stopped its watchdog, and the watchdog no longer crashes when the work breaks its folder.
 - `backend: docker`: plans and live sessions in a fresh container on this machine. The project is copied in, nothing
   is mounted, and evidence comes back owned by you; `network: none` gives a sandbox with no network, `gpus:` passes
   NVIDIA GPUs through. The hard stop is kernelkit's watchdog inside the container. See docs/docker.md.

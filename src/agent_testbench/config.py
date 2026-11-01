@@ -6,6 +6,7 @@ will fix the file from the message alone.
 from __future__ import annotations
 
 import copy
+import math
 import re
 from pathlib import Path
 
@@ -69,7 +70,7 @@ def validate(raw: dict, root: Path) -> dict:
         raise ConfigError("`project:` must be a short name of letters, digits, - or _ (it names the Modal app and volume)")
     cfg["root"] = str(root)
     for key in ("max_run_usd", "ask_above_usd", "max_day_usd"):
-        if not isinstance(cfg["budget"].get(key), (int, float)) or cfg["budget"][key] < 0:
+        if not number(cfg["budget"].get(key)):
             raise ConfigError(f"`budget.{key}` must be a number of US dollars, e.g. {DEFAULTS['budget'][key]}")
     _sessions(cfg["sessions"])
     plans = cfg.get("plans") or {}
@@ -79,6 +80,14 @@ def validate(raw: dict, root: Path) -> dict:
     for name in sorted({p["backend"] for p in cfg["plans"].values()} | {cfg["sessions"]["backend"]}):
         B.get(name).validate(cfg)
     return cfg
+
+
+def number(v, positive: bool = False) -> bool:
+    """A real number of dollars or minutes: not a bool, not NaN or infinity, not negative (not zero if positive).
+    Every limit, price and duration goes through this, because NaN compares false with everything and would let a
+    launch past every limit."""
+    return (isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+            and (v > 0 if positive else v >= 0))
 
 
 def check_hardware(where: str, backend: str, gpu) -> None:
@@ -92,7 +101,7 @@ def check_hardware(where: str, backend: str, gpu) -> None:
 def _sessions(s: dict) -> None:
     check_hardware("sessions", s.get("backend", "local"), s.get("gpu"))
     for key in ("idle_minutes", "max_minutes"):
-        if not isinstance(s.get(key), (int, float)) or s[key] <= 0:
+        if not number(s.get(key), positive=True):
             raise ConfigError(f"`sessions.{key}` must be a positive number of minutes")
 
 
@@ -129,7 +138,7 @@ def _step(where: str, step: dict, root: Path) -> dict:
     if len(kinds) != 1:
         raise ConfigError(f"`{where}` ({step['name']}) needs exactly one of `notebook:`, `run:` or `web:`")
     s = {**copy.deepcopy(STEP_DEFAULTS), **step, "kind": kinds[0]}
-    if not isinstance(s["max_minutes"], (int, float)) or s["max_minutes"] <= 0:
+    if not number(s["max_minutes"], positive=True):
         raise ConfigError(f"`{where}.max_minutes` must be a positive number; the step is stopped when it runs out")
     for key in ("params", "env", "expect"):
         if not isinstance(s[key], dict):

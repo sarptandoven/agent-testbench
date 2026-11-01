@@ -186,14 +186,18 @@ moved and the run that proves it; merging is yours to decide.
 - **Money**: worst case = hardware price x time limit (+ start-up), checked before every run, session and loop.
   Over `max_run_usd` or a day's limit: refused. Over `ask_above_usd`: a person approves - in Claude Code the hook
   asks you, in MCP clients the server asks you directly (elicitation). `~/.testbench/limits.yaml` caps every project
-  on the machine; a project can lower those limits, never raise them. Prices come from a built-in table that a
-  fetched catalog can raise, never lower (`testbench prices`).
+  on the machine; a project can lower those limits, never raise them, and they hold whatever was approved. Prices
+  come from a built-in table that a fetched catalog can raise, never lower (`testbench prices`). Anything that is
+  not a real number - a NaN budget, an infinite price, a broken ledger line - refuses the launch.
 - **Hard stops** on the machine doing the work: Modal's timeouts, or kernelkit's watchdog on Colab VMs, ssh machines
-  and in containers - so the bound holds with your laptop asleep.
+  and in containers - so the bound holds with your laptop asleep. Ssh and docker runs are also stopped from this
+  machine shortly after their limit, in case the work there stopped its watchdog.
 - **Secrets** by name only, never on a command line; strict mocks stand in for paid APIs in tests.
 - **The guard hook** (Claude Code) refuses raw cloud launches and commands that would print secrets, asks before
-  an edit raises a budget, and refuses edits to the ledgers. It is a safety net, not a sandbox - for that, use
-  `backend: docker` with `network: none`.
+  an edit raises a budget, lowers a price or loosens a docker sandbox, turns every `--approve` into a question to
+  you, and refuses edits to the ledgers. It is a safety net, not a sandbox (a script the agent writes can still
+  pass `--approve`; the machine's limits still hold) - for running code nobody reviewed, use `backend: docker`
+  with `network: none`.
 
 ## MCP and agents
 

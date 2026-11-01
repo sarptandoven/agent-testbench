@@ -129,9 +129,17 @@ def _progress(ctx):
     return progress
 
 
+def _name(value: str, what: str) -> str:
+    """A plan, run or session name as a tool argument. Never an option: `--approve` as a name must not approve."""
+    if value and not re.fullmatch(r"[A-Za-z0-9][\w.:-]{0,80}", value):
+        raise ValueError(f"{what} {value!r} is not a name testbench uses (letters, digits, - _ . : and no leading -)")
+    return value
+
+
 async def _follow(ctx, project_dir: str, run: str, seconds: int, head: str = "") -> str:
     """Follow a run with `testbench wait`, passing its progress lines on to the client as they come."""
-    code, out = await _cli(project_dir, ["wait", run, "--timeout", str(max(0, seconds))], on_line=_progress(ctx))
+    code, out = await _cli(project_dir, ["wait", _name(run, "run"), "--timeout", str(max(0, seconds))],
+                           on_line=_progress(ctx))
     return _text(code, (head + "\n" if head else "") + out)
 
 
@@ -146,7 +154,7 @@ async def plans(project_dir: str = ".") -> str:
                          "approved_by_person=true, which you may set only after the person said yes to that cost.")
 async def run_plan(plan: str, project_dir: str = ".", approved_by_person: bool = False, wait_seconds: int = 120,
                    ctx: Context = None) -> str:
-    code, out = await _with_approval(ctx, project_dir, ["run", plan, "--detach"] + (["--approve"] if approved_by_person else []))
+    code, out = await _with_approval(ctx, project_dir, ["run", _name(plan, "plan"), "--detach"] + (["--approve"] if approved_by_person else []))
     started = re.search(r"\[testbench\] run (\S+) started", out)
     if code != 3 or not started:
         return _text(code, out)
@@ -165,7 +173,7 @@ async def wait_run(run: str = "", project_dir: str = ".", timeout_seconds: int =
                          "images=true (the default) the first evidence images (plots, screenshots) come back too - look "
                          "at them before calling a visual result good.")
 async def get_report(run: str = "", project_dir: str = ".", images: bool = True):
-    code, out = await _cli(project_dir, ["report", *([run] if run else [])])
+    code, out = await _cli(project_dir, ["report", *([_name(run, "run")] if run else [])])
     if code != 0 or not images:
         return _text(code, out)
     _, raw = await _cli(project_dir, ["report", *([run] if run else []), "--json"])
@@ -187,7 +195,7 @@ async def list_runs(project_dir: str = ".", n: int = 10) -> str:
 
 @server.tool(description="Cancel a run (default: the latest), including its Modal call or Colab session.")
 async def cancel_run(run: str = "", project_dir: str = ".") -> str:
-    return _text(*await _cli(project_dir, ["cancel", *([run] if run else [])]))
+    return _text(*await _cli(project_dir, ["cancel", *([_name(run, "run")] if run else [])]))
 
 
 @server.tool(description="What runs have cost today and in total, against the project's budget and this machine's limits.")
@@ -198,12 +206,12 @@ async def spend(project_dir: str = ".") -> str:
 @server.tool(description="Check a notebook for Colab and headless pitfalls (big outputs, embedded video, secrets "
                          "without fallback, unpinned installs, settable form fields).")
 async def lint_notebook(notebook: str, project_dir: str = ".") -> str:
-    return _text(*await _cli(project_dir, ["lint", notebook]))
+    return _text(*await _cli(project_dir, ["lint", "--", notebook]))
 
 
 @server.tool(description="Add a line to the project's lab notebook (.testbench/NOTES.md): what was tried and learned.")
 async def add_note(text: str, project_dir: str = ".") -> str:
-    return _text(*await _cli(project_dir, ["note", text]))
+    return _text(*await _cli(project_dir, ["note", "--", text]))
 
 
 @server.tool(description="Start a live session: a kernel that stays up on this machine (backend local), a Modal "
@@ -215,7 +223,7 @@ async def add_note(text: str, project_dir: str = ".") -> str:
 async def session_start(name: str = "main", backend: str = "", gpu: str = "", idle_minutes: float = 0,
                         max_minutes: float = 0, project_dir: str = ".", approved_by_person: bool = False,
                         ctx: Context = None) -> str:
-    argv = ["session", "start", name] + (["--backend", backend] if backend else []) + (["--gpu", gpu] if gpu else []) \
+    argv = ["session", "start", _name(name, "session")] + ([f"--backend={backend}"] if backend else []) + ([f"--gpu={gpu}"] if gpu else []) \
         + (["--idle-minutes", str(idle_minutes)] if idle_minutes else []) + (["--max-minutes", str(max_minutes)] if max_minutes else []) \
         + (["--approve"] if approved_by_person else [])
     return _text(*await _with_approval(ctx, project_dir, argv))
@@ -229,9 +237,9 @@ async def session_start(name: str = "main", backend: str = "", gpu: str = "", id
                          "meanwhile (session_stop ends it).")
 async def session_exec(code: str = "", notebook: str = "", cells: str = "", params: str = "", session: str = "",
                        timeout_seconds: float = 600, project_dir: str = ".", as_json: bool = False):
-    argv = ["exec", "--json"] + (["-s", session] if session else []) + ["--timeout", str(timeout_seconds)]
+    argv = ["exec", "--json"] + (["-s", _name(session, "session")] if session else []) + ["--timeout", str(timeout_seconds)]
     if notebook:
-        argv += ["--cells", f"{notebook}:{cells}" if cells else notebook] + (["--params", params] if params else [])
+        argv += [f"--cells={notebook}:{cells}" if cells else f"--cells={notebook}"] + ([f"--params={params}"] if params else [])
     else:
         argv += ["--", code]
     status, out = await _cli(project_dir, argv)
@@ -249,24 +257,26 @@ async def session_exec(code: str = "", notebook: str = "", cells: str = "", para
 @server.tool(description="Files on a live session's machine: op 'ls' (path), 'get' (remote path, optional local path; "
                          "default saves into the session's outputs folder) or 'put' (local path, remote path).")
 async def session_files(op: str, path: str = ".", second_path: str = "", session: str = "", project_dir: str = ".") -> str:
-    argv = ["files", op, path] + ([second_path] if second_path else []) + (["-s", session] if session else [])
+    argv = ["files", op] + (["-s", _name(session, "session")] if session else []) + ["--", path] \
+        + ([second_path] if second_path else [])
     return _text(*await _cli(project_dir, argv))
 
 
 @server.tool(description="Copy the project's files to a live session's machine again after editing them locally "
                          "(variables in the kernel are kept).")
 async def session_sync(session: str = "", project_dir: str = ".") -> str:
-    return _text(*await _cli(project_dir, ["session", "sync", *([session] if session else [])]))
+    return _text(*await _cli(project_dir, ["session", "sync", *([_name(session, "session")] if session else [])]))
 
 
 @server.tool(description="pip install packages on a live session's machine (space-separated, pin versions).")
 async def session_install(packages: str, session: str = "", project_dir: str = ".") -> str:
-    return _text(*await _cli(project_dir, ["session", "install", *packages.split(), *(["-s", session] if session else [])]))
+    return _text(*await _cli(project_dir, ["session", "install", *(["-s", _name(session, "session")] if session else []), "--",
+                                                 *packages.split()]))
 
 
 @server.tool(description="Run a shell command on a live session's machine (nvidia-smi, ls, df, ...).")
 async def session_shell(command: str, session: str = "", project_dir: str = ".") -> str:
-    return _text(*await _cli(project_dir, ["session", "shell", command, *(["-s", session] if session else [])]))
+    return _text(*await _cli(project_dir, ["session", "shell", *(["-s", _name(session, "session")] if session else []), "--", command]))
 
 
 @server.tool(description="Live sessions with their hardware, uptime, idle time and cost so far.")
@@ -277,7 +287,7 @@ async def session_list(project_dir: str = ".") -> str:
 @server.tool(description="Stop a live session (default: the only running one) and report what it cost; it works while "
                          "a command is still running in it. Stop sessions as soon as you are done with them.")
 async def session_stop(session: str = "", project_dir: str = ".", all_sessions: bool = False) -> str:
-    argv = ["session", "stop", *([session] if session else []), *(["--all"] if all_sessions else [])]
+    argv = ["session", "stop", *([_name(session, "session")] if session else []), *(["--all"] if all_sessions else [])]
     return _text(*await _cli(project_dir, argv))
 
 
@@ -291,7 +301,7 @@ async def session_stop(session: str = "", project_dir: str = ".", all_sessions: 
 async def loop_start(plan: str, metric: str, budget_usd: float, goal: str = "max", max_hours: float = 8.0,
                      min_delta: float = 0.0, project_dir: str = ".", approved_by_person: bool = False,
                      ctx: Context = None) -> str:
-    argv = ["loop", "start", plan, "--metric", metric, "--budget-usd", str(budget_usd), "--goal", goal,
+    argv = ["loop", "start", _name(plan, "plan"), f"--metric={metric}", "--budget-usd", str(budget_usd), f"--goal={goal}",
             "--max-hours", str(max_hours), "--min-delta", str(min_delta)] + (["--approve"] if approved_by_person else [])
     return _text(*await _with_approval(ctx, project_dir, argv))
 
@@ -301,7 +311,7 @@ async def loop_start(plan: str, metric: str, budget_usd: float, goal: str = "max
                          "words. wait_seconds=0 follows the run until it ends; if it is still running (exit 3), "
                          "loop_status judges it later.")
 async def loop_try(description: str, wait_seconds: int = 0, project_dir: str = ".", ctx: Context = None) -> str:
-    argv = ["loop", "try", description] + (["--wait", str(wait_seconds)] if wait_seconds else [])
+    argv = ["loop", "try"] + (["--wait", str(wait_seconds)] if wait_seconds else []) + ["--", description]
     return _text(*await _cli(project_dir, argv, on_line=_progress(ctx)))
 
 

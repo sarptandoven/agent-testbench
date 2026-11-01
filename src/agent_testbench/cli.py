@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -575,10 +576,41 @@ def cmd_mcp(a):
     return 0
 
 
+class _Parser(argparse.ArgumentParser):
+    """No abbreviated options: `--appr` must not mean `--approve` to testbench while the guard hook sees no
+    `--approve` (every subcommand, at every level, is one of these)."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("allow_abbrev", False)
+        super().__init__(*args, **kwargs)
+
+
+def _number(text: str) -> float:
+    """A real number on the command line; nan and inf would compare false with every limit."""
+    v = float(text)
+    if not math.isfinite(v):
+        raise argparse.ArgumentTypeError(f"{text!r} is not a finite number")
+    return v
+
+
+def _dollars(text: str) -> float:
+    v = _number(text)
+    if v < 0:
+        raise argparse.ArgumentTypeError(f"{text!r} must be 0 or more")
+    return v
+
+
+def _positive(text: str) -> float:
+    v = _number(text)
+    if v <= 0:
+        raise argparse.ArgumentTypeError(f"{text!r} must be more than 0")
+    return v
+
+
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="testbench", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = _Parser(prog="testbench", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--version", action="version", version=f"agent-testbench {__version__}")
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub = ap.add_subparsers(dest="cmd", required=True, parser_class=_Parser)
     p = sub.add_parser("init", help="write testbench.yaml and the working rules (AGENTS.md) for this project")
     p.add_argument("--force", action="store_true")
     p.set_defaults(fn=cmd_init)
@@ -592,12 +624,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("plan")
     p.add_argument("--approve", action="store_true", help="a person approved this run's cost (never set this yourself)")
     p.add_argument("--detach", action="store_true", help="start it and return at once")
-    p.add_argument("--wait", type=float, default=540, help="follow for at most this many seconds (default 540)")
+    p.add_argument("--wait", type=_number, default=540, help="follow for at most this many seconds (default 540)")
     p.add_argument("--foreground", action="store_true", help="run in this process (no background driver)")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("wait", help="follow a run until it ends or the timeout passes")
     p.add_argument("run", nargs="?")
-    p.add_argument("--timeout", type=float, default=540)
+    p.add_argument("--timeout", type=_number, default=540)
     p.set_defaults(fn=cmd_wait)
     for name, fn, helptext in (("status", cmd_status, "one line about a run"), ("report", cmd_report, "a run's report"),
                                ("cancel", cmd_cancel, "stop a run, locally and remotely"),
@@ -654,8 +686,8 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("name", nargs="?", default="main")
     q.add_argument("--backend", help="local, modal, colab, or an installed backend (`testbench doctor` lists them)")
     q.add_argument("--gpu")
-    q.add_argument("--idle-minutes", type=float, help="stop after this long without use (default from testbench.yaml)")
-    q.add_argument("--max-minutes", type=float, help="stop after this long in any case; bounds the cost")
+    q.add_argument("--idle-minutes", type=_positive, help="stop after this long without use (default from testbench.yaml)")
+    q.add_argument("--max-minutes", type=_positive, help="stop after this long in any case; bounds the cost")
     q.add_argument("--secret", action="append", default=[], help="a secret NAME to pass in (repeatable)")
     q.add_argument("--approve", action="store_true", help="a person approved this session's cost (never set this yourself)")
     ssub.add_parser("list", help="sessions, their hardware, uptime and cost")
@@ -671,7 +703,7 @@ def build_parser() -> argparse.ArgumentParser:
     q = ssub.add_parser("shell", help="run a shell command on the session's machine (nvidia-smi, ls, df ...)")
     q.add_argument("command")
     q.add_argument("-s", "--name")
-    q.add_argument("--timeout", type=float, default=120)
+    q.add_argument("--timeout", type=_number, default=120)
     p.set_defaults(fn=cmd_session)
     p = sub.add_parser("exec", help="run code, a file, or notebook cells in a live session and show what came back")
     p.add_argument("code", nargs="?", help="Python code (or use -f, --cells, or stdin)")
@@ -679,7 +711,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-f", "--file", help="a .py file to run")
     p.add_argument("--cells", help="notebook cells, e.g. train.ipynb:3-5 (code cells from 1); train.ipynb alone runs all")
     p.add_argument("--params", help='form fields for --cells, as JSON: \'{"EPOCHS": 2}\'')
-    p.add_argument("--timeout", type=float, default=600, help="seconds per cell before it is interrupted (default 600)")
+    p.add_argument("--timeout", type=_number, default=600, help="seconds per cell before it is interrupted (default 600)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_exec)
     p = sub.add_parser("files", help="files on a session's machine: ls [PATH] | get REMOTE [LOCAL] | put LOCAL REMOTE")
@@ -694,15 +726,15 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--metric", required=True, help="FILE:KEY of a number a json expectation of the plan checks, "
                                                     "e.g. outputs/metrics.json:accuracy; or check:SUBSTRING, the "
                                                     "number of the check whose name contains it, e.g. check:val_loss")
-    q.add_argument("--budget-usd", type=float, required=True, help="what the whole loop may spend, every run together")
+    q.add_argument("--budget-usd", type=_dollars, required=True, help="what the whole loop may spend, every run together")
     q.add_argument("--goal", choices=["max", "min"], default="max", help="max: higher is better (default); min: lower")
-    q.add_argument("--min-delta", type=float, default=0.0, help="keep a try only if it beats the best by more than this")
-    q.add_argument("--max-hours", type=float, default=8.0, help="no new tries after this long (default 8)")
+    q.add_argument("--min-delta", type=_number, default=0.0, help="keep a try only if it beats the best by more than this")
+    q.add_argument("--max-hours", type=_positive, default=8.0, help="no new tries after this long (default 8)")
     q.add_argument("--approve", action="store_true", help="a person approved the loop's total budget (never set this yourself)")
-    q.add_argument("--wait", type=float, help="follow the baseline run at most this many seconds (default: until it ends)")
+    q.add_argument("--wait", type=_number, help="follow the baseline run at most this many seconds (default: until it ends)")
     q = lsub.add_parser("try", help="commit the edits as a try, run the plan, keep it or revert it")
     q.add_argument("description", nargs="+", help="what this try changed, in a few words")
-    q.add_argument("--wait", type=float, help="follow the run at most this many seconds (default: until it ends)")
+    q.add_argument("--wait", type=_number, help="follow the run at most this many seconds (default: until it ends)")
     lsub.add_parser("status", help="the loop's tries: kept or reverted, the metric, the cost")
     lsub.add_parser("stop", help="write the loop's report and go back to the branch it started from")
     p.set_defaults(fn=cmd_loop)

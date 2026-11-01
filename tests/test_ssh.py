@@ -123,3 +123,16 @@ def test_the_ssh_section_is_checked(tmp_path):
     write_config(tmp_path, {"project": "p", "ssh": {"host": "h", "command": "ssh -p 2222", "usd_per_hour": 0.5},
                             "plans": {"p": {"backend": "ssh", "steps": [{"name": "a", "run": "true"}]}}})
     assert C.load(tmp_path)["ssh"]["command"] == ["ssh", "-p", "2222"]
+
+
+def test_a_plan_past_its_limit_is_stopped_from_here(project, box):
+    """If the work on the machine stopped its watchdog, this machine stops the plan shortly after the limit (made
+    short here: the grace after the limit can be lowered, never raised)."""
+    cfg = C.yaml.safe_load((project / "testbench.yaml").read_text())
+    cfg["plans"]["stuck"] = {"backend": "ssh", "steps": [{"name": "nap", "run": "sleep 50", "max_minutes": 1}]}
+    write_config(project, cfg)
+    began = time.time()
+    r = cli(project, "run", "stuck", "--wait", "120",
+            env={"TESTBENCH_SSH_POLL_SECONDS": "0.5", "TESTBENCH_SSH_GRACE_SECONDS": "-170"})
+    assert r.returncode != 0 and "stopped from this machine" in r.stdout, r.stdout + r.stderr
+    assert time.time() - began < 45, "it did not wait for the step to end on its own"

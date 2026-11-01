@@ -27,6 +27,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from .. import config as C
 from ..config import ConfigError
 from . import Backend, tool_check
 
@@ -34,6 +35,7 @@ PKG = Path(__file__).resolve().parents[1]
 WATCHDOG = PKG / "kernelkit" / "watchdog.py"
 BASE_PIP = ["nbformat>=5.9", "nbclient>=0.10", "ipykernel>=6.29", "jupyter_client>=8", "pyyaml>=6"]
 MARK = "TESTBENCH_RESULT "
+GRACE_SECONDS = min(float(os.environ.get("TESTBENCH_SSH_GRACE_SECONDS") or 120), 120)   # after the limit, from here
 IDLE_SLACK = 10           # the machine's watchdog waits this much longer than the supervisor here (it is the backstop)
 
 
@@ -192,12 +194,21 @@ class SSHRunner:
                         f"int(sys.argv[2]))' {shlex.quote(d + '/watchdog')} {self.pid}", timeout=60)
         runs.write_state(self.run_dir, ssh_pid=self.pid)
         print(f"[testbench] running the plan on {s['host']} (up to {limit:g} min)", flush=True)
+        give_up, overran = self.started + limit * 60 + GRACE_SECONDS, False   # the watchdog there stops it first
         while self.remote.run(f"kill -0 {self.pid} 2>/dev/null", check=False, timeout=60).returncode == 0:
+            if time.time() > give_up:                         # the work on the machine stopped the watchdog
+                print(f"[testbench] still running {limit:g} min in: stopping it from here", flush=True)
+                self.cancel()
+                overran = True
+                break
             self._mirror(light=True)
             time.sleep(float(os.environ.get("TESTBENCH_SSH_POLL_SECONDS", 5)))
         self._mirror(light=False)
         self._clean_up()
         rep = R.load(self.run_dir)
+        if rep and overran:
+            rep.update(status="error", stopped_because=f"still running past its {limit:g} min limit on {s['host']} "
+                       "(its watchdog there did not stop it); stopped from this machine")
         if not rep:
             log = self.remote.log.read_text(errors="replace")[-2000:] if self.remote.log.exists() else ""
             rep = {**self.meta, "steps": [], "started": self.started, "status": "error",
@@ -213,8 +224,10 @@ class SSHRunner:
         p = self.remote.run(f"cd {q} 2>/dev/null && {pick}", check=False, binary=True, timeout=1800)
         if p.returncode != 0 or not p.stdout:
             return
-        with tarfile.open(fileobj=io.BytesIO(p.stdout)) as t:
-            t.extractall(self.run_dir, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
+        with tarfile.open(fileobj=io.BytesIO(p.stdout)) as t:     # what the work wrote: plain files inside the run
+            keep = [m for m in t.getmembers() if (m.isfile() or m.isdir()) and not m.name.startswith("/")
+                    and ".." not in Path(m.name).parts]
+            t.extractall(self.run_dir, members=keep, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
 
     def _clean_up(self) -> None:
         """The run is over: its watchdog goes, and so does its folder on the machine (the evidence is here now)."""
@@ -355,7 +368,7 @@ class SSH(Backend):
         if not s.get("host"):
             raise ConfigError("`ssh.host` is needed for the ssh backend: a Host from ~/.ssh/config, or user@host, that "
                               "`ssh HOST true` reaches without a password")
-        if not isinstance(s.get("usd_per_hour"), (int, float)) or s["usd_per_hour"] < 0:
+        if not C.number(s.get("usd_per_hour")):
             raise ConfigError("`ssh.usd_per_hour` is what the machine costs you per hour while it works (0 for your own)")
         if s.get("setup") not in ("venv", "none"):
             raise ConfigError("`ssh.setup` is venv (a virtualenv per project on the machine) or none (use ssh.python)")

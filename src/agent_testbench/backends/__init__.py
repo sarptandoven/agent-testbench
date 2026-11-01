@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import fnmatch
 import importlib
+import re
 import shutil
 from pathlib import Path
 from typing import Protocol
@@ -23,6 +24,7 @@ from typing import Protocol
 from ..config import ConfigError
 
 ENTRY_POINTS = "agent_testbench.backends"
+GPU_FORMAT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.!+-]*(:[1-9][0-9]{0,2})?")
 BUILTIN = {"local": "agent_testbench.backends.local:backend",
            "modal": "agent_testbench.backends.modal_backend:backend",
            "colab": "agent_testbench.backends.colab_backend:backend",
@@ -65,6 +67,9 @@ class Backend:
     def check_hardware(self, where: str, gpu) -> None:
         if not gpu:
             return
+        if not GPU_FORMAT.fullmatch(str(gpu)):
+            raise ConfigError(f"`{where}.gpu` is {gpu!r}; write a GPU name, or NAME:COUNT for several (e.g. H100:2), "
+                              "with no spaces")
         if not self.gpus:
             raise ConfigError(f"`{where}.gpu`: {self.name} has no choice of GPU; drop the GPU, or choose "
                               f"{_gpu_backends()}")
