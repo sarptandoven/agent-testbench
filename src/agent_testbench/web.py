@@ -15,7 +15,9 @@ Needs `pip install "agent-testbench[web]"` and `playwright install chromium`.
 """
 from __future__ import annotations
 
+import os
 import shlex
+import shutil
 import subprocess
 import time
 import urllib.error
@@ -57,12 +59,15 @@ def run(spec: dict, *, workdir: Path, out_dir: Path, env: dict, deadline: float,
                 result["setup_error"] = (f"Something already answers at {spec['url']} before the app started, so the "
                                          "step would test the wrong program. Stop it or use another port.")
                 return result
-            proc = subprocess.Popen(shlex.split(spec["serve"]) if isinstance(spec["serve"], str) else spec["serve"],
-                                    cwd=workdir, env=env, stdout=log, stderr=subprocess.STDOUT, **procs.group_kwargs())
+            argv = shlex.split(spec["serve"]) if isinstance(spec["serve"], str) else list(spec["serve"])
+            if os.name == "nt" and argv:                 # npm is npm.cmd there, which only a PATHEXT lookup finds
+                argv[0] = shutil.which(argv[0], path=env.get("PATH")) or argv[0]
+            proc = subprocess.Popen(argv, cwd=workdir, env=env, stdout=log, stderr=subprocess.STDOUT,
+                                    **procs.group_kwargs())
         status = _wait_up(spec["url"], min(float(spec.get("ready_timeout", 30)), max(1, deadline - time.time())), proc)
-        if proc is not None and proc.poll() is not None:
-            status = None                     # the app's own server died; whatever answered is not the app
-            why = f"the serve command exited with code {proc.returncode}" if proc and proc.poll() is not None else \
+        died = proc is not None and proc.poll() is not None     # whatever answered then is not the app
+        if died or (proc is not None and status is None):
+            why = f"the serve command exited with code {proc.returncode}" if died else \
                 f"nothing answered at {spec['url']} within {spec.get('ready_timeout', 30)} s"
             result["setup_error"] = f"The app did not come up: {why}. See the step log."
             return result

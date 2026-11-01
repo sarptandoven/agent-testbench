@@ -125,8 +125,8 @@ def validate(raw: dict, root: Path) -> dict:
         raise ConfigError("`project:` must be a short name of letters, digits, - or _ (it names the Modal app and volume)")
     cfg["root"] = str(root)
     if not isinstance(cfg.get("exclude"), list) or not all(isinstance(x, str) for x in cfg["exclude"]):
-        raise ConfigError("`exclude:` is a list of file patterns left out of copies of the project, e.g. [data/raw, "
-                          "\"*.ckpt\"]")
+        raise ConfigError("`exclude:` is a list of file names or patterns left out of copies of the project, e.g. "
+                          "[.git, data/*.bin]")
     cfg["exclude"] = list(dict.fromkeys(cfg["exclude"] + NEVER_COPIED))
     for key in ("max_run_usd", "ask_above_usd", "max_day_usd"):
         if not number(cfg["budget"].get(key)):

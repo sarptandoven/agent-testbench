@@ -69,8 +69,8 @@ class Backend:
         if not gpu:
             return
         if not GPU_FORMAT.fullmatch(str(gpu)):
-            raise ConfigError(f"`{where}.gpu` is {gpu!r}; write a GPU name, or NAME:COUNT for several (e.g. H100:2), "
-                              "with no spaces")
+            raise ConfigError(f"`{where}.gpu` is {gpu!r}; write a GPU name, or NAME:COUNT for several, with no "
+                              "spaces: e.g. H100 or H100:2")
         if not self.gpus:
             raise ConfigError(f"`{where}.gpu`: {self.name} has no choice of GPU; drop the GPU, or choose "
                               f"{_gpu_backends()}")
