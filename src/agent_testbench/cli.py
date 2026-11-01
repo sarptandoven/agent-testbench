@@ -799,7 +799,7 @@ DEMOS = {   # the examples `testbench demo NAME` copies: what each is, its free 
         "about": "a Colab-style notebook that trains a small network, and plans for this machine, Modal and Colab",
         "list": "a Colab-style notebook that trains a small network (needs scikit-learn and matplotlib)",
         "plan": "smoke", "plan_about": "lint, then a quick train on this machine", "dir": "testbench-demo", "exit": 0,
-        "needs": {"sklearn": "scikit-learn==1.5.2", "matplotlib": "matplotlib==3.9.2"},
+        "needs": {"sklearn": "scikit-learn>=1.5", "matplotlib": "matplotlib>=3.9"},     # wheels for every Python
         "why": "The demo trains a small model, which needs {names}: pip install {pips}",
         "next": """
 Next, in {target}:
@@ -912,7 +912,14 @@ def cmd_demo(a):
 
 
 def cmd_mcp(a):
-    from .mcp_server import main as serve
+    try:
+        from .mcp_server import main as serve
+    except ImportError as exc:
+        if (getattr(exc, "name", None) or "").split(".")[0] != "mcp":
+            raise
+        print('testbench mcp needs the MCP package: pip install "agent-testbench[mcp]" (or "agent-testbench[all]")',
+              file=sys.stderr)
+        return 2
     serve(http=a.http, host=a.host, port=a.port)
     return 0
 

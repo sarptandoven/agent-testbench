@@ -5,7 +5,7 @@ scikit-learn's bundled digits, saves `outputs/metrics.json` and a confusion-matr
 metrics for download. Its form fields (`HIDDEN`, `EPOCHS`, `LEARNING_RATE`, `SEED`) are set per plan.
 
 ```bash
-pip install "agent-testbench[all]" scikit-learn==1.5.2 matplotlib==3.9.2
+pip install "agent-testbench[all]" "scikit-learn>=1.5" "matplotlib>=3.9"
 testbench plans
 testbench run smoke          # lint + quick train here, free, seconds
 testbench run full-modal     # full train in a Modal CPU container (~$0.002)

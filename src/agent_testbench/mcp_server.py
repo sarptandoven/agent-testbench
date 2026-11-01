@@ -27,7 +27,7 @@ except ImportError:                          # mcp 1.x
     from mcp.server.fastmcp import Context, FastMCP as _Server, Image
     from mcp.server.fastmcp.exceptions import ToolError
 
-from . import config as C, notify
+from . import __version__, config as C, notify
 from .cli import render_exec
 
 INSTRUCTIONS = (
@@ -43,7 +43,15 @@ MAX_IMAGES = 6
 MAX_IMAGE_BYTES = 2_000_000
 ASK_NOTICE_AFTER_S = 60.0     # a person asked directly who has not answered by then may be away: notify: tells them
 
-server = _Server(name="agent-testbench", instructions=INSTRUCTIONS)
+try:                                         # the version clients see in initialize (mcp 2 takes it here)
+    server = _Server(name="agent-testbench", instructions=INSTRUCTIONS, version=__version__)
+except Exception:                            # mcp 1.x
+    server = _Server(name="agent-testbench", instructions=INSTRUCTIONS)
+if getattr(getattr(server, "_mcp_server", None), "version", None) in (None, ""):
+    try:
+        server._mcp_server.version = __version__
+    except Exception:
+        pass
 
 
 async def _cli(project_dir: str, argv: list[str], on_line=None, env: dict | None = None) -> tuple[int, str]:

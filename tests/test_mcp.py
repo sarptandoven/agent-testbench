@@ -226,3 +226,15 @@ def test_mcp_over_http(plain):
         assert "quick: local" in reply["result"]["content"][0]["text"]
     finally:
         proc.kill()
+
+
+def test_the_server_says_its_version_and_a_missing_extra_says_what_to_install(tmp_path):
+    import subprocess
+    import sys
+    from agent_testbench import __version__, mcp_server
+    inner = getattr(mcp_server.server, "_mcp_server", None)
+    assert __version__ in (getattr(mcp_server.server, "version", None), getattr(inner, "version", None))
+    code = ("import sys; sys.modules['mcp'] = None\n"                 # as if the mcp package were not installed
+            "from agent_testbench.cli import main\nsys.exit(main(['mcp']))")
+    r = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 2 and 'pip install "agent-testbench[mcp]"' in r.stderr and "Traceback" not in r.stderr, r.stderr

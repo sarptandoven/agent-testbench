@@ -2,6 +2,11 @@
 
 ## 0.2.0 - not yet released
 
+- Release readiness: the PyPI page's links point at GitHub (the README's relative links are rewritten at build
+  time), local builds leave out `.env` and caches, `release.yml` publishes only from a published GitHub release whose
+  tag, versions and dated changelog agree (actions pinned to commit SHAs), and a test keeps the version equal in
+  every file. `testbench mcp` without the `mcp` extra says what to install; the MCP server reports its version; the
+  demo installs scikit-learn and matplotlib versions that have wheels for every Python, 3.14 included.
 - The test suite runs in parallel (`python -m pytest -q -n 4`; pytest-xdist is in the dev extras): about 3.5 minutes
   instead of 13 here. `testbench cancel` no longer waits a minute for a run whose driver ended before it could
   close it.

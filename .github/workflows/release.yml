@@ -1,36 +1,56 @@
 name: release
-# Publishes to PyPI with PyPI trusted publishing (no API token anywhere): when a GitHub release is published,
-# or by hand from the Actions tab (`gh workflow run release.yml`). PyPI rejects a version that already exists.
+# Publishes agent-testbench to PyPI when a GitHub release is published - and on nothing else (no push, no tag, no
+# run by hand). PyPI trusted publishing, so there is no token anywhere: on pypi.org the project's trusted publisher
+# names this repository, this file (release.yml) and the environment `pypi` (docs/publishing.md). The release's tag
+# must be v<version> and the changelog must date the release, or nothing is built; PyPI refuses a version it has.
+# Every action is pinned to a full commit SHA, with its tag in the comment.
 on:
   release:
     types: [published]
-  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1          # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0      # v7.1.0
         with:
           python-version: "3.12"
+      - name: the tag, the version in every file and the changelog agree
+        env:
+          TESTBENCH_RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python -m pip install pytest==9.2.0 pyyaml==6.0.3
+          python -m pytest -q --noconftest -p no:cacheprovider tests/test_release.py
       - name: build and check
         run: |
-          python -m pip install --upgrade build twine
+          python -m pip install build==1.6.1 twine==7.0.0
           python -m build
           python -m twine check --strict dist/*
-      - uses: actions/upload-artifact@v4
+          # the MCP Registry proves ownership by this line in the PyPI description
+          unzip -p dist/*.whl '*.dist-info/METADATA' | grep -q 'mcp-name: io.github.sarptandoven/agent-testbench' \
+            || { echo "::error::the wheel's description has no mcp-name line (README.md's last line)"; exit 1; }
+          ls -l dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with:
           name: dist
           path: dist/
+          if-no-files-found: error
   publish:
     needs: build
+    if: github.event_name == 'release' && github.event.action == 'published'
     runs-on: ubuntu-latest
-    environment: pypi
+    environment:
+      name: pypi
+      url: https://pypi.org/project/agent-testbench/
     permissions:
-      id-token: write
+      id-token: write                    # trusted publishing (and the attestations PyPI shows); nothing else
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3

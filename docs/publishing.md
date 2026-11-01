@@ -7,15 +7,18 @@ Registry reads the README of the release on PyPI, so PyPI comes first.
 Each section says what was **verified** against the live documentation or code on 2026-10-31, and what is
 **inferred** (not checked, or only checked through search results). agentskills.io and cursor.com could not be
 reached from the session that wrote this page; their specifications were read from their GitHub repositories
-instead, as each section says.
+instead, as each section says. Sections 1 to 4 were checked again for 0.2.0 on 2026-11-01; the
+[release checklist](#release-checklist) at the end says what that covered and lists the owner's steps in order.
 
 ## Every release: the version, in every place
 
-A release changes the version in all of these, to the same number:
+A release changes the version in all of these, to the same number. `tests/test_release.py` fails when one of them
+differs from `pyproject.toml`, and the release workflow runs it with the release's tag:
 
 | file | field |
 |---|---|
 | `pyproject.toml` | `version` |
+| `src/agent_testbench/__init__.py` | `__version__` |
 | `.claude-plugin/plugin.json` | `version` |
 | `.claude-plugin/marketplace.json` | `plugins[0].version` |
 | `.cursor-plugin/plugin.json` | `version` |
@@ -25,25 +28,62 @@ A release changes the version in all of these, to the same number:
 
 ## 1. PyPI
 
-`.github/workflows/release.yml` builds the package, checks it with `twine check --strict` and publishes it with
-PyPI trusted publishing (no API token), when a GitHub release is published or when it is run by hand.
+`.github/workflows/release.yml` runs when a GitHub release is published, and on nothing else: no push, no tag on
+its own, no run by hand (0.1.x's workflow could also be started by hand, from any branch). Its `build` job checks
+out the release's tag, runs `tests/test_release.py` with that tag (the tag must be `v` and the version, every file
+in the table above must name that version, and the changelog heading must have a date), builds the sdist and the
+wheel, checks them with `twine check --strict`, and checks that the wheel's description still has the `mcp-name`
+line. Its `publish` job, in the GitHub environment `pypi` and with no permission but `id-token: write`, uploads
+them with PyPI trusted publishing (no API token anywhere) and the attestations PyPI shows. Every action is pinned
+to a full commit SHA, with its tag in a comment.
 
-1. On pypi.org, project `agent-testbench`, Settings, Publishing: there must be a trusted publisher for repository
-   `sarptandoven/agent-testbench`, workflow `release.yml`, environment `pypi`. 0.1.x was published this way, so it
-   should already be there (inferred).
-2. In `CHANGELOG.md`, replace "0.2.0 - not yet released" with the date.
-3. Tag and publish the release from a commit whose README.md has the `mcp-name` comment (section 4); publishing
-   it starts the workflow:
+Set up once, before the first release from this workflow:
+
+1. On pypi.org, project `agent-testbench`, Manage, Publishing: a GitHub trusted publisher with owner
+   `sarptandoven`, repository `agent-testbench`, workflow `release.yml` and environment `pypi`. It is there today:
+   PyPI's provenance for 0.1.2
+   (`https://pypi.org/integrity/agent-testbench/0.1.2/agent_testbench-0.1.2-py3-none-any.whl/provenance`) names
+   exactly that publisher (verified 2026-11-01). Renaming the workflow file or the environment breaks it until the
+   publisher on PyPI is changed to match.
+2. In the repository, Settings, Environments, `pypi` (GitHub made it for 0.1.x): add yourself as a required
+   reviewer, so an upload waits for your yes. PyPI's documentation strongly recommends such an environment
+   (inferred: the repository's environments could not be read from the session that checked this).
+
+Each release:
+
+1. Merge the release into `main` first. The PyPI page's links and its image point at files on `main` (below), and
+   until 0.2.0 is merged, `main` has no docs/tour.md and the other new pages (checked 2026-11-01: 404).
+2. In `CHANGELOG.md`, replace "0.2.0 - not yet released" with the date, as `## 0.2.0 - YYYY-MM-DD`; the workflow
+   refuses a release whose heading has no date.
+3. Tag that commit of `main` and publish a release from the tag; publishing it starts the workflow:
 
    ```bash
    git tag v0.2.0 && git push origin v0.2.0
-   gh release create v0.2.0 --title 0.2.0 --notes "See CHANGELOG.md"
+   gh release create v0.2.0 --verify-tag --title 0.2.0 --notes "See CHANGELOG.md"
    ```
 
-4. Check it: `uvx --from "agent-testbench[all]==0.2.0" testbench --version` prints `agent-testbench 0.2.0`.
+   To list the action on the GitHub Marketplace in the same step, draft the release on github.com instead
+   (section 2): `gh release create` has no Marketplace option.
+4. In the run (Actions, release), approve the `pypi` deployment if the environment has a reviewer.
+5. Check it: `uvx --from "agent-testbench[all]==0.2.0" testbench --version` prints `agent-testbench 0.2.0`.
 
-Verified: the workflow (read), and that a build of this tree passes `twine check --strict` with the README's
-`mcp-name` comment in the package description. Inferred: the PyPI-side settings.
+If the `build` job fails, nothing reached PyPI: fix it on `main`, delete the release and the tag
+(`gh release delete v0.2.0 --cleanup-tag`), and publish again. Once a file is on PyPI, that version can never be
+uploaded again, even after deleting it there; the next try needs a new version.
+
+**The description on PyPI.** README.md's links are relative (`docs/tour.md`), which works on GitHub and on the
+documentation site but would point at pypi.org. `pyproject.toml` builds the package description with
+hatch-fancy-pypi-readme, whose two substitutions turn each relative link into one to that file (`blob/main/...`)
+or folder (`tree/main/...`) on GitHub; README.md itself stays as it is. `tests/test_release.py` checks that no
+relative link is left, that each one names a file or folder (and heading) of the repository, and that the
+`mcp-name` line is still there. The README's image is already an absolute `raw.githubusercontent.com` URL.
+
+Verified 2026-11-01: a build of this tree (sdist and wheel, hatchling 1.33.0) passes `twine check --strict`; its
+description has 54 links, all absolute, and the `mcp-name` line. PyPI accepts the wheel's Metadata-Version 2.5
+(0.1.2's wheel on PyPI has it too). The workflow's test step was run as the runner does it (a fresh Python 3.12 with
+only pytest and pyyaml, `TESTBENCH_RELEASE_TAG=v0.2.0`): it passes with a dated changelog, and fails, naming the
+file, when one manifest is left at another version. Not run: the workflow itself on GitHub, and actionlint or
+zizmor on it.
 
 ## 2. The GitHub Action: tag `v1`
 
@@ -54,9 +94,17 @@ release that stays compatible:
 git tag -f v1 "v0.2.0^{commit}" && git push -f origin v1
 ```
 
-To list the action on the GitHub Marketplace, tick "Publish this Action to the GitHub Marketplace" when drafting a
-release; `action.yml` already has a name, a description and `branding` (inferred from GitHub's documentation, not
-checked today).
+There is no `v1` tag yet (checked 2026-11-01: the tags are v0.1.0, v0.1.1 and v0.1.2), so every
+`uses: sarptandoven/agent-testbench@v1` in README.md and docs/github-action.md fails until it is pushed. The action
+is new in 0.2.0, so `v1` starts at `v0.2.0`.
+
+To list the action on the GitHub Marketplace, draft the release on github.com (the banner on `action.yml`, or
+Releases, Draft a new release) and tick "Publish this Action to the GitHub Marketplace"; the first time, the account
+must accept the Marketplace Developer Agreement, and publishing needs two-factor authentication. The listing needs
+a public repository with one `action.yml` at its root and a `name` no other listing, GitHub user or organization
+has; `action.yml` has `name: agent-testbench`, a description and `branding`, and the form says whether the name is
+free (verified against GitHub's documentation source, github.com/github/docs,
+`content/actions/how-tos/create-and-publish-actions/publish-in-github-marketplace.md`).
 
 ## 3. The documentation site
 
@@ -65,7 +113,8 @@ anchor or a page left out of the nav fails it) and, on pushes to `main`, deploys
 `actions/upload-pages-artifact` and `actions/deploy-pages`.
 
 1. In the repository: Settings, Pages, Build and deployment, Source: **GitHub Actions**. Until then the deploy job
-   fails (inferred).
+   fails (inferred). Pages is not on yet (checked 2026-11-01), and the package's Documentation link on PyPI
+   points at the site, so do this before the release.
 2. Push to `main` (or re-run the docs workflow). The site is at <https://sarptandoven.github.io/agent-testbench/>
    (`site_url` in `mkdocs.yml`; change it there for a custom domain).
 3. To read it locally: `pip install -r docs/requirements.txt && mkdocs serve`.
@@ -106,7 +155,7 @@ Steps:
 What a client runs from this entry: VS Code builds `uvx [runtimeArguments] <identifier>@<version>
 [packageArguments]` (read in its source, `src/vs/platform/mcp/common/mcpManagementService.ts`), which here is
 `uvx --with agent-testbench[all]==0.2.0 agent-testbench@0.2.0 mcp`. That command was run against a local build of
-0.2.0: the server started and listed its 21 tools. The `--with` brings in the `all` extra, which has the MCP
+0.2.0: the server started and listed its 25 tools. The `--with` brings in the `all` extra, which has the MCP
 server; the command is `agent-testbench`, the package's second entry point, because clients put the package name
 there. `registryBaseUrl` is left out on purpose: the registry fills in `https://pypi.org` (verified), and VS Code
 would pass a set value to uvx as `--index-url https://pypi.org`, which is not a package index (inferred from the
@@ -114,6 +163,16 @@ code; not run).
 
 To publish from CI later, the registry documents a workflow that logs in with `mcp-publisher login github-oidc`
 (`docs/modelcontextprotocol-io/github-actions.mdx` in its repository).
+
+Checked again on 2026-11-01: `server.json` validates against the 2025-12-11 schema (jsonschema, Draft 7, no
+errors); that is still the newest released schema (the schema changelog has only a draft after it) and the one
+every entry the live API listed uses; the registry has no entry for `io.github.sarptandoven/agent-testbench` yet;
+the publisher's commands (`init`, `login`, `logout`, `publish`, `status`, `validate`) and its install routes are as
+the registry's quickstart gives them. The four ways a client starts this server - the `server.json` command above,
+the Cursor plugin's `.cursor-plugin/mcp.json`, the README's unpinned `uvx --from "agent-testbench[all]" testbench mcp`
+and `uv tool install "agent-testbench[all]==0.2.0"` - each answered an MCP `initialize` and listed 25 tools from a
+fresh HOME, with uv finding 0.2.0 in a local build (`UV_FIND_LINKS`) instead of on PyPI. `mcp-publisher` itself was
+not run.
 
 ## 5. Anthropic's plugin directory (Claude Code)
 
@@ -183,3 +242,72 @@ the description is under 1024 characters, and there are no other fields. `argume
 it is a Claude Code addition that `skills-ref` rejects, and Claude Code's documentation says fields outside the
 specification fail an upload to claude.ai or the Skills API. The one loss is the argument hint after
 `/agent-testbench:iterate` in Claude Code's menu.
+
+## Release checklist
+
+### Verified for 0.2.0 on 2026-11-01
+
+From commit `59372e6` of the release branch plus this page's commit, on Linux, without publishing anything:
+
+- **Build.** `python -m build` (hatchling 1.33.0) makes `agent_testbench-0.2.0.tar.gz` (about 320 KB) and
+  `agent_testbench-0.2.0-py3-none-any.whl` (about 370 KB, 1.4 MB unpacked); `twine check --strict` passes both.
+  The wheel holds exactly the git-tracked files of `src/agent_testbench` (recipes, mock_clients, schema,
+  kernelkit, colab_shim) and of the four examples `testbench demo` copies (tiny-model, llm-app, web-app,
+  test-suite); the sdist adds README.md, LICENSE, pyproject.toml and .gitignore, and no tests, docs or caches.
+  `pricing/catalog.json` ships in neither: the prices are built into the code, and `testbench prices --update`
+  fetches the catalog from GitHub. A build from a folder with `.env` files, `.testbench/`, `outputs/` and
+  caches in it ships none of them (`.env` files did ship before `[tool.hatch.build] exclude` in pyproject.toml).
+- **Install,** with pip (its resolver, then `pip check`) in a fresh venv and a fresh HOME for each Python and
+  extra: Python 3.10, 3.11, 3.12, 3.13 and 3.14, each bare and with `[all]`, `[mcp]`, `[web]`, `[mlflow]`,
+  `[wandb]`, `[modal]` and `[dev]` (pip 23.0 to 26.2, as each Python's venv comes): every install resolves with
+  no conflict (mcp 2.3.0, modal 1.6.3, playwright 1.64.1, mlflow 3.17.2, wandb 0.31.0), and `testbench
+  --version` and `agent-testbench --version` print 0.2.0, and `from agent_testbench import Testbench, tools`
+  imports, in every one. Bare: `doctor`, `recipes`, `demo --list` and `demo llm-app` (passes) work; `demo`,
+  `demo test-suite` and `demo web-app` say which packages to install, and do their job once they are there
+  (tiny-model passes, test-suite fails on purpose). `[all]`, `[mcp]` and `[dev]`: `testbench mcp` answers
+  `initialize` and lists 25 tools, and `tools.anthropic_tools()` gives 25. `[web]` and `[all]`: `demo web-app`
+  passes (with playwright 1.63.0, the release whose Chromium this machine had; 1.64.1 asks for
+  `playwright install chromium`, as it should). `[mlflow]` and `[wandb]`: `export --to mlflow` (sqlite store)
+  and `--to wandb` (offline) work. `[modal]`: `doctor` finds modal (no Modal call was made). Found, not fixed
+  here: on Python 3.14, `testbench demo` asks for `scikit-learn==1.5.2 matplotlib==3.9.2`, which have no 3.14
+  wheels, so pip builds them from source (matplotlib's build failed on this machine); with today's releases
+  (scikit-learn 1.9.1, matplotlib 3.11.2) the demo passes on 3.14. And without the `mcp` extra, `testbench mcp`
+  stops with a `ModuleNotFoundError` traceback instead of saying `pip install "agent-testbench[mcp]"`.
+- **MCP.** The four ways a client starts the server (section 4) answer `initialize` and list 25 tools.
+- **Versions.** 0.2.0 in all the places in the table at the top; `tests/test_release.py` keeps them equal.
+- **PyPI description.** No relative link left, each target a file or folder of the repository, the `mcp-name`
+  line kept (section 1).
+- **Docs.** `mkdocs build --strict` passes with the versions pinned in docs/requirements.txt (mkdocs 1.6.1,
+  mkdocs-material 9.8.0, pymdown-extensions 12.3, Markdown 3.11.2).
+- **Plugin.** `claude plugin validate .` and `claude plugin validate .claude-plugin/plugin.json --strict` pass
+  (Claude Code 2.1.316), with the one warning ICON_MISSING. The Claude Code plugin starts no MCP server; its
+  guard hook, run as Claude Code runs it from a fresh HOME, refuses `modal run` in a project and turns
+  `testbench run --approve` into a question with the plan's worst case.
+- **Registry.** `server.json` validates against its schema (section 4).
+- **Release workflow.** Runs only on a published release, actions pinned to commit SHAs, its test step tried as
+  the runner runs it (section 1). PyPI's trusted publisher for this workflow and environment exists (0.1.2's
+  provenance).
+
+### The owner's steps, in order
+
+Only the owner can do these; nothing here was published.
+
+1. Turn on GitHub Pages: Settings, Pages, Source **GitHub Actions** (section 3), so the docs deploy that runs on
+   the merge works and the package's Documentation link has a site behind it.
+2. Optional: Settings, Environments, `pypi`, add yourself as a required reviewer (section 1).
+3. Merge the release branch into `main`, then on `main` date the changelog (`## 0.2.0 - YYYY-MM-DD`) and push.
+   Wait for the tests, action and docs workflows to pass on that commit.
+4. Tag and release: `git tag v0.2.0 && git push origin v0.2.0`, then publish the release - on github.com with
+   "Publish this Action to the GitHub Marketplace" ticked to list the action (section 2), or
+   `gh release create v0.2.0 --verify-tag --title 0.2.0 --notes "See CHANGELOG.md"`.
+5. In the release workflow's run, approve the `pypi` deployment (if step 2), and see it finish. Then
+   `uvx --from "agent-testbench[all]==0.2.0" testbench --version` prints `agent-testbench 0.2.0`, and
+   <https://pypi.org/project/agent-testbench/> shows the README with working links and its image.
+6. Point the action's major tag at it: `git tag v1 "v0.2.0^{commit}" && git push origin v1` (later releases:
+   `git tag -f` and `git push -f`, section 2).
+7. MCP Registry (section 4): `mcp-publisher validate`, `mcp-publisher login github` as `sarptandoven`,
+   `mcp-publisher publish`, then the `curl` check.
+8. Anthropic's plugin directory (section 5): add `.claude-plugin/icon.png` first (it is taken only once), then
+   submit at <https://claude.ai/directory/manage>.
+9. Cursor Marketplace (section 6): try the plugin locally, then submit at <https://cursor.com/marketplace/publish>.
+10. Agent Skills (section 7): nothing to do once the repository is public.
