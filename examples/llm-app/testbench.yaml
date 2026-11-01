@@ -1,0 +1,38 @@
+# agent-testbench example: an LLM app's tool-use loop tested for free, against a strict mock of the Anthropic SDK.
+# `mocks: {anthropic: ...}` makes the step's `import anthropic` load the mock: no API key, no network, no cost. A
+# request the real API would refuse (a system message in messages, a tool result with the wrong id) fails the step.
+project: llm-app
+
+plans:
+  mocked:
+    backend: local
+    description: the support bot answers five questions against the mock anthropic package (free, no API key)
+    steps:
+      - name: answer questions
+        run: python support_bot.py --questions questions.json --out outputs/answers.json
+        mocks:
+          anthropic: {replies: mock_replies.yaml}
+        max_minutes: 2
+        artifacts: [outputs/answers.json]
+        expect:
+          text:
+            stdout:                    # made from what lookup_order returned, so the tool really ran
+              - Order A1002 has shipped with UPS and should arrive on 2026-11-04.
+              - Order A1001 is still being packed
+              - Order A1003 was cancelled, and the refund was sent on 2026-10-28.
+              - I could not find an order A9999.
+          json:
+            outputs/answers.json: {questions: 5, lookups: 4, "answers.0.orders.0": A1002, "answers.3.orders.0": A9999}
+          mock_calls:                  # what the bot asked of the API: 4 lookups, 9 requests, prompts that stay small
+            anthropic: {calls: 9, tool_calls: 4, input_tokens: "<= 1500", output_tokens: "<= 300"}
+
+      - name: survives a rate limit
+        run: python support_bot.py --questions questions.json --out outputs/answers.json
+        mocks:
+          anthropic: {replies: mock_replies.yaml, fail_on_call: 3, fail_with: rate_limit}
+        max_minutes: 2
+        expect:
+          text:
+            stdout: [Order A1002 has shipped with UPS, I could not find an order A9999.]
+          mock_calls:                  # the third request got a 429; the SDK retried it, and every answer still came
+            anthropic: {calls: 10, injected: 1, tool_calls: 4}

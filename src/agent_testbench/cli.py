@@ -697,7 +697,64 @@ def cmd_notify(a):
     return 0 if ok else 1
 
 
-DEMO_NEEDS = {"sklearn": "scikit-learn==1.5.2", "matplotlib": "matplotlib==3.9.2"}
+DEMOS = {   # the examples `testbench demo NAME` copies: what each is, its free plan, what it needs, what to try next
+    "tiny-model": {
+        "about": "a Colab-style notebook that trains a small network, and plans for this machine, Modal and Colab",
+        "list": "a Colab-style notebook that trains a small network (needs scikit-learn and matplotlib)",
+        "plan": "smoke", "plan_about": "lint, then a quick train on this machine", "dir": "testbench-demo", "exit": 0,
+        "needs": {"sklearn": "scikit-learn==1.5.2", "matplotlib": "matplotlib==3.9.2"},
+        "why": "The demo trains a small model, which needs {names}: pip install {pips}",
+        "next": """
+Next, in {target}:
+  testbench session start && testbench exec --cells tiny_model.ipynb:1-3      # work live in a kernel
+  testbench exec "model.score(X_test, y_test)" && testbench session stop
+  testbench loop start smoke --metric outputs/metrics.json:accuracy --budget-usd 0   # then edit cells/02_settings.py,
+  testbench nb build cells tiny_model.ipynb && testbench loop try "what changed"      # rebuild, and try it
+  testbench ui                                                                       # every run as a page
+Or open it in Claude Code with the plugin and ask: "use testbench loop to raise the smoke plan's accuracy"."""},
+    "llm-app": {
+        "about": "a support bot on the Anthropic SDK with one tool (look up an order), and a plan that runs its "
+                 "tool-use loop against testbench's strict mock of the SDK: no API key, no network, no cost",
+        "list": "a support bot on the Anthropic SDK with one tool, tested against the mock SDK (no API key)",
+        "plan": "mocked", "plan_about": "five questions against the mock anthropic package, then again with a 429",
+        "dir": "llm-app", "exit": 0, "needs": {},
+        "next": """
+Next, in {target}:
+  testbench report --format html                 # the run as one page: every check, and what each request asked
+  head -c 600 .testbench/runs/*/steps/01-answer-questions/mock_calls.jsonl     # a request, as the API would get it
+Break the loop and run `testbench run mocked` again: in support_bot.py, send a tool_result with the wrong
+tool_use_id, or put SYSTEM first in messages as a system message - the report names the 400 the real API would send.
+Or open it in Claude Code with the plugin and ask: "add a cancel_order tool to the support bot and prove it works with
+the mocked plan"."""},
+    "web-app": {
+        "about": "a page with a form and a small JSON API, and a plan that fills the form in headless Chromium, "
+                 "checks the answer and the console, and takes screenshots",
+        "list": "a page with a form, filled in and checked in headless Chromium (needs Playwright)",
+        "plan": "ui", "plan_about": "split a bill in headless Chromium, then a bad one", "dir": "web-app", "exit": 0,
+        "needs": {"playwright": '"agent-testbench[web]"'},
+        "why": "The demo opens the page in headless Chromium, which needs Playwright: pip install {pips} && "
+               "playwright install chromium",
+        "next": """
+Next, in {target}:
+  testbench report --format html       # the run as one page, with its screenshots
+  testbench ui                         # every run as a page
+Break the app and run `testbench run ui` again: round down in split() in app.py (ROUND_DOWN), or rename #result in
+static/index.html - the report says which text the page no longer shows, or which error it threw.
+Or open it in Claude Code with the plugin and ask: "let the form take a tip in dollars too, and prove it with the ui
+plan"."""},
+    "test-suite": {
+        "about": "a small Python package whose pytest suite fails on a planted bug, with plans that judge the suite by "
+                 "its JUnit report here and in a Docker sandbox with no network",
+        "list": "a package whose pytest suite fails on a planted bug, here and in a Docker sandbox: fix it",
+        "plan": "tests", "plan_about": "the pytest suite on this machine, judged by its JUnit report",
+        "dir": "test-suite", "exit": 1, "needs": {"pytest": "pytest"},
+        "why": "The demo runs a pytest suite, which needs {names}: pip install {pips}",
+        "next": """
+The plan fails: that is the point. The report names the failing test and what it got.
+Ask your agent to fix it: open {target} in Claude Code with the plugin and ask
+  "the tests plan fails: find out why, fix the code (not the tests), and prove it with the plan"
+With Docker running, `testbench run sandbox` runs the same suite in a fresh container with no network."""},
+}
 
 
 def _example(name: str) -> Path:
@@ -711,36 +768,44 @@ def _example(name: str) -> Path:
 def cmd_demo(a):
     import importlib.util as iu
     import shutil
-    target = Path(a.dir).resolve()
+    if a.list:
+        print("`testbench demo NAME [DIR]` copies an example to a new folder (a git repository) and runs its free plan:")
+        for name, d in DEMOS.items():
+            print(f"  {name:<11} {'(the default) ' if name == 'tiny-model' else ''}{d['list']}")
+        return 0
+    name, folder = a.name, a.dir
+    if name not in DEMOS:
+        if name is not None and folder is not None:
+            print(f"testbench: there is no {name} example; the examples are {', '.join(DEMOS)} "
+                  "(`testbench demo --list` says what each shows)")
+            return 2
+        name, folder = "tiny-model", name            # `testbench demo` and `testbench demo DIR`, as before
+    demo, given = DEMOS[name], [x for x in (a.name, a.dir) if x is not None]
+    target = Path(folder or demo["dir"]).resolve()
     if target.exists() and any(target.iterdir()):
         print(f"{target} is not empty; give `testbench demo` a new folder")
         return 2
-    missing = [pkg for mod, pkg in DEMO_NEEDS.items() if iu.find_spec(mod) is None]
+    missing = [pkg for mod, pkg in demo["needs"].items() if iu.find_spec(mod) is None]
     if missing:
-        print(f"The demo trains a small model, which needs {' and '.join(missing)}: "
-              f"pip install {' '.join(missing)} - then run `testbench demo {a.dir}` again.")
+        print(demo["why"].format(names=" and ".join(missing), pips=" ".join(missing))
+              + f" - then run `{' '.join(['testbench', 'demo', *given])}` again.")
         return 2
-    shutil.copytree(_example("tiny-model"), target, ignore=shutil.ignore_patterns(".testbench", "outputs", "__pycache__"))
-    (target / ".gitignore").write_text("outputs/\n__pycache__/\n")
+    shutil.copytree(_example(name), target,
+                    ignore=shutil.ignore_patterns(".testbench", "outputs", "__pycache__", ".pytest_cache"))
+    (target / ".gitignore").write_text("outputs/\n__pycache__/\n.pytest_cache/\n")
     if shutil.which("git"):                          # a repository, so `testbench loop` works there too
         for cmd in (["init", "-q"], ["add", "-A"], ["-c", "user.name=testbench demo", "-c", "user.email=demo@localhost",
-                                                    "commit", "-qm", "tiny-model demo"]):
+                                                    "commit", "-qm", f"{name} demo"]):
             subprocess.run(["git", *cmd], cwd=target, capture_output=True)
-    print(f"Copied the tiny-model example to {target}: a Colab-style notebook that trains a small network, and plans "
-          "for this machine, Modal and Colab.\n")
+    print(f"Copied the {name} example to {target}: {demo['about']}.\n")
     if a.no_run:
         code = 0
     else:
-        print("Running its free plan, `smoke` (lint, then a quick train on this machine):\n", flush=True)
-        code = subprocess.call([sys.executable, "-m", "agent_testbench", "run", "smoke", "--wait", "300"], cwd=target)
-    print(f"""
-Next, in {target}:
-  testbench session start && testbench exec --cells tiny_model.ipynb:1-3      # work live in a kernel
-  testbench exec "model.score(X_test, y_test)" && testbench session stop
-  testbench loop start smoke --metric outputs/metrics.json:accuracy --budget-usd 0   # then edit cells/02_settings.py,
-  testbench nb build cells tiny_model.ipynb && testbench loop try "what changed"      # rebuild, and try it
-  testbench ui                                                                       # every run as a page
-Or open it in Claude Code with the plugin and ask: "use testbench loop to raise the smoke plan's accuracy".""")
+        print(f"Running its free plan, `{demo['plan']}` ({demo['plan_about']}):\n", flush=True)
+        code = subprocess.call([sys.executable, "-m", "agent_testbench", "run", demo["plan"], "--wait", "300"],
+                               cwd=target)
+        code = 0 if code == demo["exit"] else (code or 1)   # test-suite's plan fails on purpose
+    print(demo["next"].format(target=target))
     return code
 
 
@@ -956,7 +1021,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_notify)
     sub.add_parser("doctor", help="check what this machine can run").set_defaults(fn=cmd_doctor)
     p = sub.add_parser("demo", help="copy a small example project to DIR, run its free plan, and show what to try next")
-    p.add_argument("dir", nargs="?", default="testbench-demo")
+    p.add_argument("name", nargs="?", metavar="NAME", help=f"the example: {', '.join(DEMOS)} (default tiny-model)")
+    p.add_argument("dir", nargs="?", metavar="DIR", help="a new folder (default: testbench-demo for tiny-model, the "
+                                                         "example's name for the others)")
+    p.add_argument("--list", action="store_true", help="the examples, and what each shows")
     p.add_argument("--no-run", action="store_true", help="only copy it")
     p.set_defaults(fn=cmd_demo)
     p = sub.add_parser("mcp", help="serve these commands as MCP tools (stdio, or --http)")
