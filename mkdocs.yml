@@ -1,7 +1,7 @@
 # The documentation site: https://sarptandoven.github.io/agent-testbench/
 # Build it:  pip install -r docs/requirements.txt && mkdocs build --strict   (or `mkdocs serve` to read it locally)
-# The pages are the Markdown files of the repository; docs/hooks.py puts README.md and sections of the other files
-# into pages and points their GitHub links at the site.
+# The pages are the Markdown files of the repository; docs/hooks.py puts README.md's sections (after the home page's
+# own landing screen) and sections of the other files into pages and points their GitHub links at the site.
 site_name: agent-testbench
 site_description: A test bench your coding agent operates - live kernels and proved runs on your machine, Docker, ssh, Modal GPUs or Colab, inside a budget.
 site_url: https://sarptandoven.github.io/agent-testbench/
@@ -24,6 +24,8 @@ hooks:
 
 nav:
   - Home: index.md
+  - Why agent-testbench: why.md
+  - Use cases: use-cases.md
   - Getting started: getting-started.md
   - Expectations: expectations.md
   - Backends:
@@ -35,6 +37,8 @@ nav:
   - Proof records: proof-records.md
   - CI: github-action.md
   - Reference: reference.md
+  - FAQ: faq.md
+  - Troubleshooting: troubleshooting.md
   - Demos:
       - An agent improves a model: demo-loop.md
       - A failing suite fixed in a Docker sandbox: demo-sandbox.md
