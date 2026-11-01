@@ -31,6 +31,20 @@ def test_a_loop_works_in_a_repository_that_ignores_the_testbench_folder(repo):
     assert (repo / "settings.py").read_text() == "SCORE = 3\n" and (repo / "README.md").read_text() == "next idea\n"
 
 
+def test_the_approval_a_loop_waits_for_names_a_command_that_runs(repo, webhook):
+    # `--metric "check:mock anthropic output_tokens"` is a documented metric; the approve_with command sent to the
+    # webhook had it unquoted, so pasting it ran a different command (argparse: unrecognized arguments).
+    import shlex
+    import yaml
+    cfg = yaml.safe_load((repo / "testbench.yaml").read_text())
+    (repo / "testbench.yaml").write_text(yaml.safe_dump({**cfg, "notify": {"webhook": webhook.url}}, sort_keys=False))
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "notify")
+    r = cli(repo, "loop", "start", "score", "--metric", "check:metrics.json: score", "--budget-usd", "1")
+    assert r.returncode == 2 and "Needs approval" in r.stdout, r.stdout
+    argv = shlex.split(webhook.events("approval_needed")[-1]["approve_with"])
+    assert argv[argv.index("--metric") + 1] == "check:metrics.json: score", argv
+
+
 def test_rescue_does_not_report_files_a_notebook_makes_or_reads_from_an_archive_as_missing(tmp_path):
     # ZipFile(path, "w") and h5py.File(path, "w") make the file; z.open(name) reads a member of the archive; with
     # path.open("w") the path is the file and "w" its mode. Each was reported as "reads X, which is not there" (blocks,

@@ -28,6 +28,7 @@ import datetime as dt
 import json
 import math
 import re
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -319,7 +320,7 @@ def start(root: Path, cfg: dict, plan: str, metric: str, budget_usd: float, goal
                    f"to ${worst:.2f}), above {where}. Ask a person; if they agree, rerun with --approve.")
         given = (("max-hours", max_hours, 8.0), ("min-delta", min_delta, 0.0), ("target", target, None),
                  ("patience", patience, None), ("max-tries", max_tries, None))
-        how = " ".join([f"testbench loop start {plan} --metric {metric} --budget-usd {budget_usd:g}"]
+        how = " ".join([f"testbench loop start {plan} --metric {shlex.quote(metric)} --budget-usd {budget_usd:g}"]
                        + ([f"--goal {goal}"] if goal != "max" else [])
                        + [f"--{k} {v:g}" for k, v, usual in given if v != usual] + ["--approve"])
         p = cfg["plans"][plan]
