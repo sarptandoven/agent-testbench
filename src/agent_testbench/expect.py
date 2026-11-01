@@ -41,6 +41,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from .config import counted
+
 OPS = {">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b, "!=": lambda a, b: a != b, "==": lambda a, b: a == b,
        ">": lambda a, b: a > b, "<": lambda a, b: a < b}
 RULE = re.compile(r"^\s*(>=|<=|!=|==|>|<)\s*(.+?)\s*$")
@@ -290,7 +292,7 @@ def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
             name = f"{source} /{pattern}/ {rule}"
             hits = list(re.finditer(pattern, text, re.M)) if text is not None else []
             if text is None or not hits:
-                add(name, False, why or f"no match in {source} ({len(text.splitlines())} lines)")
+                add(name, False, why or f"no match in {source} ({counted(len(text.splitlines()), 'line')})")
                 continue
             last = hits[-1]
             ok, detail = compare(_number(last.group(1) if last.re.groups else last.group(0)), rule)
@@ -415,7 +417,7 @@ def _junit(spec: dict, workdir: Path, result: dict, add) -> None:
         return
     for key, rule in {"failures": 0, "errors": 0, **{k: v for k, v in spec.items() if k != "path"}}.items():
         ok, detail = compare(got.get(key), rule)
-        detail += "" if key == "tests" else f" of {got['tests']} tests"
+        detail += "" if key == "tests" else f" of {counted(got['tests'], 'test')}"
         cases = {"failures": got["failing"], "errors": got["erroring"]}.get(key)
         if cases:
             detail += (f"; {'failed' if key == 'failures' else 'errored'}: " + "; ".join(cases[:3])

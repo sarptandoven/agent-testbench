@@ -120,6 +120,17 @@ def test_patience_refuses_more_of_the_same(repo, webhook):
         "a loop's runs are told by the loop, and each try's verdict only when asked for"
 
 
+def test_a_patience_of_one_reads_as_one_try(repo):
+    assert cli(repo, *START, "--patience", "1").returncode == 0
+    score(repo, 0)
+    r = cli(repo, "loop", "try", "zero")
+    assert r.returncode == 1 and "That is 1 try in a row not kept (--patience 1)" in r.stdout, r.stdout
+    score(repo, 0.5)
+    r = cli(repo, "loop", "try", "half")
+    assert r.returncode == 2 and "1 try in a row was not kept (--patience 1):" in r.stdout, r.stdout
+    assert "1 try, 0 kept" in cli(repo, "loop", "status").stdout
+
+
 def test_max_tries(repo):
     r = cli(repo, *START, "--max-tries", "1", "--patience", "5")
     assert r.returncode == 0
@@ -131,7 +142,7 @@ def test_max_tries(repo):
     assert r.returncode == 2 and "the loop has made its 1 try (--max-tries 1); best score 2 (try 1" in r.stdout
     git(repo, "checkout", "--", "settings.py")
     report = cli(repo, "loop", "stop").stdout
-    assert "at most 1 tries (1 made)" in report and "It had made all its tries" in report, report
+    assert "at most 1 try (1 made)" in report and "It had made all its tries" in report, report
 
 
 def test_bad_rules_and_loops_without_them(repo):

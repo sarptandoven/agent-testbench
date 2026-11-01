@@ -153,6 +153,12 @@ def validate(raw: dict, root: Path) -> dict:
     return cfg
 
 
+def counted(n, one: str, many: str | None = None) -> str:
+    """A count with its noun, singular for exactly one: counted(1, "try", "tries") is "1 try", counted(3, "file") is
+    "3 files"."""
+    return (f"{n:g}" if isinstance(n, float) else str(n)) + " " + (one if n == 1 else many or one + "s")
+
+
 def number(v, positive: bool = False) -> bool:
     """A real number of dollars or minutes: not a bool, not NaN or infinity, not negative (not zero if positive).
     Every limit, price and duration goes through this, because NaN compares false with everything and would let a

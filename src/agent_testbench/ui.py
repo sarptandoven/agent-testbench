@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 
 from . import budget, report as R, runs
+from .config import counted
 
 e = html.escape
 
@@ -69,7 +70,7 @@ def build(root: Path, cfg: dict) -> Path:
     done = [r for r in reports if r.get("status") in runs.DONE]
     spent = sum(e_["usd"] for e_ in budget.entries(root) if e_["event"] == "finish")
     body = [f"<h1>{e(cfg['project'])}</h1>",
-            f"<div class=muted>{len(reports)} runs, {sum(r['status'] == 'passed' for r in done)} passed; "
+            f"<div class=muted>{counted(len(reports), 'run')}, {sum(r['status'] == 'passed' for r in done)} passed; "
             f"${budget.spent_today(root):.3f} committed today, ${spent:.3f} in all (estimates). Built "
             f"{dt.datetime.now():%Y-%m-%d %H:%M}; rebuild with <code>testbench ui</code>.</div>"]
     if unreadable:
@@ -113,7 +114,7 @@ def build(root: Path, cfg: dict) -> Path:
                     link = f" &middot; <a href='../loops/{e(s['id'])}/report.html'>report</a>"
                 body.append(f"<li><b>{e(s['id'])}</b> ({e(s['status'])}): {e(s['key'])} best "
                             f"{'-' if s['best']['value'] is None else format(s['best']['value'], 'g')}, "
-                            f"{len(s['tries']) - 1} tries, {kept} kept{link}</li>")
+                            f"{counted(len(s['tries']) - 1, 'try', 'tries')}, {kept} kept{link}</li>")
             except (ValueError, TypeError, KeyError, AttributeError, IndexError, OSError):
                 body.append(f"<li><b>{e(p.parent.name)}</b>: its state.json cannot be read</li>")
         body.append("</ul>")

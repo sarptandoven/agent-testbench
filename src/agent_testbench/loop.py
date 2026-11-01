@@ -225,9 +225,11 @@ def _halt(state: dict) -> tuple[str, str, str] | None:
     if patience and len(streak) >= patience:
         tried = "\n".join(f"  try {t['n']}: {t['description']} - {_why(t)}" for t in streak)
         return ("out_of_patience",
-                f"That is {len(streak)} tries in a row not kept (--patience {patience}): {STOP}, or try something "
+                f"That is {C.counted(len(streak), 'try', 'tries')} in a row not kept (--patience {patience}): "
+                f"{STOP}, or try something "
                 "different in kind with `testbench loop try --new-direction \"...\"`.",
-                f"{len(streak)} tries in a row were not kept (--patience {patience}):\n{tried}\nBest {key} so far: "
+                f"{C.counted(len(streak), 'try', 'tries')} in a row "
+                f"{'was' if len(streak) == 1 else 'were'} not kept (--patience {patience}):\n{tried}\nBest {key} so far: "
                 f"{_fmt(best)} ({_best_at(state)}). More of the same is unlikely to help. Either {STOP}, or try an "
                 "idea different in kind from these with `testbench loop try --new-direction \"what is different\"` "
                 "(the count starts again from it).")
@@ -242,7 +244,7 @@ def _rules(state: dict, when: str = "now") -> str:
     if state.get("patience"):
         out.append(f"patience {state['patience']} ({len(_streak(state))} in a row not kept {when})")
     if state.get("max_tries"):
-        out.append(f"at most {state['max_tries']} tries "
+        out.append(f"at most {C.counted(state['max_tries'], 'try', 'tries')} "
                    f"({len([t for t in state['tries'][1:] if t['status'] != 'running'])} made)")
     return "; ".join(out)
 
@@ -269,7 +271,8 @@ def _tell(root: Path, cfg: dict, state: dict, status: str, why: str, report: Pat
     then = {"stopped": "", "out_of_patience": " The agent was told to stop the loop, or to try something different "
             "in kind."}.get(status, " The agent was told to stop the loop and report.")
     text = (f"loop {state['id']} on plan {state['plan']} {ENDED[status]}: {state['key']} {_fmt(base)} -> "
-            f"{_fmt(best['value'])} ({state['goal']}) in {len(tries)} tries, {kept} kept, ${spent(state):.3f} of "
+            f"{_fmt(best['value'])} ({state['goal']}) in {C.counted(len(tries), 'try', 'tries')}, {kept} kept, "
+            f"${spent(state):.3f} of "
             f"${state['budget_usd']:.2f}." + (f" {why}" if why else "") + then
             + (f" Best: {_best_at(state)}." if best["try"] is not None else "")
             + (f" Report: {notify.rel(report, root)}" if report else ""))
@@ -390,7 +393,8 @@ def try_change(root: Path, cfg: dict, description: str, new_direction: bool = Fa
                                    if left else ""))
     if new_direction and not halt:
         raise LoopError("--new-direction is for the try after --patience refused one, and this try is not refused"
-                        + (f" ({len(_streak(state))} of {state['patience']} tries in a row not kept so far)"
+                        + (f" ({len(_streak(state))} of {C.counted(state['patience'], 'try', 'tries')} in a row "
+                           "not kept so far)"
                            if state.get("patience") else " (this loop has no --patience)") + "; try it without")
     top = _git(root, "rev-parse", "--show-toplevel")
     inside = _changes(root)
@@ -506,7 +510,8 @@ def describe(state: dict) -> str:
     left = (state["deadline"] - time.time()) / 3600
     lines = [f"loop {state['id']} ({state['status']}) on plan {state['plan']}: {state['goal']} {_what(state)}; "
              f"best {_fmt(state['best']['value'])} at {state['best']['commit'][:9]}; "
-             f"{len(state['tries']) - 1 if state['tries'] else 0} tries, {len(kept)} kept; ${used:.3f} of "
+             f"{C.counted(len(state['tries']) - 1 if state['tries'] else 0, 'try', 'tries')}, {len(kept)} kept; "
+             f"${used:.3f} of "
              f"${state['budget_usd']:.2f} spent" + (f"; {left:.1f} h left" if state["status"] == ACTIVE else ""),
              f"branch {state['branch']} (from {state['original_branch']} at {state['base'][:9]})"]
     if _rules(state):
@@ -551,7 +556,8 @@ def render(state: dict) -> str:
     hours = ((state.get("stopped") or time.time()) - state["started"]) / 3600
     out = [f"# Loop `{state['id']}` on plan `{state['plan']}`: {state['key']} {_fmt(base)} -> "
            f"{_fmt(state['best']['value'])} ({state['goal']})", "",
-           f"{len(tries)} tries, {len(kept)} kept, ${spent(state):.3f} of ${state['budget_usd']:.2f}, {hours:.1f} h. "
+           f"{C.counted(len(tries), 'try', 'tries')}, {len(kept)} kept, ${spent(state):.3f} of "
+           f"${state['budget_usd']:.2f}, {hours:.1f} h. "
            f"Branch `{state['branch']}` from `{state['original_branch']}` at `{state['base'][:9]}`.", ""]
     if _rules(state):
         ended = state.get("ended_by")

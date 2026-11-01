@@ -89,7 +89,8 @@ def start(root: Path, cfg: dict, name: str = "main", backend: str | None = None,
     idle, longest = float(idle), float(longest)
     most = B.get(hw["backend"]).max_session_minutes
     if most and longest > most:
-        raise SessionError(f"a {hw['backend']} session can last at most {most / 60:g} hours (max_minutes <= {most:g})")
+        raise SessionError(f"a {hw['backend']} session can last at most {C.counted(most / 60, 'hour')} "
+                           f"(max_minutes <= {most:g})")
     sdir = sessions_dir(root) / name
     if (sdir / "state.json").exists():
         old = read(sdir)
@@ -211,7 +212,7 @@ def exec_cells(root: Path, cfg: dict, sdir: Path, nb_path: Path, spec, params: d
     numbers = C.parse_cells(spec) if spec else list(range(1, len(code) + 1))
     bad = [x for x in numbers if x > len(code)]
     if bad:
-        raise SessionError(f"cells {bad} asked for, but {nb_path.name} has {len(code)} code cells")
+        raise SessionError(f"cells {bad} asked for, but {nb_path.name} has {C.counted(len(code), 'code cell')}")
     out = []
     for n in numbers:
         res = exec_code(root, cfg, sdir, code[n - 1], timeout, label=f"{nb_path.name} cell {n}")

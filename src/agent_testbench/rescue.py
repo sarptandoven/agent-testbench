@@ -1294,7 +1294,7 @@ def rescue(notebook: str | Path, *, timeout: float = 120, fix: str | Path | None
 def render(d: dict) -> str:
     nb, status, f = d["notebook"], d["status"], d.get("failure")
     cell = f"cell {f['cell']}" if f and f.get("cell") else "a cell"
-    head = {"passed": f"runs top to bottom here ({d['code_cells']} code cells, {d['seconds']} s)",
+    head = {"passed": f"runs top to bottom here ({C.counted(d['code_cells'], 'code cell')}, {d['seconds']} s)",
             "failed": f"fails at {cell} of {d['code_cells']}",
             "timeout": f"was still running {cell} at the time limit ({d['timeout_seconds']:g} s)",
             "error": "did not start", "not run": "read without running it"}[status]

@@ -249,7 +249,7 @@ class Watch:
 
     def loop(self) -> int:
         writes = outputs(self.cfg["plans"][self.plan])
-        self.say(f"[watch] watching {len(self.snap)} files in {self.root} for plan {self.plan}: a run starts "
+        self.say(f"[watch] watching {C.counted(len(self.snap), 'file')} in {self.root} for plan {self.plan}: a run starts "
                  f"{self.debounce:g} s after the last change, one at a time. Left out: exclude:, .gitignore, caches"
                  + (f", and what the plan writes ({_names(writes, 4)})" if writes else "") + ". Ctrl-C stops.")
         self.start([])

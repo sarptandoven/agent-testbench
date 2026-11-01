@@ -18,6 +18,8 @@ from pathlib import Path
 
 import nbformat
 
+from .config import counted
+
 PARAM = re.compile(r"^(?P<lhs>\s*(?P<name>[A-Za-z_]\w*)\s*=\s*)(?P<value>.*?)(?P<tail>\s*#\s*@param.*)$", re.M)
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 CELL_MARK = re.compile(r"^[ \t]*#[ \t]*%%(%*)(?:[ \t]+(.*?))?[ \t]*$")      # `# %%`, `# %% title [markdown] tags=[..]`
@@ -448,7 +450,7 @@ def run(nb_path: str | Path, *, params: dict, cells: list[int] | None, deadline:
     numbers = cells or list(range(1, len(code_idx) + 1))
     bad = [n for n in numbers if n > len(code_idx)]
     if bad:
-        raise ParamError(f"cells {bad} asked for, but the notebook has {len(code_idx)} code cells")
+        raise ParamError(f"cells {bad} asked for, but the notebook has {counted(len(code_idx), 'code cell')}")
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     log = open(live_log, "a", buffering=1) if live_log else None
