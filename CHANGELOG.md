@@ -2,6 +2,17 @@
 
 ## 0.2.0 - not yet released
 
+- `testbench diff A B` (`--json`, MCP `diff_runs`) says what changed between two runs: each checked number old ->
+  new and whether that is better by its rule, checks that flipped, evidence that changed, the commits with
+  `git diff --stat`, packages that changed version. `testbench watch PLAN` reruns a free plan whenever project
+  files change, one run at a time with at most one queued, each run through the budget (`--approve` asks, through
+  the guard hook). Reports record package versions; `last~N` names runs; cancelling a local run takes about 1 s
+  instead of 10.
+- GitHub Action: `comment: true` posts one pull request comment per plan (verdict, failures, the checked numbers and
+  their change since the base branch, cost, links), edited on later pushes and skipped on forks; `attest: true`
+  signs report.json and the evidence with GitHub artifact attestations; `testbench verify RUN --attestation`
+  checks them with `gh`. The repository's own self-test signs only when run by hand, since a public repository's
+  attestations go to Sigstore's public log for good.
 - `testbench demo [NAME] [DIR]` and `demo --list`: three more free examples beside tiny-model, each about a minute:
   `llm-app` (an Anthropic SDK support bot whose tool-use loop is proved against the mock SDK, no API key),
   `web-app` (a form filled in and checked in headless Chromium, with screenshots) and `test-suite` (a pytest suite

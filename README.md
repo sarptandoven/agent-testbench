@@ -68,7 +68,9 @@ outside Claude Code.
 { "mcpServers": { "agent-testbench": { "command": "uvx", "args": ["--from", "agent-testbench[all]", "testbench", "mcp"] } } }
 ```
 
-**In CI**: `uses: sarptandoven/agent-testbench@v1` with `plan: smoke` ([docs/github-action.md](docs/github-action.md)).
+**In CI**: `uses: sarptandoven/agent-testbench@v1` with `plan: smoke`; `comment: true` puts the verdict and the
+numbers' change since the base branch on the pull request, and `attest: true` signs the report so
+`testbench verify --attestation` shows which workflow and commit made it ([docs/github-action.md](docs/github-action.md)).
 
 **Your own agent or a notebook**: `from agent_testbench import Testbench` runs plans and live sessions from Python,
 and `agent_testbench.tools` gives the same tools to the Anthropic or OpenAI API (`tools.anthropic_tools()`,
@@ -191,7 +193,9 @@ Run `20261031-064120-smoke`, started 2026-10-31 06:41, 0.05 min, about $0.000. S
 Each report names what it proves: the git commit it ran (and a hash of any uncommitted changes), the Python,
 platform and packages where it ran, and the sha256 of every evidence file, in a format published as a
 [JSON Schema](src/agent_testbench/schema/report-v1.schema.json). `testbench verify` says whether the evidence still
-matches. `report --format html` writes one page with the plots inline, `--format junit` feeds CI test reports,
+matches, and `testbench diff A B` says what changed between two runs - each checked number old -> new and whether
+that is better by its rule, checks that flipped, evidence that changed, the commits, packages that changed version.
+`testbench watch smoke` reruns a free plan whenever you save, one run at a time. `report --format html` writes one page with the plots inline, `--format junit` feeds CI test reports,
 `testbench history <plan>` shows how the checked numbers moved, and `testbench ui` writes static pages for every
 run with a trend line per number; `testbench ui --serve` shows them live at http://127.0.0.1:8770/ - what is
 running, its log as it grows, sessions, the loop, and today's spend against your limits - read-only and for this
@@ -240,7 +244,7 @@ JSON POST ([docs/loops.md](docs/loops.md), [docs/notify.md](docs/notify.md)).
 
 Tools: `session_start`, `session_exec`, `session_files`, `session_sync`, `session_install`, `session_shell`,
 `session_list`, `session_stop`, `plans`, `run_plan`, `wait_run`, `get_report`, `list_runs`, `cancel_run`, `spend`,
-`lint_notebook`, `rescue_notebook`, `recipes`, `export_run`, `add_note`, `loop_start`, `loop_try`, `loop_status`,
+`lint_notebook`, `rescue_notebook`, `recipes`, `export_run`, `diff_runs`, `add_note`, `loop_start`, `loop_try`, `loop_status`,
 `loop_stop`. They run side by side (stop a
 session while a long cell runs), return plots and screenshots as images, and pass on progress. `testbench mcp --http`
 serves streamable HTTP on 127.0.0.1. In Claude Code: `claude mcp add agent-testbench -- testbench mcp`, or the
@@ -252,8 +256,8 @@ plugin, which adds the `iterate` and `setup` skills.
 |---|---|
 | `testbench demo` / `init [--recipe]` / `recipes` / `connect` / `doctor` / `mcp [--http]` | try it, set up, check this machine, serve MCP |
 | `testbench session start/list/stop/sync/install/shell`, `exec`, `files` | live kernels |
-| `testbench plans` / `run` / `wait` / `runs` / `cancel` | plans |
-| `testbench report [--format html\|junit]` / `verify` / `history` / `ui` / `export` | proof |
+| `testbench plans` / `run` / `wait` / `runs` / `cancel` / `watch` | plans |
+| `testbench report [--format html\|junit]` / `verify [--attestation]` / `diff` / `history` / `ui [--serve]` / `export` | proof |
 | `testbench loop start/try/status/stop` / `notify test` | improvement loops, notifications |
 | `testbench estimate` / `spend [--modal]` / `prices [--update]` | money |
 | `testbench lint` / `rescue` / `nb split/build/fields` / `note` | notebooks and the lab notebook |

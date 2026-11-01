@@ -50,9 +50,12 @@ $ testbench verify 20261101-064131-smoke
 - **That the expectations are the right ones.** A plan proves what it checks and nothing more. `testbench init`
   writes the checks it can (every cell runs, the files a notebook writes appear, every test passes) and leaves a
   `FILL IN` line for the number only you know.
-- **That a report was not forged.** Reports are not signed. `verify` shows that the evidence files still match the
-  hashes in report.json; someone who can write to the run folder could rewrite both. For a record a reviewer can
-  trust, run the plan where the agent does not control the machine: in CI, with [the GitHub Action](github-action.md).
+- **That a report was not forged.** A report made on your machine is not signed. `verify` shows that the evidence
+  files still match the hashes in report.json; someone who can write to the run folder could rewrite both. For a
+  record a reviewer can trust, run the plan where the agent does not control the machine: in CI, with
+  [the GitHub Action](github-action.md). With its `attest: true`, GitHub signs report.json and the evidence, and
+  `testbench verify --attestation` shows which repository's workflow made them, at which commit
+  ([attestations](github-action.md#attestations)).
 - **That every file came from this run.** `junit:`, `image:`, and `metrics:` on a file refuse a file last written
   before the run started. `json:`, `files:` and `text:` on a file read what is there, so a result file left over
   from an earlier run can satisfy them if the code stopped writing it. Have the code write its outputs on every
