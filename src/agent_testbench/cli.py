@@ -333,6 +333,30 @@ def cmd_history(a):
     return 0
 
 
+def cmd_diff(a):
+    from . import diff as D
+    root = C.find_root()
+    try:
+        plans = list(C.load(root)["plans"])
+    except C.ConfigError:
+        plans = []                                   # a testbench.yaml that does not load still leaves its runs to read
+    try:
+        old, new = D.pick(root, a.runs, plans)
+        d = D.compare(D.load(old), D.load(new), root)
+    except D.DiffError as exc:
+        print(f"testbench: {exc}")
+        return 2
+    print(json.dumps(d, indent=1) if a.json else D.render(d).rstrip())
+    return 0
+
+
+def cmd_watch(a):
+    from . import watch as W
+    root, cfg = _root_cfg()
+    return W.watch(root, cfg, a.plan, approve=a.approve, interval=a.interval, debounce=a.debounce,
+                   max_runs=a.max_runs)
+
+
 def cmd_export(a):
     from . import export as X
     root, cfg = _root_cfg()
@@ -786,6 +810,16 @@ def _positive(text: str) -> float:
     return v
 
 
+def _count(text: str) -> int:
+    try:
+        v = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number") from None
+    if v < 1:
+        raise argparse.ArgumentTypeError(f"{text!r} must be 1 or more")
+    return v
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = _Parser(prog="testbench", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--version", action="version", version=f"agent-testbench {__version__}")
@@ -841,6 +875,40 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-n", type=int, default=30, help="the latest N runs (default 30)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_history)
+    p = sub.add_parser("diff", help="what changed between two runs: verdict, steps, every checked number, checks, "
+                                    "evidence, cost, code and environment",
+                       description="What changed from run A to run B, in plain words: the verdict and each step, every "
+                                   "checked number (old -> new, by how much, better or worse by the check's rule), "
+                                   "checks that newly pass or fail, evidence files added, removed or changed (sha256), "
+                                   "cost and minutes, the code (commits, uncommitted changes, git diff --stat) and "
+                                   "where it ran (Python, platform, packages that changed version).")
+    p.add_argument("runs", nargs="*", metavar="RUN", help="A B: two runs, older first (run ids, prefixes, last, last~N); "
+                                                          "one PLAN: its last two finished runs; one RUN: it and the "
+                                                          "run of its plan before it; none: the latest run and the one "
+                                                          "before it")
+    p.add_argument("--json", action="store_true", help="the comparison as JSON")
+    p.set_defaults(fn=cmd_diff)
+    p = sub.add_parser("watch", help="run a plan again whenever the project's files change; free plans only, unless a "
+                                     "person approves (--approve), and every run is checked against the budget",
+                       description="Run PLAN now, then again whenever the project's files change (polled every "
+                                   "--interval seconds; a run starts once nothing has changed for --debounce seconds). "
+                                   "A change while a run is going queues one more run, never more. Each run is a normal "
+                                   "launch, priced and checked against the budget first. Only plans whose worst case "
+                                   "is $0 (local, or docker, ssh or kubernetes at usd_per_hour 0) are watched without "
+                                   "--approve; with it, every run is still checked against max_run_usd and the "
+                                   "project's and this machine's day limits, and watching stops at the first refusal. "
+                                   "Left out: exclude:, .gitignore, caches and editor files, and the files the plan "
+                                   "itself writes. Runs it starts send no run_end notification (notify.on: watch_run "
+                                   "sends one when a result changes). Ctrl-C cancels the run that is going and stops.")
+    p.add_argument("plan")
+    p.add_argument("--approve", action="store_true", help="a person approved watching a plan that costs money (never "
+                                                          "set this yourself); each run still has to fit max_run_usd "
+                                                          "and the day limits")
+    p.add_argument("--debounce", type=_positive, default=1.0, help="seconds without a change before a run starts "
+                                                                    "(default 1)")
+    p.add_argument("--interval", type=_positive, default=0.5, help="seconds between looks at the files (default 0.5)")
+    p.add_argument("--max-runs", type=_count, metavar="N", help="stop after N runs (default: until Ctrl-C)")
+    p.set_defaults(fn=cmd_watch)
     p = sub.add_parser("export", help="a run in MLflow, W&B, a csv or a jsonl file, with its numbers and evidence "
                                       "(again: updates it, no duplicate)")
     p.add_argument("run", nargs="?", help="run id or prefix, latest (the default), or all (every finished run)")

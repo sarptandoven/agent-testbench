@@ -101,7 +101,7 @@ def run(spec: dict, *, workdir: Path, out_dir: Path, env: dict, deadline: float,
             browser.close()
     finally:
         if proc and proc.poll() is None:
-            procs.stop_and_wait(proc.pid, grace=10)
+            procs.stop_and_wait(proc.pid, grace=10, proc=proc)
         log.close()
     return result
 
