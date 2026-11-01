@@ -39,6 +39,7 @@ nav:
   - Proof records: proof-records.md
   - "Exports: MLflow, W&B, csv": export.md
   - CI: github-action.md
+  - Python API and tools: python-api.md
   - Reference: reference.md
   - Demos:
       - An agent improves a model: demo-loop.md
