@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import urllib.request
 from pathlib import Path
 
@@ -32,22 +33,54 @@ def cached() -> dict:
     """The fetched catalog, {} if there is none (or it cannot be read: then the built-in prices apply)."""
     try:
         data = json.loads(cache_path().read_text())
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if k not in ("modal", "colab") or isinstance(v, dict)}
 
 
 def _price(v) -> bool:
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+    try:
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
+    except OverflowError:                                # an integer too big for a float
+        return False
 
 
 def raised(built_in: dict, fetched) -> dict:
-    """built_in with each fetched price that is higher, and fetched prices for names it does not have."""
+    """built_in with each fetched price that is higher, and fetched prices for names it does not have (above 0: hardware
+    a catalog adds for free would make every estimate for it $0). Names in capitals, as a plan's `gpu:` is looked up: a
+    catalog's "h100x" would otherwise be offered and then priced at nothing."""
     out = dict(built_in)
     for name, value in (fetched or {}).items() if isinstance(fetched, dict) else ():
-        if _price(value) and value > out.get(name, -1):
+        name = str(name).upper()
+        if _price(value) and value > out.get(name, 0):
             out[name] = float(value)
     return out
+
+
+def upper(table) -> dict:
+    """A project's own prices by name in capitals (its `pricing:` may say t4 for T4)."""
+    return {str(k).upper(): v for k, v in table.items()} if isinstance(table, dict) else {}
+
+
+def own_table(pricing: dict, key: str) -> dict:
+    """The project's `pricing.KEY` table ({T4: 0.0002}), by name in capitals."""
+    table = pricing.get(key) or {}
+    if not isinstance(table, dict) or not all(_price(v) for v in table.values()):
+        from .config import ConfigError
+        raise ConfigError(f"`pricing.{key}` is {table!r}; write names and prices of 0 or more, e.g. {{T4: 0.000164}}")
+    return upper(table)
+
+
+def own_price(pricing: dict, key: str, default: float) -> float:
+    """The project's `pricing.KEY`, one price, or default."""
+    if key not in pricing:
+        return default
+    if not _price(pricing[key]):
+        from .config import ConfigError
+        raise ConfigError(f"`pricing.{key}` is {pricing[key]!r}; write one price of 0 or more, e.g. 0.0000131")
+    return float(pricing[key])
 
 
 def raised_value(built_in: float, fetched) -> float:
@@ -55,9 +88,10 @@ def raised_value(built_in: float, fetched) -> float:
 
 
 def source(name: str, built_in: dict, fetched, overrides: dict | None) -> str:
-    if name in (overrides or {}):
+    if name in upper(overrides):
         return "testbench.yaml pricing:"
-    if isinstance(fetched, dict) and _price(fetched.get(name)) and fetched[name] > built_in.get(name, -1):
+    fetched = raised({}, fetched)
+    if fetched.get(name, 0) > built_in.get(name, 0):
         return f"catalog {cached().get('version', '?')}"
     return "built in"
 

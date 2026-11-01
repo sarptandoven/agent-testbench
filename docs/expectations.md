@@ -52,6 +52,10 @@ one of:
 Quote rules in YAML (`">= 0.9"`, not `>= 0.9`). Tolerances suit noisy numbers (a loss that moves with the seed);
 ranges suit numbers that are wrong when too high as well as too low (an F1 of 1.0 often means a leak).
 
+A value that is NaN or infinite meets no rule (a loss that diverged to `inf` is not "< 0.3", and a NaN accuracy is
+not "!= 0"; `"!= nan"` asks for a real number). `true` and `false` are not numbers: `true` is not `1` and not
+">= 0.9" (`"== true"` matches a JSON `true`).
+
 What a miss looks like:
 
 ```
@@ -71,7 +75,11 @@ testbench: `plans.p.steps[0].expect.json.metrics.json.accuracy`: '~= 0.93' is ne
 ```
 
 Unknown expectation names (`jsn:`), unknown keys (`gpu: {util: ...}`), a range with the high end first, a regex
-that does not compile, a `junit:` without `path:` and an `image:` without `like:` are all refused this way.
+that does not compile, a `junit:` without `path:` and an `image:` without `like:` are all refused this way, and so
+are checks that could never fail or never pass: an empty text to find, a file with no keys under `json:`, a
+comparison written `=>` or `≥`, a rule against NaN. So is a key given twice in one mapping (a second `json:` under
+one `expect:` would replace the first without a word) and a misspelt step field (`expects:` would leave the step
+with no checks).
 
 ## exit_code
 
@@ -131,6 +139,9 @@ The file can be a pattern when its folder is not known in advance - `"**/metrics
 exactly one file; otherwise the check fails and says how many matched (`testbench init` writes its suggestions this
 way). `testbench loop --metric "**/metrics.json:accuracy"` reads it the same way.
 
+A file last written before the run started fails instead of being read: in a project that runs in place, last
+run's `metrics.json` is still there when this run forgets to write one. The same holds for a file under `text:`.
+
 ## text
 
 Text that must appear in the step's output (`stdout`: everything it printed, stdout and stderr) or in a file.
@@ -173,7 +184,8 @@ written before the run started, fails instead of being read.
 
 A test suite's own JUnit XML report: pytest `--junitxml=report.xml`, jest-junit, go-junit-report, Maven
 Surefire and most others. Reports with a `<testsuites>` root and bare `<testsuite>` reports both work; the counts
-come from the `<testcase>` elements (or from the suites' totals when a report has none).
+come from the `<testcase>` elements (or from a suite's totals when it has none), and failures and errors are never
+fewer than the suites' totals say (a suite that broke before its tests ran may list no test case for it).
 
 ```yaml
 junit: {path: report.xml, tests: ">= 10", skipped: "<= 2"}

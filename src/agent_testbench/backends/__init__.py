@@ -68,6 +68,9 @@ class Backend:
         if not self.gpus:
             raise ConfigError(f"`{where}.gpu`: {self.name} has no choice of GPU; drop the GPU, or choose "
                               f"{_gpu_backends()}")
+        _, sep, count = str(gpu).partition(":")
+        if sep and not (count.isascii() and count.isdigit() and int(count) > 0):     # T4:0 would be priced as no GPU
+            raise ConfigError(f"`{where}.gpu` is {gpu!r}; write the GPU, or the GPU and how many, e.g. H100 or H100:2")
         if split_gpu(gpu)[0] not in {g.upper() for g in self.gpus}:
             raise ConfigError(f"`{where}.gpu` is {gpu!r}; {self.name} offers {', '.join(self.gpus)}")
 
@@ -102,7 +105,7 @@ def split_gpu(gpu) -> tuple[str, int]:
     if not gpu:
         return "", 1
     name, _, count = str(gpu).partition(":")
-    return name.upper(), int(count) if count.isdigit() else 1
+    return name.upper(), int(count) if count.isascii() and count.isdigit() else 1
 
 
 def tool_check(what: str, exe: str, how: str) -> tuple[str, bool, str]:

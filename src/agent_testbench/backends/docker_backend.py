@@ -531,6 +531,7 @@ class DockerBackend(Backend):
         """Containers get the GPUs docker.gpus gives them; `gpu:` on a docker plan is a label (checked in validate)."""
 
     def validate(self, cfg: dict) -> None:
+        from ..config import _finite
         d = cfg["docker"]
         if not isinstance(d.get("image"), str) or not d["image"].strip():
             raise ConfigError("`docker.image` is the image containers start from, e.g. python:3.11-slim (Python 3.10 "
@@ -551,10 +552,10 @@ class DockerBackend(Backend):
                               "NVIDIA's Container Toolkit); leave it out for no GPU")
         for key, flag in (("cpu", "--cpus"), ("memory_gb", "--memory")):
             v = d.get(key)
-            if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0):
+            if v is not None and (not _finite(v) or v <= 0):
                 raise ConfigError(f"`docker.{key}` is a positive number (docker's {flag}), or leave it out for no limit")
         v = d.get("usd_per_hour")
-        if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
+        if not _finite(v) or v < 0:
             raise ConfigError("`docker.usd_per_hour` is what the machine costs you per hour while it works (0 for your "
                               "own)")
         if not isinstance(d.get("python"), str) or not d["python"].strip():
@@ -564,8 +565,11 @@ class DockerBackend(Backend):
             v = d.get(key)
             if v is None:
                 v = d[key] = []
-            if isinstance(v, str):
-                v = d[key] = shlex.split(v)
+            try:
+                v = d[key] = shlex.split(v) if isinstance(v, str) else v
+            except ValueError as exc:                    # an unclosed quote
+                raise ConfigError(f"`docker.{key}` {v!r} cannot be split into arguments ({exc}); write it as a list, "
+                                  f"e.g. {example}") from None
             if not isinstance(v, list) or not all(isinstance(x, (str, int, float)) for x in v):
                 raise ConfigError(f"`docker.{key}` is a list of arguments, e.g. {example}")
             d[key] = [str(x) for x in v]

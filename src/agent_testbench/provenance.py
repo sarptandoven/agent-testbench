@@ -71,14 +71,29 @@ def evidence(run_dir: Path) -> tuple[list[dict], str]:
     files = sorted(p for p in (run_dir / "steps").rglob("*") if p.is_file()) if (run_dir / "steps").exists() else []
     out = [{"path": p.relative_to(run_dir).as_posix(), "bytes": p.stat().st_size, "sha256": _sha256_file(p)}
            for p in files]                                   # / on every system, so a report checks out anywhere
-    total = hashlib.sha256("".join(f"{e['path']}\0{e['sha256']}\n" for e in out).encode()).hexdigest()
-    return out, total
+    return out, _total(out)
+
+
+def _total(entries: list[dict]) -> str:
+    text = "".join(f"{e['path']}\0{e['sha256']}\n" for e in entries)
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()     # a file name that is not UTF-8
 
 
 def verify(run_dir: Path, report: dict) -> list[str]:
-    """What no longer matches the evidence the report recorded: changed, missing or added files."""
-    recorded = {e["path"]: e["sha256"] for e in report.get("evidence") or []}
-    now = {e["path"]: e["sha256"] for e in evidence(run_dir)[0]}
+    """What no longer matches the evidence the report recorded: changed, missing or added files, or a list of hashes
+    edited to match changed files (it no longer adds up to the evidence_sha256 the run recorded and printed)."""
+    entries = report.get("evidence")
+    if not isinstance(entries, list) or not all(isinstance(e, dict) and isinstance(e.get("path"), str)
+                                                and isinstance(e.get("sha256"), str) for e in entries):
+        return ["the report's evidence list is not a list of {path, sha256}: report.json was cut short or edited"]
+    if _total(entries) != report.get("evidence_sha256"):
+        return ["the report's evidence list does not add up to its evidence_sha256: report.json was edited after "
+                "the run"]
+    recorded = {e["path"]: e["sha256"] for e in entries}
+    try:
+        now = {e["path"]: e["sha256"] for e in evidence(run_dir)[0]}
+    except OSError as exc:
+        return [f"the evidence cannot be read: {exc}"]
     problems = [f"changed: {p}" for p in recorded if p in now and now[p] != recorded[p]]
     problems += [f"missing: {p}" for p in recorded if p not in now]
     problems += [f"added after the run: {p}" for p in now if p not in recorded]

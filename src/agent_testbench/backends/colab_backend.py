@@ -217,14 +217,17 @@ class Colab(Backend):
 
     @property
     def gpus(self) -> tuple[str, ...]:
-        fetched = (prices.cached().get("colab") or {}).get("units_per_hour") or {}
+        fetched = prices.raised({}, (prices.cached().get("colab") or {}).get("units_per_hour"))   # priced ones only
         return self.built_in_gpus + tuple(g for g in fetched if g not in self.built_in_gpus and g != "CPU")
+
+    def validate(self, cfg: dict) -> None:
+        self._rates(cfg)                                 # pricing: overrides are numbers where one is meant
 
     def _rates(self, cfg: dict) -> tuple[dict, float]:
         own = cfg.get("pricing") or {}
         cat = prices.cached().get("colab") or {}
-        units = {**prices.raised(UNITS_PER_HOUR, cat.get("units_per_hour")), **(own.get("colab_units_per_hour") or {})}
-        return units, float(own.get("colab_usd_per_unit", prices.raised_value(USD_PER_UNIT, cat.get("usd_per_unit"))))
+        units = {**prices.raised(UNITS_PER_HOUR, cat.get("units_per_hour")), **prices.own_table(own, "colab_units_per_hour")}
+        return units, prices.own_price(own, "colab_usd_per_unit", prices.raised_value(USD_PER_UNIT, cat.get("usd_per_unit")))
 
     def rate_per_minute(self, cfg: dict, hardware: dict) -> float:
         units, usd = self._rates(cfg)

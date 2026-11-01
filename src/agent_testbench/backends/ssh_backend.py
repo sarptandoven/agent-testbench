@@ -352,16 +352,21 @@ class SSH(Backend):
 
     def validate(self, cfg: dict) -> None:
         s = cfg["ssh"]
-        if not s.get("host"):
+        from ..config import _finite
+        if not s.get("host") or not isinstance(s["host"], str):
             raise ConfigError("`ssh.host` is needed for the ssh backend: a Host from ~/.ssh/config, or user@host, that "
                               "`ssh HOST true` reaches without a password")
-        if not isinstance(s.get("usd_per_hour"), (int, float)) or s["usd_per_hour"] < 0:
+        if not _finite(s.get("usd_per_hour")) or s["usd_per_hour"] < 0:
             raise ConfigError("`ssh.usd_per_hour` is what the machine costs you per hour while it works (0 for your own)")
         if s.get("setup") not in ("venv", "none"):
             raise ConfigError("`ssh.setup` is venv (a virtualenv per project on the machine) or none (use ssh.python)")
         cmd = s.get("command")
         if isinstance(cmd, str):
-            s["command"] = cmd = shlex.split(cmd)
+            try:
+                s["command"] = cmd = shlex.split(cmd)
+            except ValueError as exc:                    # an unclosed quote
+                raise ConfigError(f"`ssh.command` {cmd!r} cannot be split into arguments ({exc}); write it as a list: "
+                                  "[ssh, -p, \"2222\"]") from None
         if not isinstance(cmd, list) or not cmd or not all(isinstance(x, str) for x in cmd):
             raise ConfigError("`ssh.command` is how to reach the machine, as a list: [ssh] or [ssh, -p, \"2222\"]")
         if not isinstance(s.get("pip") or [], list):

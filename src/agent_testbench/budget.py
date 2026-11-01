@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import os
 from contextlib import contextmanager
 from pathlib import Path
@@ -172,6 +173,10 @@ def check(cfg: dict, est: dict, approve: bool, how_to_lower: str) -> tuple[bool,
     person said yes. Each limit is the project's, capped by the machine's limits."""
     lim = limits(cfg)
     cost, what = est["worst_case_usd"], est["what"]
+    if not (isinstance(cost, (int, float)) and math.isfinite(cost) and cost >= 0):     # NaN passes every comparison
+        return False, (f"Refused: the worst case of {what} cannot be priced (it came to {cost!r}). Its minutes "
+                       f"({est.get('max_minutes')!r}) and prices must be numbers of 0 or more; `testbench prices` "
+                       "shows the prices in use."), est
     most, where = lim["max_run_usd"]
     if cost > most:
         return False, (f"Refused: {what} could cost up to ${cost:.2f} ({est['max_minutes']:.0f} min at "
