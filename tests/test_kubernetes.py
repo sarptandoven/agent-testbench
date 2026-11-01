@@ -383,9 +383,14 @@ def test_names_fit_kubernetes():
 # ---- on a real cluster: kind ----------------------------------------------------------------------------------
 
 CLUSTER = os.environ.get("TESTBENCH_TEST_KIND_CLUSTER", "testbench")
-needs_kind = pytest.mark.skipif(os.environ.get("TESTBENCH_TEST_KIND") != "1",
-                                reason="a real cluster: set TESTBENCH_TEST_KIND=1 with a kind cluster running")
+_kind = pytest.mark.skipif(os.environ.get("TESTBENCH_TEST_KIND") != "1",
+                           reason="a real cluster: set TESTBENCH_TEST_KIND=1 with a kind cluster running")
 CONTEXT = f"kind-{CLUSTER}"
+
+
+def needs_kind(test):
+    """A test on the kind cluster: they share it (and the image loaded into it), so one at a time (serial)."""
+    return pytest.mark.serial(_kind(test))
 
 
 def kubectl(*args, check=True, data=None) -> subprocess.CompletedProcess:

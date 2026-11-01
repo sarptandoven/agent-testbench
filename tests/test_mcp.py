@@ -67,7 +67,10 @@ def test_a_session_can_be_stopped_while_a_long_exec_runs(plain):
         assert "ready on local" in c.text(1, 120)
         began = time.time()
         c.call(2, "session_exec", {"code": "import time; time.sleep(60); 'too slow'", "project_dir": str(plain)})
-        time.sleep(3)
+        from agent_testbench import sessions
+        main, end = plain / ".testbench" / "sessions" / "main", time.time() + 30
+        while time.time() < end and sessions.read(main).get("busy_until", 0) < time.time():
+            time.sleep(0.1)                                   # until the exec has the session (it marks it busy)
         c.call(3, "session_list", {"project_dir": str(plain)})
         assert "main  ready on local" in c.text(3, 30) and 2 not in c.replies, "other tools answer during an exec"
         c.call(4, "session_stop", {"project_dir": str(plain)})

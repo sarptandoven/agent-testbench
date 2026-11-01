@@ -80,6 +80,19 @@ def test_cancel_stops_the_work(tmp_path):
     assert "CANCELLED" in (run / "report.md").read_text()
 
 
+def test_cancel_closes_a_run_whose_driver_is_gone_at_once(plain):
+    """A driver that ends without closing its run - a cancel that came while it was still starting, before it could
+    catch the signal - is not waited for: the run is closed as cancelled at once, not a minute later."""
+    from agent_testbench import procs, runs
+    run = plain / ".testbench" / "runs" / "20261101-120000-quick"
+    run.mkdir(parents=True)
+    starting = procs.spawn([sys.executable, "-c", "import time; time.sleep(60)"], cwd=plain, log_path=run / "driver.log")
+    runs.write_state(run, run_id=run.name, plan="quick", backend="local", status="queued", driver_pid=starting.pid)
+    began = time.time()
+    assert runs.cancel(run) == f"{run.name} cancelled"
+    assert runs.read_state(run)["status"] == "cancelled" and time.time() - began < 20
+
+
 def test_timeouts_are_enforced(tmp_path):
     root = tmp_path / "t"
     root.mkdir()

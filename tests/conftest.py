@@ -56,6 +56,19 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True)
+def one_serial_test_at_a_time(request, tmp_path_factory):
+    """Tests marked serial use something the whole machine shares (the Docker daemon, a kind cluster). Under pytest -n
+    they hold a lock all the run's workers share, so they run one at a time on whichever worker gets them (an
+    xdist_group would need --dist loadgroup, which pytest-xdist 3.8 cannot honour on pytest 9.2)."""
+    if not (os.environ.get("PYTEST_XDIST_WORKER") and request.node.get_closest_marker("serial")):
+        yield
+        return
+    from agent_testbench.procs import exclusive
+    with exclusive(tmp_path_factory.getbasetemp().parent / "serial.lock"):     # the run's own basetemp
+        yield
+
+
+@pytest.fixture(autouse=True)
 def machine_limits(tmp_path, monkeypatch) -> Path:
     """Every test gets its own ~/.testbench (limits for all projects, the machine's ledger), never the real one."""
     d = tmp_path / "user-testbench"
@@ -90,8 +103,8 @@ def plain(tmp_path) -> Path:
 
 def has_sklearn() -> bool:
     try:
-        import sklearn, matplotlib  # noqa: F401
-        return True
+        import sklearn, matplotlib
+        return bool(sklearn and matplotlib)
     except ImportError:
         return False
 
@@ -103,6 +116,18 @@ def chromium_ready() -> bool:
             return Path(p.chromium.executable_path).exists()
     except Exception:
         return False
+
+
+def own_port(config: Path, port: int) -> None:
+    """A copied example's fixed port in its testbench.yaml swapped for a free one, so tests running at the same time
+    (pytest -n) or a server already on this machine never answer for it."""
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        free = s.getsockname()[1]
+    text = config.read_text()
+    assert str(port) in text, f"{config} no longer uses port {port}: update this test"
+    config.write_text(text.replace(str(port), str(free)))
 
 
 PLUGIN = '''

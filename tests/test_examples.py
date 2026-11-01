@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from agent_testbench import cli as CLI, config as C
-from conftest import EXAMPLES, REPO, chromium_ready, cli
+from conftest import EXAMPLES, REPO, chromium_ready, cli, own_port
 
 needs_chromium = pytest.mark.skipif(not chromium_ready(), reason="needs `playwright install chromium`")
 
@@ -68,6 +68,7 @@ def test_llm_app_names_the_400_a_broken_tool_loop_would_get(tmp_path):
 @needs_chromium
 def test_web_app_fills_the_form_and_checks_the_answer(tmp_path):
     root = copy(tmp_path, "web-app")
+    own_port(root / "testbench.yaml", 8974)
     r = cli(root, "run", "ui", "--wait", "180")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "page shows 'Each person pays $19.17 (of $57.50 with the tip).' - found" in r.stdout
@@ -81,6 +82,7 @@ def test_web_app_fills_the_form_and_checks_the_answer(tmp_path):
 @needs_chromium
 def test_web_app_catches_a_rounding_bug(tmp_path):
     root = copy(tmp_path, "web-app")
+    own_port(root / "testbench.yaml", 8974)
     edit(root / "app.py", 'each = (with_tip / people).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)',
          'each = (with_tip / people).quantize(Decimal("0.01"), rounding="ROUND_DOWN")')
     r = cli(root, "run", "ui", "--wait", "180")
@@ -100,6 +102,7 @@ def test_test_suite_fails_on_its_planted_bug_until_it_is_fixed(tmp_path):
 
 
 @pytest.mark.posix
+@pytest.mark.serial                                      # Docker
 @pytest.mark.skipif(not _docker_answers(), reason="needs a Docker daemon that answers `docker info`")
 def test_test_suite_sandbox_runs_the_suite_offline_in_docker(tmp_path):
     root = copy(tmp_path, "test-suite")

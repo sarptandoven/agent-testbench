@@ -9,12 +9,11 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
-import subprocess
 import sys
 import time
 from pathlib import Path
 
-from . import budget, config as C, notify, procs, provenance, report as R
+from . import budget, notify, procs, provenance, report as R
 
 DONE = ("passed", "failed", "cancelled", "error")
 
@@ -208,8 +207,8 @@ def cancel(run_dir: Path) -> str:
     if alive(pid):
         kill_group(pid)                                # the driver cancels remote work on its way out
         for _ in range(60):
-            if read_state(run_dir).get("status") in DONE:
-                break
+            if read_state(run_dir).get("status") in DONE or not alive(pid):   # or gone without closing the run
+                break                                  # (still starting, it had no handler yet): closed below at once
             time.sleep(1)
     s = read_state(run_dir)
     if s.get("status") not in DONE:                  # the driver is gone: cancel remote work from here

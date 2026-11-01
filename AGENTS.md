@@ -4,6 +4,10 @@
 - Run `python -m pytest -q` before and after a change. Web tests need `playwright install chromium`.
   The default suite never touches Modal or Colab. `tests/test_live.py` does (opt in with TESTBENCH_TEST_MODAL=1 /
   TESTBENCH_TEST_COLAB=1) and costs money - ask first.
+- `python -m pytest -q -n 4` runs it in parallel (pytest-xdist; CI does). So tests run side by side:
+  each needs its own ports (port 0, or conftest's `own_port`), folders (`tmp_path`) and names, finds processes only
+  by something no other test has (its own folder), and waits on a condition, not a fixed sleep. A test that uses
+  something the whole machine shares (Docker, a kind cluster) is marked `@pytest.mark.serial`.
 - After changing `examples/tiny-model/cells/`, rebuild: `cd examples/tiny-model && testbench nb build cells tiny_model.ipynb`
   (a test checks the notebook matches its cells).
 - Messages are for whoever reads them next (often an agent): say what was found and what to do, in plain words.

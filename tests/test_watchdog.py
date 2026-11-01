@@ -107,6 +107,9 @@ def test_without_the_runtime_service_it_still_ends_everything(tmp_path, monkeypa
     assert not watchdog.can_release("colab")
     (tmp_path / "plan").mkdir()
     victim = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True)
+    # collected as soon as it ends, as its parent on Colab would: a zombie still looks alive, and the watchdog would
+    # wait out its 30 s for an interrupted plan and its 10 s after SIGTERM
+    threading.Thread(target=victim.wait, daemon=True).start()
     (tmp_path / "plan" / "interrupt.pid").write_text(str(victim.pid))       # what a plan on Colab writes
     watchdog.watch(tmp_path / "plan", max_minutes=0.002, release="colab")
     assert victim.wait(timeout=10) != 0, "the plan's process is interrupted"
