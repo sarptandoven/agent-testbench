@@ -397,6 +397,12 @@ def cmd_prices(a):
 def cmd_ui(a):
     from . import ui
     root, cfg = _root_cfg()
+    if a.serve:
+        from . import dashboard
+        return dashboard.serve(root, cfg, dashboard.PORT if a.port is None else a.port, a.open)
+    if a.port is not None:
+        print("testbench: --port goes with --serve (the live dashboard)", file=sys.stderr)
+        return 2
     index = ui.build(root, cfg)
     print(f"wrote {index} (static pages: open it in a browser; each run's page is report.html in its folder)")
     if a.open:
@@ -833,8 +839,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--update", action="store_true", help="fetch the price catalog (it can raise prices, never lower them)")
     p.add_argument("--url", default=None, help="fetch the catalog from here instead of the repository")
     p.set_defaults(fn=cmd_prices)
-    p = sub.add_parser("ui", help="the project's runs as static pages: .testbench/ui/index.html")
+    p = sub.add_parser("ui", help="the project's runs as static pages (.testbench/ui/index.html), or live with --serve")
     p.add_argument("--open", action="store_true", help="also open it in the browser")
+    p.add_argument("--serve", action="store_true", help="a live, read-only dashboard at http://127.0.0.1:8770/ "
+                                                        "(this machine only; Ctrl-C stops it)")
+    p.add_argument("--port", type=int, default=None, help="with --serve (default 8770; 0 picks a free one)")
     p.set_defaults(fn=cmd_ui)
     p = sub.add_parser("history", help="a plan over time: each run's outcome and the numbers its checks found")
     p.add_argument("plan")

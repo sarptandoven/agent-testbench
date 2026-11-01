@@ -42,6 +42,7 @@ nav:
   - Loops: loops.md
   - Notifications: notify.md
   - Proof records: proof-records.md
+  - Live dashboard: dashboard.md
   - "Exports: MLflow, W&B, csv": export.md
   - CI: github-action.md
   - Python API and tools: python-api.md
