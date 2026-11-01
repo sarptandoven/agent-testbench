@@ -1,23 +1,29 @@
 """Response types of the mock `openai` package (agent-testbench; docs/mocks.md). Request types (*Param) are plain
-dicts, as the real ones are TypedDicts."""
+dicts, as the real ones are TypedDicts. The modules app code imports them from (openai.types.completion_usage,
+.create_embedding_response, .embedding) are here too. Each model's fields for model_validate follow openai 3.42.0."""
 from _testbench_mock import Obj as _Obj
 
 from . import chat
+from .completion_usage import CompletionUsage
 
 __all__ = ["chat", "CompletionUsage", "Embedding", "CreateEmbeddingResponse", "EmbeddingModel", "ChatModel",
            "EmbeddingCreateParams"]
 
 
-class CompletionUsage(_Obj):
-    pass
-
-
 class Embedding(_Obj):
-    pass
+    _required = ("embedding", "index", "object")
+
+
+class _EmbeddingUsage(_Obj):
+    _required = ("prompt_tokens", "total_tokens")
+
+
+_EmbeddingUsage.__name__ = _EmbeddingUsage.__qualname__ = "Usage"
 
 
 class CreateEmbeddingResponse(_Obj):
-    pass
+    _required = ("data", "model", "object", "usage")
+    _nested = {"data": Embedding, "usage": _EmbeddingUsage}
 
 
 EmbeddingModel = ChatModel = str

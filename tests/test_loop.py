@@ -102,7 +102,7 @@ def test_loop_over_mcp_and_the_guard(repo):
         return a, b, c, d
 
     a, b, c, d = asyncio.run(go())
-    assert "BASELINE: score 1" in a and "KEPT try 1: score 4" in b and "1 tries, 1 kept" in c and "score 1 -> 4" in d
+    assert "BASELINE: score 1" in a and "KEPT try 1: score 4" in b and "1 try, 1 kept" in c and "score 1 -> 4" in d
     for tool, inp in (("Bash", {"command": "testbench loop start score --metric m.json:x --budget-usd 9 --approve"}),
                       ("mcp__x__loop_start", {"plan": "score", "budget_usd": 9, "approved_by_person": True})):
         p = subprocess.run([sys.executable, str(REPO / "hooks" / "guard.py")], capture_output=True, text=True,

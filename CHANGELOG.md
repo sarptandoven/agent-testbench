@@ -2,6 +2,13 @@
 
 ## 0.2.0 - not yet released
 
+- Rough edges: `init --add` no longer adds a recipe's `sessions:` (it prints it); `params:`/`cells:`/`uploads:`/
+  `colab_shim:` on a step that is not a notebook, and `cells:` that skip where a param is set, are refused instead
+  of ignored. Notifications: `loop_rule` (a rule fired, the loop is still open) apart from `loop_end` (stopped); an
+  opt-in `loop_try` replaces each loop run's `run_end`; `run_end` is sent once per run; `approval_needed` waits a
+  minute for a person the MCP client is asking directly. `rescue` takes percent-format `.py` notebooks. `doctor`
+  launches Chromium and names a missing build and the install command. The mock SDKs have
+  `model_dump(exclude_none=)`, `model_validate` and the deep type modules. "1 try", not "1 tries".
 - The command line explains itself: `testbench` / `testbench help` list the commands in groups with the ones to
   start with; every `--help` ends with examples; a mistyped command, plan, run, session, recipe, client or example
   name gets the closest one, and words in the wrong order get the right order. `status` exits 0/1/3 like `wait`;

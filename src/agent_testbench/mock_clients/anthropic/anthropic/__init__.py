@@ -29,6 +29,8 @@ __all__ = ["types", "Anthropic", "AsyncAnthropic", "Client", "AsyncClient", "Str
            "DEFAULT_MAX_RETRIES"]
 DEFAULT_MAX_RETRIES = 2
 _MOCK = core.Mock("anthropic")
+core.absent_modules("anthropic", "anthropic.types and its message, text_block, tool_use_block, thinking_block, "
+                    "redacted_thinking_block, usage, message_tokens_count, content_block and model modules")
 
 # the SDK's models (anthropic.types.Model); any other name is accepted and noted
 KNOWN_MODELS = ("claude-haiku-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-opus-5-5", "claude-mythos-5-1",

@@ -48,6 +48,7 @@ ok   python >= 3.10: 3.13.17
 ok   nbclient (notebook steps): installed
 ok   ipykernel (notebook steps): installed
 ok   playwright (web steps): installed
+ok   chromium (web steps): Chromium <version> launches headless
 ok   mcp (the MCP server): installed
 ok   ffprobe (media checks): /usr/bin/ffprobe
 ok   backends: local, modal, colab, ssh, docker
@@ -62,6 +63,10 @@ no   testbench.yaml: No testbench.yaml here or in any parent of <folder>. Run `t
 
 - `no   <module> (...): missing` - install the extra: `pip install "agent-testbench[all]"` (or `[web]`, `[mcp]`,
   `[modal]`). For web steps, also `playwright install chromium`.
+- `no   chromium (web steps): Playwright 1.64.1 needs Chromium build 1248 (chromium_headless_shell-1248), which is
+  not installed; /opt/pw-browsers has build 1243, for another Playwright version. Install it with: /usr/bin/python -m
+  playwright install chromium` - doctor launches Chromium headless (a second or two), so it sees a browser built for
+  another Playwright version; run the command it gives, which installs for the Python that runs testbench.
 - `no   ffprobe (media checks): missing` - install ffmpeg; only `media:` expectations need it.
 - `` no   Modal login: run `modal setup` `` - once, in your terminal (an agent should never handle the token). In CI,
   `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` in the environment count.
@@ -174,9 +179,9 @@ A run that started writes a report; the failure is in it, first. `testbench repo
   notebook, run headless.
 - `form field 'MIN_AMMOUNT' found on 0 #@param lines; the notebook's fields are: MIN_AMOUNT, TOP` - a `params:` (or
   `--params`) name that is not a form field. `testbench nb fields <notebook>` lists them.
-- `` web: WebSetupError: Chromium did not start (BrowserType.launch: Executable doesn't exist at ...); run
-  `playwright install chromium` `` - no browser, or one installed for a different playwright version (the path
-  names the build it wants). Run `playwright install chromium` with the same Python that runs testbench.
+- `web: WebSetupError: Chromium did not start: Playwright 1.64.1 needs Chromium build 1248 ..., which is not
+  installed; ... Install it with: <python> -m playwright install chromium` - no browser, or one installed for a
+  different Playwright version. Run the command it names (`testbench doctor` says the same).
 - `web: WebSetupError: Something already answers at http://127.0.0.1:8994/ before the app started, so the step
   would test the wrong program. Stop it or use another port.` - an old server, or someone else's, holds the port.
   Stop it, or change the port in both `serve:` and `url:`.

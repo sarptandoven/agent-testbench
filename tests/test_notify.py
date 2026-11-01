@@ -38,7 +38,7 @@ def test_run_end_for_passing_and_failing_runs(repo, webhook):
     run = sent["run_id"]
     assert sent["path"] == Webhook.SECRET and sent["project"] == "scoring" and sent["plan"] == "score"
     assert sent["status"] == "passed" and sent["numbers"] == {"metrics.json: score >= 0": 1.0}
-    assert sent["cost_usd"] == 0 and sent["report"] == f".testbench/runs/{run}/report.md" and sent["loop"] is None
+    assert sent["cost_usd"] == 0 and sent["report"] == f".testbench/runs/{run}/report.md"
     assert sent["text"].startswith(f"agent-testbench, scoring: run {run} of plan score on local PASSED after ")
     assert "metrics.json: score >= 0 (found 1)" in sent["text"], sent["text"]
 
@@ -63,6 +63,23 @@ def test_run_end_for_a_cancelled_run(repo, webhook):
     [sent] = webhook.events("run_end")
     assert sent["status"] == "cancelled" and sent["plan"] == "slow" and "CANCELLED" in sent["text"], sent
     never_shown(repo, cancelled.stdout + cancelled.stderr)
+
+
+def test_run_end_is_sent_once_when_a_cancel_gives_up_on_a_slow_driver(repo, webhook, monkeypatch):
+    from agent_testbench import notify, runs
+    configure(repo, {"webhook": webhook.url})
+    assert cli(repo, "run", "score").returncode == 0
+    run_dir = runs.resolve(repo, None)
+    runs.write_state(run_dir, status="running", driver_pid=12345)          # as when `cancel` came in, not yet told
+    (run_dir / notify.TOLD).unlink()
+    webhook.bodies.clear()
+    monkeypatch.setattr(runs, "alive", lambda pid: True)                    # a driver that takes over 60 s to stop
+    monkeypatch.setattr(runs, "kill_group", lambda pid, hard=False: None)
+    monkeypatch.setattr(runs.time, "sleep", lambda s: None)
+    assert runs.cancel(run_dir).endswith("cancelled") and runs.read_state(run_dir)["status"] == "cancelled"
+    notify.run_end(repo, run_dir)                                           # ... then the driver finishes after all
+    assert [e["status"] for e in webhook.events("run_end")] == ["cancelled"], "one run, one run_end"
+    assert json.loads((run_dir / notify.TOLD).read_text())["time"]
 
 
 def test_approval_needed_for_runs_sessions_and_loops(repo, plugin, webhook):
@@ -171,7 +188,7 @@ def test_notify_test(repo, webhook):
         in t.stdout, t.stdout
     assert "webhook_env: NAME" in t.stdout, "the URL in the file is worth a word"
     [sent] = webhook.bodies
-    assert sent["event"] == "test" and "Notifications for loop_end go here" in sent["text"]
+    assert sent["event"] == "test" and "Notifications for loop_end, loop_rule go here" in sent["text"]
     webhook.status = 404
     t = cli(repo, "notify", "test")
     assert t.returncode == 1 and "not accepted (HTTP 404 Not Found: no_service)" in t.stdout, t.stdout
@@ -198,9 +215,13 @@ def test_config_says_what_to_write(tmp_path, notify, says):
 def test_config_reads_a_bare_on_and_defaults_to_every_event(tmp_path):
     from agent_testbench import config as C
     (tmp_path / "testbench.yaml").write_text("project: p\nnotify:\n  webhook_env: HOOK\n  on: [loop_end]\nplans: {}\n")
-    assert C.load(tmp_path)["notify"] == {"webhook": None, "webhook_env": "HOOK", "on": ["loop_end"]}
+    assert C.load(tmp_path)["notify"] == {"webhook": None, "webhook_env": "HOOK", "on": ["loop_end", "loop_rule"]}, \
+        "a list written when a rule firing was sent as loop_end still hears it"
     cfg = C.validate({"project": "p", "notify": {"webhook": "https://a.example/x"}, "plans": {}}, tmp_path)
-    assert cfg["notify"]["on"] == ["run_end", "loop_end", "approval_needed"]
+    assert cfg["notify"]["on"] == ["run_end", "loop_rule", "loop_end", "approval_needed"]
+    cfg = C.validate({"project": "p", "notify": {"webhook": "https://a.example/x", "on": ["loop_rule"]}, "plans": {}},
+                     tmp_path)
+    assert cfg["notify"]["on"] == ["loop_rule"]
     assert C.validate({"project": "p", "plans": {}}, tmp_path)["notify"] is None
 
 

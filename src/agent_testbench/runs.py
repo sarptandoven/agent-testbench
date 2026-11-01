@@ -56,8 +56,9 @@ def resolve(root: Path, run: str | None) -> Path:
     back = re.fullmatch(r"(?:last|latest)~(\d{1,9})", str(run))
     if back:
         if int(back.group(1)) >= len(runs):
-            raise FileNotFoundError(f"{run} is before the first run: there {'is' if len(runs) == 1 else 'are'} "
-                                    f"{len(runs)} run{'s' * (len(runs) != 1)} (`testbench runs` lists them)")
+            raise FileNotFoundError(f"{run} is before the first run: there "
+                                    f"{'is' if len(runs) == 1 else 'are'} {C.counted(len(runs), 'run')} "
+                                    "(`testbench runs` lists them)")
         return runs[-1 - int(back.group(1))]
     hits = [p for p in runs if p.name == run] or [p for p in runs if p.name.startswith(run)]
     if len(hits) > 1:

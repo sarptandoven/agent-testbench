@@ -12,6 +12,8 @@ import math
 import re
 from pathlib import Path
 
+from .config import counted
+
 ICON = {"passed": "PASS", "failed": "FAIL", "timeout": "TIMEOUT", "error": "ERROR", "cancelled": "CANCELLED",
         "running": "RUNNING", "queued": "QUEUED"}
 NOT_XML = re.compile(f"[^\t\n\r -{chr(0xD7FF)}{chr(0xE000)}-{chr(0xFFFD)}{chr(0x10000)}-{chr(0x10FFFF)}]")  # control chars, surrogates
@@ -235,7 +237,7 @@ def html_body(report: dict, run_dir: Path) -> str:
              ("worst case", f"${r['worst_case_usd']:.2f}" if isinstance(r.get("worst_case_usd"), (int, float)) else "-"),
              ("code", (src.get("commit", "")[:12] + (" + uncommitted changes" if src.get("dirty") else "")) if src else "not in git"),
              ("python", f"{env.get('python', '?')} on {env.get('machine', '?')}" if env else "-"),
-             ("evidence", f"{len(r['evidence'])} files, sha256 {r['evidence_sha256'][:12]}" if r.get("evidence_sha256")
+             ("evidence", f"{counted(len(r['evidence']), 'file')}, sha256 {r['evidence_sha256'][:12]}" if r.get("evidence_sha256")
               else "not recorded (an older run)")]
     out = [f"<h1><span class='badge {e(r['status'])}'>{e(ICON.get(r['status'], r['status'].upper()))}</span> plan "
            f"<code>{e(str(r.get('plan')))}</code></h1>",

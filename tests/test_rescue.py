@@ -229,6 +229,52 @@ def test_fix_writes_a_copy_with_mechanical_fixes_only(tmp_path, monkeypatch):
     assert p.returncode == 2 and "never writes the original" in p.stdout
 
 
+PERCENT = '''\
+# ---
+# jupyter:
+#   kernelspec: {display_name: Python 3, language: python, name: python3}
+# ---
+
+# %% [markdown]
+# # An analysis
+# !pip install stays-in-markdown
+
+# %%
+# !pip install -q requests==2.32.3
+import yaml
+
+# %% Use it   {"tags": ["main"]}
+print("rows", len(pd.DataFrame()))  # pandas, never imported
+'''
+
+
+def test_a_percent_format_py_notebook_is_rescued_and_fixed_as_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(RS, "_probe", lambda names, wd: {n: {"installed": n != "yaml", "version": None} for n in names})
+    nb = tmp_path / "analysis.py"
+    nb.write_text(PERCENT)
+    d = RS.rescue(nb, run=False, fix=tmp_path / "fixed.py")
+    assert d["code_cells"] == 2 and _found(d, "packages") and "notebook: fixed.py" in d["plan"]["yaml"]
+    fixed = (tmp_path / "fixed.py").read_text()
+    assert fixed.startswith(PERCENT.split("# %%\n")[0]), "the header and the markdown cell are as they were"
+    assert "# !pip install stays-in-markdown" in fixed and "# %pip install -q requests==2.32.3" in fixed
+    assert "# %%\n# added by testbench rescue" in fixed and "# %pip install -q pyyaml\nimport pandas as pd\n" in fixed
+    assert '# %% Use it   {"tags": ["main"]}\nprint("rows"' in fixed, "titles and tags stay"
+    from agent_testbench import notebook as NB
+    cells = [c.source for c in NB.read(tmp_path / "fixed.py").cells if c.cell_type == "code"]
+    assert cells[1:] == ["%pip install -q requests==2.32.3\nimport yaml", "print(\"rows\", len(pd.DataFrame()))  # pandas, never imported"]
+    RS.rescue(nb, run=False, fix=tmp_path / "fixed.ipynb")
+    assert [c.source for c in nbformat.read(str(tmp_path / "fixed.ipynb"), as_version=4).cells if c.cell_type == "code"] == cells
+
+    p = cli(tmp_path, "rescue", "analysis.py", "--timeout", "90")
+    assert p.returncode == 1 and "# Rescue: `analysis.py` fails at cell 2 of 2" in p.stdout, p.stdout
+    (tmp_path / "script.py").write_text("print('hi')\n")
+    p = cli(tmp_path, "rescue", "script.py")
+    assert p.returncode == 2 and "is a plain Python file, not a notebook" in p.stdout and "`# %%`" in p.stdout
+    make_notebook(tmp_path / "nb.ipynb", ["x = 1"])
+    p = cli(tmp_path, "rescue", "nb.ipynb", "--no-run", "--fix", "nb-fixed.py")
+    assert p.returncode == 2 and "give a path that ends in .ipynb" in p.stdout, p.stdout
+
+
 def test_cli_json_markdown_and_exit_codes(tmp_path):
     make_notebook(tmp_path / "nb.ipynb", ["import json", "print(not_made_anywhere)"])
     p = cli(tmp_path, "rescue", "nb.ipynb", "--json", "--timeout", "90")

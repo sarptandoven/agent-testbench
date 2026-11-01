@@ -15,10 +15,13 @@ Needs `pip install "agent-testbench[web]"` and `playwright install chromium`.
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -29,6 +32,67 @@ from . import procs
 
 
 LOOPBACK = {"127.0.0.1", "localhost", "::1", "[::1]"}
+LAUNCH = """\
+import json
+try:
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        print(json.dumps({"ok": True, "version": b.version}))
+        b.close()
+except Exception as exc:
+    print(json.dumps({"ok": False, "error": str(exc)}))
+"""
+
+
+def install_command(deps: bool = False) -> str:
+    """The command that installs Chromium (or, with deps, the system libraries it needs) for this Python's
+    Playwright: a bare `playwright` on PATH may belong to another Python, with another Playwright."""
+    return f"{shlex.quote(sys.executable)} -m playwright {'install-deps' if deps else 'install'} chromium"
+
+
+def explain_launch_error(error: str) -> str:
+    """What a Chromium that did not launch lacks, in plain words, and the command that fixes it."""
+    missing = re.search(r"Executable doesn't exist at (.+)", error)      # to the end of the line: a path may hold spaces
+    if missing:
+        path = Path(missing.group(1).strip())
+        folder = next((p for p in path.parents if re.fullmatch(r"[a-z_]+-\d+", p.name)), None)
+        if folder is not None:
+            kind, build = folder.name.rsplit("-", 1)
+            try:
+                have = sorted(p.name.rsplit("-", 1)[1] for p in folder.parent.glob(f"{kind}-*")
+                              if p.name.rsplit("-", 1)[1].isdigit())
+            except OSError:
+                have = []
+            try:
+                from importlib.metadata import version
+                who = f"Playwright {version('playwright')}"
+            except Exception:
+                who = "This Playwright"
+            return (f"{who} needs Chromium build {build} ({folder.name}), which is not installed; {folder.parent} has "
+                    + (f"build{'s' * (len(have) > 1)} {', '.join(have)}, for another Playwright version" if have
+                       else "none") + f". Install it with: {install_command()}")
+        return f"Chromium is not installed ({path} is missing). Install it with: {install_command()}"
+    if "missing dependencies" in error or "error while loading shared libraries" in error:
+        return ("Chromium is installed, but this machine lacks system libraries it needs. Install them with: "
+                f"{install_command(deps=True)} (it uses the system's package manager, so it may ask for sudo)")
+    first = next((ln.strip() for ln in error.splitlines() if ln.strip()), "no reason given")
+    return f"Chromium did not start ({first[:300]}). Reinstall it with: {install_command()}"
+
+
+def chromium_check(timeout: float = 30) -> tuple[bool, str]:
+    """(whether Playwright's Chromium launches headless here, what was found): a real launch, in a process of its
+    own, since an installed playwright package says nothing about the browser build it needs."""
+    try:
+        p = subprocess.run([sys.executable, "-c", LAUNCH], capture_output=True, text=True, timeout=timeout)
+        got = json.loads((p.stdout.strip().splitlines() or ["{}"])[-1])
+    except subprocess.TimeoutExpired:
+        return False, f"Chromium did not start within {timeout:g} s. Reinstall it with: {install_command()}"
+    except (OSError, ValueError) as exc:
+        return False, f"the check could not run ({exc})"
+    if got.get("ok"):
+        return True, f"Chromium {got.get('version')} launches headless"
+    return False, explain_launch_error(str(got.get("error") or p.stderr or "no reason given"))
 
 
 def _wait_up(url: str, seconds: float, proc) -> int | None:
@@ -84,7 +148,7 @@ def run(spec: dict, *, workdir: Path, out_dir: Path, env: dict, deadline: float,
             try:
                 browser = p.chromium.launch()
             except Exception as exc:
-                result["setup_error"] = f"Chromium did not start ({str(exc).splitlines()[0]}); run `playwright install chromium`"
+                result["setup_error"] = f"Chromium did not start: {explain_launch_error(str(exc))}"
                 return result
             w, h = spec.get("viewport", [1280, 800])
             page = browser.new_page(viewport={"width": int(w), "height": int(h)})

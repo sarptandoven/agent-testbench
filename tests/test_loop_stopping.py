@@ -40,12 +40,33 @@ def test_target_reached_ends_the_loop(repo, webhook):
     r = cli(repo, "loop", "stop")
     assert r.returncode == 0 and "Stopping rules: target score >= 3. It had reached its target when it was stopped." \
         in r.stdout, r.stdout
-    ends = webhook.events("loop_end")
-    assert [e["status"] for e in ends] == ["target_reached", "stopped"], ends
-    assert ends[0]["best"] == 3 and ends[0]["tries"] == 2 and ends[0]["best_run"] == state(repo)["tries"][2]["run"]
-    assert "reached its target: score 1 -> 3 (max) in 2 tries, 2 kept" in ends[0]["text"]
-    assert ends[1]["report"].endswith("report.md") and "It had reached its target." in ends[1]["text"]
-    assert not webhook.events("run_end"), "on: [loop_end] sends nothing else"
+    assert [(e["event"], e["status"], e["open"]) for e in webhook.bodies] == [
+        ("loop_rule", "target_reached", True), ("loop_end", "stopped", False)], "a rule fired, then the loop ended"
+    rule, end = webhook.bodies
+    assert rule["best"] == 3 and rule["tries"] == 2 and rule["best_run"] == state(repo)["tries"][2]["run"]
+    assert "reached its target: score 1 -> 3 (max) in 2 tries, 2 kept" in rule["text"]
+    assert end["report"].endswith("report.md") and "It had reached its target." in end["text"]
+    assert end["ended_by"] == "target_reached" and rule["ended_by"] is None
+    assert not webhook.events("run_end"), "on: [loop_end] sends nothing else (it brings loop_rule along)"
+
+
+def test_each_try_s_verdict_is_sent_when_asked_for(repo, webhook):
+    cfg = (repo / "testbench.yaml").read_text() + f"notify:\n  webhook: {webhook.url}\n  on: [run_end, loop_try]\n"
+    (repo / "testbench.yaml").write_text(cfg)
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "notify")
+    assert cli(repo, *START).returncode == 0
+    score(repo, 2)
+    assert cli(repo, "loop", "try", "two").returncode == 0
+    score(repo, 0)
+    assert cli(repo, "loop", "try", "zero").returncode == 1
+    tries = webhook.events("loop_try")
+    assert [(e["try"], e["status"], e["value"]) for e in tries] == [(0, "baseline", 1), (1, "kept", 2),
+                                                                    (2, "reverted", 0)], tries
+    assert "KEPT try 1: score 2" in tries[1]["text"] and tries[1]["description"] == "two"
+    assert "REVERTED try 2" in tries[2]["text"] and tries[2]["run_status"] == "passed" and tries[2]["best"] == 2
+    assert not webhook.events("run_end"), "a loop's runs send no run_end: a run's PASSED cannot say kept or reverted"
+    assert cli(repo, "run", "score").returncode == 0
+    assert len(webhook.events("run_end")) == 1, "a run outside the loop still does"
 
 
 def test_a_baseline_at_the_target_refuses_the_first_try(repo):
@@ -91,11 +112,23 @@ def test_patience_refuses_more_of_the_same(repo, webhook):
     r = cli(repo, "loop", "try", "anything", "--new-direction", env=env)
     assert r.returncode == 2 and "--new-direction is for the try after --patience refused one" in r.stdout
     assert "[new direction] a different model" in cli(repo, "loop", "status", env=env).stdout
-    ends = webhook.events("loop_end")
-    assert [e["status"] for e in ends] == ["out_of_patience"], ends
-    assert "ran out of patience" in ends[0]["text"] and "try something different in kind" in ends[0]["text"]
-    assert len(webhook.events("run_end")) == 6 and webhook.events("run_end")[1]["loop_try"] == 1
-    assert "(loop " in webhook.events("run_end")[1]["text"] and ", try 1)" in webhook.events("run_end")[1]["text"]
+    rules = webhook.events("loop_rule")
+    assert [e["status"] for e in rules] == ["out_of_patience"] and rules[0]["open"], rules
+    assert "ran out of patience" in rules[0]["text"] and "try something different in kind" in rules[0]["text"]
+    assert not webhook.events("loop_end"), "the loop goes on after patience runs out: it has not ended"
+    assert not webhook.events("run_end") and not webhook.events("loop_try"), \
+        "a loop's runs are told by the loop, and each try's verdict only when asked for"
+
+
+def test_a_patience_of_one_reads_as_one_try(repo):
+    assert cli(repo, *START, "--patience", "1").returncode == 0
+    score(repo, 0)
+    r = cli(repo, "loop", "try", "zero")
+    assert r.returncode == 1 and "That is 1 try in a row not kept (--patience 1)" in r.stdout, r.stdout
+    score(repo, 0.5)
+    r = cli(repo, "loop", "try", "half")
+    assert r.returncode == 2 and "1 try in a row was not kept (--patience 1):" in r.stdout, r.stdout
+    assert "1 try, 0 kept" in cli(repo, "loop", "status").stdout
 
 
 def test_max_tries(repo):
@@ -109,7 +142,7 @@ def test_max_tries(repo):
     assert r.returncode == 2 and "the loop has made its 1 try (--max-tries 1); best score 2 (try 1" in r.stdout
     git(repo, "checkout", "--", "settings.py")
     report = cli(repo, "loop", "stop").stdout
-    assert "at most 1 tries (1 made)" in report and "It had made all its tries" in report, report
+    assert "at most 1 try (1 made)" in report and "It had made all its tries" in report, report
 
 
 def test_bad_rules_and_loops_without_them(repo):

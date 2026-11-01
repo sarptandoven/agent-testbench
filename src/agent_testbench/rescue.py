@@ -30,7 +30,7 @@ from pathlib import Path
 
 import nbformat
 
-from . import config as C
+from . import config as C, notebook as NB
 from .notebook import fields as nb_fields
 from .scaffold import _q, _slug
 
@@ -467,9 +467,12 @@ def read(nb_path: str | Path, workdir: str | Path | None = None) -> dict:
     nb_path = Path(nb_path)
     workdir = Path(workdir or nb_path.parent)
     try:
-        nb = nbformat.read(str(nb_path), as_version=4)
+        nb = NB.read(nb_path)
+    except NB.NotebookError as exc:
+        raise RescueError(str(exc)) from None
     except Exception as exc:
-        raise RescueError(f"{nb_path} is not a notebook nbformat can read ({str(exc)[:300]}); is it a .ipynb file?") from None
+        raise RescueError(f"{nb_path} cannot be read as a notebook ({str(exc)[:300]}); rescue reads an .ipynb, or a "
+                          "percent-format .py (`# %%` cells)") from None
     lang = (nb.metadata.get("kernelspec") or {}).get("language") or (nb.metadata.get("language_info") or {}).get("name") or "python"
     if lang.lower() != "python":
         raise RescueError(f"{nb_path.name} is a {lang} notebook; testbench rescue reads and runs Python notebooks")
@@ -1123,15 +1126,23 @@ def plan_yaml(nb_rel: str, info: dict, diag: dict) -> tuple[str, str]:
     return name, "\n".join(lines) + "\n"
 
 
+PIP_BANG = r"^(\s*)!\s*(?:pip3?|python3? -m pip)\s+install\b"
+
+
 def write_fix(nb_path: Path, out: Path, info: dict, failure: dict | None) -> list[str]:
     """A copy with mechanical fixes only: `%pip install` for `!pip install`, and a first cell that installs the missing
-    packages rescue is sure of and adds standard imports nothing in the notebook makes. Nothing is moved."""
+    packages rescue is sure of and adds standard imports nothing in the notebook makes. Nothing is moved. A
+    percent-format .py notebook's copy can be a .py (the fixes made on its text) or an .ipynb."""
     if out.resolve() == nb_path.resolve():
         raise RescueError(f"--fix {out} is the notebook itself; rescue never writes the original. Give another path.")
-    nb = nbformat.read(str(nb_path), as_version=4)
+    percent = out.suffix.lower() == ".py"
+    if percent and nb_path.suffix.lower() != ".py":
+        raise RescueError(f"--fix {out}: {nb_path.name} is an .ipynb, and so is its fixed copy; give a path that ends "
+                          "in .ipynb")
+    nb = NB.read(nb_path)
     changes = []
     for n, cell in enumerate((c for c in nb.cells if c.cell_type == "code"), 1):
-        new = re.sub(r"^(\s*)!\s*(?:pip3?|python3? -m pip)\s+install\b", r"\1%pip install", cell.source, flags=re.M)
+        new = re.sub(PIP_BANG, r"\1%pip install", cell.source, flags=re.M)
         if new != cell.source:
             cell.source = new
             changes.append(f"cell {n}: `!pip install` became `%pip install`, which installs into the kernel's own Python")
@@ -1147,6 +1158,7 @@ def write_fix(nb_path: Path, out: Path, info: dict, failure: dict | None) -> lis
                and (ALIASES[u].split()[1].split(".")[0] in sys.stdlib_module_names
                     or (info["probe"].get(ALIASES[u].split()[1].split(".")[0]) or {}).get("installed")
                     or pip_name(ALIASES[u].split()[1])[0] in pips)]
+    lines = []
     if pips or imports:
         lines = ["# added by testbench rescue: what the notebook needs before its first cell"]
         if pips:
@@ -1157,8 +1169,55 @@ def write_fix(nb_path: Path, out: Path, info: dict, failure: dict | None) -> lis
         what = (["installs " + ", ".join(pips)] if pips else []) + (["adds " + "; ".join(f"`{i}`" for i in imports)] if imports else [])
         changes.append(f"a new first code cell {' and '.join(what)}; the code cells after it are numbered one higher")
     out.parent.mkdir(parents=True, exist_ok=True)
-    nbformat.write(nb, str(out))
+    if percent:
+        _write_percent_fix(nb_path, out, lines, [c.source for c in nb.cells if c.cell_type == "code"])
+    else:
+        nbformat.write(nb, str(out))
     return changes
+
+
+def _write_percent_fix(src: Path, out: Path, first: list[str], want: list[str]) -> None:
+    """The percent-format `src` with the fixes made on its text, so everything else in it (its header, comments,
+    titles, blank lines) stays as it was: `%pip install` for `!pip install` in its code cells, and `first` (lines)
+    as a new cell before the first code cell, its magics commented out as jupytext writes them. `want`: the code
+    cells' sources the copy must read back as; if it does not, nothing is left at `out`."""
+    lines = src.read_text(encoding="utf-8").splitlines(keepends=True)
+    i = 0                                                # the header, as NB.from_percent skips it
+    while i < len(lines) and (lines[i].startswith("#!") or re.match(r"#.*coding[:=]", lines[i])):
+        i += 1
+    if i < len(lines) and lines[i].rstrip() == "# ---":
+        i = next((j + 1 for j in range(i + 1, len(lines)) if lines[j].rstrip() == "# ---"), i)
+    chunks, options, start, quote = [], None, i, None
+    for k in range(i, len(lines)):
+        mark = None if quote else NB.CELL_MARK.match(lines[k].rstrip("\r\n"))
+        if mark:
+            chunks.append((options, start, k))
+            options, start = mark.group(2) or "", k
+            continue
+        quote = NB._open_string(lines[k], quote)
+    chunks.append((options, start, len(lines)))
+    code = [(o, s, e) for o, s, e in chunks if (o is not None or "".join(lines[s:e]).strip())
+            and NB._cell_options(o or "")[0] == "code"]
+    for o, s, e in code:
+        for k in range(s + (o is not None), e):
+            lines[k] = re.sub(r"^(\s*(?:#\s?)?)!\s*(?:pip3?|python3? -m pip)\s+install\b", r"\1%pip install", lines[k])
+    if first:
+        block = ["# %%\n"] + [("# " + ln if ln.startswith("%") else ln) + "\n" for ln in first] + ["\n"]
+        at = code[0][1] if code else len(lines)
+        if code and code[0][0] is None:
+            block.append("# %%\n")                       # the code above the first marker becomes a cell of its own
+        if at and not lines[at - 1].endswith("\n"):
+            lines[at - 1] += "\n"
+        lines[at:at] = block
+    out.write_text("".join(lines), encoding="utf-8")
+    try:
+        got = [c.source for c in NB.read(out).cells if c.cell_type == "code"]
+    except Exception:
+        got = None
+    if got != want:
+        out.unlink(missing_ok=True)
+        raise RescueError(f"--fix {out}: the fixes could not be made on {src.name}'s text without changing how its "
+                          "cells read, so nothing was written; give a path that ends in .ipynb for the fixed copy")
 
 
 # ---- putting it together --------------------------------------------------------------------------------------
@@ -1175,8 +1234,10 @@ def rescue(notebook: str | Path, *, timeout: float = 120, fix: str | Path | None
     nb_path = Path(notebook).expanduser().resolve()
     if not nb_path.is_file():
         raise RescueError(f"{notebook} does not exist")
-    if nb_path.suffix.lower() != ".ipynb":
-        raise RescueError(f"{notebook} is not a .ipynb notebook")
+    if nb_path.suffix.lower() not in (".ipynb", ".py"):
+        raise RescueError(f"{notebook} is not a notebook: rescue reads an .ipynb, or a percent-format .py (`# %%` cells)")
+    if NB.plain_python(nb_path):
+        raise RescueError(NB.plain_python(nb_path))
     if fix and Path(fix).expanduser().resolve() == nb_path:
         raise RescueError(f"--fix {fix} is the notebook itself; rescue never writes the original. Give another path.")
     workdir = nb_path.parent
@@ -1233,7 +1294,7 @@ def rescue(notebook: str | Path, *, timeout: float = 120, fix: str | Path | None
 def render(d: dict) -> str:
     nb, status, f = d["notebook"], d["status"], d.get("failure")
     cell = f"cell {f['cell']}" if f and f.get("cell") else "a cell"
-    head = {"passed": f"runs top to bottom here ({d['code_cells']} code cells, {d['seconds']} s)",
+    head = {"passed": f"runs top to bottom here ({C.counted(d['code_cells'], 'code cell')}, {d['seconds']} s)",
             "failed": f"fails at {cell} of {d['code_cells']}",
             "timeout": f"was still running {cell} at the time limit ({d['timeout_seconds']:g} s)",
             "error": "did not start", "not run": "read without running it"}[status]

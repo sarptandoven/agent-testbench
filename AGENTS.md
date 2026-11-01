@@ -24,9 +24,10 @@
 - CI: `action.yml` (the GitHub Action) and `.github/workflows/action.yml` (its self-test).
 - Loops: `loop.py` (`testbench loop`: tries on a git branch, kept or reverted by a plan run's metric; stopping
   rules --target, --patience, --max-tries).
-- Notifications: `notify.py` (testbench.yaml `notify:`; run_end from `runs.finalize`, loop_end from `loop.py`,
-  approval_needed from launches refused with "Needs approval"). Delivery never raises or blocks for long, and only a
-  webhook URL's scheme and host are ever shown. Tests post to a local server (the `webhook` fixture), never a real one.
+- Notifications: `notify.py` (testbench.yaml `notify:`; run_end from `runs.finalize`, once per run and not for a
+  loop's tries; loop_rule / loop_end / loop_try from `loop.py`; approval_needed from launches refused with "Needs
+  approval"). Delivery never raises or blocks for long, and only a webhook URL's scheme and host are ever shown.
+  Tests post to a local server (the `webhook` fixture), never a real one.
 - Exports: `export.py` (`testbench export`, and testbench.yaml's `export:` after every run from `runs.finalize`:
   MLflow, W&B, csv, jsonl). Trackers are imported only when used and never fail or hold up a run; their tests
   skip unless mlflow / wandb are installed (in a separate venv: `docs/export.md`).

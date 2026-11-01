@@ -96,6 +96,19 @@ def test_an_unknown_param_names_the_parameters_the_notebook_has(tmp_path):
         NB.prepare(NB.read(plain), {"x": 2})
 
 
+def test_cells_that_skip_where_a_param_is_set_are_refused(tmp_path):
+    nb = papermill_notebook(tmp_path / "w" / "nb.ipynb")
+    with pytest.raises(NB.ParamError) as e:
+        run(nb, tmp_path, params={"ROWS": 7, "N": 5}, cells=[3])
+    msg = str(e.value)
+    assert "ROWS in code cell 2 (the cell tagged `parameters`)" in msg and "N in code cell 1 (a Colab form field)" in msg
+    assert "the cells asked for (3) do not include those cells" in msg and "Add cells 1, 2 to the cells to run" in msg
+    r = run(nb, tmp_path, params={"ROWS": 7, "N": 5}, cells=[1, 2, 3])
+    assert r["status"] == "passed" and "rows 7 label ada n 5" in r["cells"][-1]["stdout_tail"], "with their cells, run"
+    with pytest.raises(NB.ParamError, match="LABEL in code cell 2 .* do not include that cell, .* Add cell 2 "):
+        NB.check_cells_set_params(NB.read(nb), {"LABEL": "x"}, [1, 3])
+
+
 def test_a_cell_left_by_a_papermill_run_is_replaced(tmp_path):
     nb = papermill_notebook(tmp_path / "w" / "nb.ipynb")
     doc = nbformat.read(str(nb), 4)

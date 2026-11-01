@@ -9,14 +9,19 @@ whatever Python the step uses; nothing here opens a network connection.
 """
 from __future__ import annotations
 
+import copy
 import difflib
 import hashlib
+import importlib.abc
+import importlib.machinery
 import json
 import math
 import os
 import random
 import re
+import sys
 import time
+import types
 from functools import lru_cache
 
 LOG_NAME = "mock_calls.jsonl"
@@ -66,21 +71,76 @@ omit = Omit()
 
 
 class Obj:
-    """A response object: attribute access like the SDKs' models, and to_dict() / model_dump() / to_json()."""
+    """A response object: attribute access like the SDKs' models (pydantic models), with their to_dict() / to_json()
+    and pydantic's model_dump() / model_dump_json() / model_validate() / model_validate_json() / model_copy().
+
+    A model class says what model_validate needs: _required (the fields the real model requires), _optional (the
+    ones it fills with None when they are not given) and _nested ({field: class}, or {field: {"type" value: class}}
+    for a list of blocks of several kinds), which turn nested mappings into objects as the real models do; others
+    stay mappings, as a tool call's `input` does. Types are not checked beyond that."""
+    _required: tuple = ()
+    _optional: tuple = ()
+    _nested: dict = {}
 
     def __init__(self, **fields):
         self.__dict__.update(fields)
+        for k in self._optional:                         # None where the real model has a default
+            self.__dict__.setdefault(k, None)
 
-    def to_dict(self, **_):
-        return plain(self)
+    def to_dict(self, *, mode="python", use_api_names=True, exclude_unset=True, exclude_defaults=False,
+                exclude_none=False, warnings=True):
+        return plain(self, exclude_none)
 
-    model_dump = to_dict
+    def to_json(self, *, indent=2, use_api_names=True, exclude_unset=True, exclude_defaults=False, exclude_none=False,
+                warnings=True):
+        return json.dumps(plain(self, exclude_none), indent=indent)
 
-    def to_json(self, indent=2, **_):
-        return json.dumps(self.to_dict(), indent=indent)
+    def model_dump(self, *, mode="python", include=None, exclude=None, context=None, by_alias=None,
+                   exclude_unset=False, exclude_defaults=False, exclude_none=False, exclude_computed_fields=False,
+                   round_trip=False, warnings=True, fallback=None, serialize_as_any=False,
+                   polymorphic_serialization=None):
+        return _pick(plain(self, exclude_none), include, exclude)
 
-    def model_dump_json(self, indent=None, **_):
-        return json.dumps(self.to_dict(), indent=indent)
+    def model_dump_json(self, *, indent=None, ensure_ascii=False, include=None, exclude=None, context=None,
+                        by_alias=None, exclude_unset=False, exclude_defaults=False, exclude_none=False,
+                        exclude_computed_fields=False, round_trip=False, warnings=True, fallback=None,
+                        serialize_as_any=False, polymorphic_serialization=None):
+        return json.dumps(_pick(plain(self, exclude_none), include, exclude), indent=indent, ensure_ascii=ensure_ascii)
+
+    @classmethod
+    def model_validate(cls, obj, *, strict=None, extra=None, from_attributes=None, context=None, by_alias=None,
+                       by_name=None):
+        if isinstance(obj, cls):
+            return obj
+        data = plain(obj) if isinstance(obj, Obj) else obj
+        if not isinstance(data, dict):
+            raise validation_error(cls.__name__, [{"type": "model_type", "loc": (), "input": obj,
+                                                   "ctx": {"class_name": cls.__name__}}])
+        missing = [k for k in cls._required if k not in data]
+        if missing:
+            raise validation_error(cls.__name__, [{"type": "missing", "loc": (k,), "input": data} for k in missing])
+        return cls(**{k: _nest(cls._nested[k], v) if k in cls._nested else v for k, v in data.items()})
+
+    @classmethod
+    def model_validate_json(cls, json_data, *, strict=None, extra=None, context=None, by_alias=None, by_name=None):
+        try:
+            data = json.loads(json_data)
+        except ValueError as exc:
+            raise validation_error(cls.__name__, [{"type": "json_invalid", "loc": (), "input": json_data,
+                                                   "ctx": {"error": str(exc)}}]) from None
+        return cls.model_validate(data)
+
+    @classmethod
+    def model_construct(cls, _fields_set=None, **values):
+        return cls(**values)
+
+    construct = model_construct
+
+    def model_copy(self, *, update=None, deep=False):
+        new = type(self).__new__(type(self))
+        new.__dict__.update(copy.deepcopy(vars(self)) if deep else vars(self))
+        new.__dict__.update(update or {})
+        return new
 
     def __eq__(self, other):
         return type(other) is type(self) and plain(other) == plain(self)
@@ -89,6 +149,101 @@ class Obj:
 
     def __repr__(self):
         return f"{type(self).__name__}({', '.join(f'{k}={v!r}' for k, v in vars(self).items() if k[0] != '_')})"
+
+
+def _nest(kind, v):
+    """A nested mapping (or each one in a list) as the object the real model makes of it."""
+    if isinstance(v, (list, tuple)):
+        return [_nest(kind, x) for x in v]
+    if not isinstance(v, (dict, Obj)):
+        return v
+    if isinstance(kind, dict):                           # blocks of several kinds, told apart by their "type"
+        t = v.get("type") if isinstance(v, dict) else getattr(v, "type", None)
+        kind = kind.get(t, Obj)
+    return kind.model_validate(v)
+
+
+def _pick(d, include, exclude):
+    """model_dump's include= and exclude=: a set of field names, or a mapping of names to True or to the same for
+    that field (for a list field, for each of its items; "__all__" too)."""
+    def spec(s):
+        return {k: True for k in s} if isinstance(s, (set, frozenset, list, tuple)) else s
+
+    def apply(v, inc, exc):
+        if isinstance(v, list):
+            return [apply(x, (inc or {}).get("__all__", inc) if isinstance(inc, dict) else inc,
+                          (exc or {}).get("__all__", exc) if isinstance(exc, dict) else exc) for x in v]
+        if not isinstance(v, dict):
+            return v
+        inc, exc = spec(inc), spec(exc)
+        out = {}
+        for k, x in v.items():
+            if inc is not None and inc is not True and k not in inc:
+                continue
+            if isinstance(exc, dict) and exc.get(k) is True:
+                continue
+            sub_inc = inc.get(k) if isinstance(inc, dict) else None
+            sub_exc = exc.get(k) if isinstance(exc, dict) else None
+            out[k] = apply(x, None if sub_inc is True else sub_inc, None if sub_exc is True else sub_exc)
+        return out
+    return apply(d, include, exclude)
+
+
+def validation_error(title: str, errors: list) -> Exception:
+    """pydantic's own ValidationError where pydantic is installed (code that catches it works as with the real
+    SDK), else a ValueError that reads the same."""
+    try:
+        from pydantic_core import ValidationError
+        return ValidationError.from_exception_data(title, errors)
+    except Exception:
+        what = {"missing": "Field required", "model_type": f"Input should be a valid dictionary or instance of {title}",
+                "json_invalid": "Invalid JSON"}
+        lines = [(".".join(map(str, e["loc"])) + "\n  " if e["loc"] else "  ") + what.get(e["type"], e["type"])
+                 + f" [type={e['type']}]" for e in errors]
+        return MockValidationError(f"{len(errors)} validation error{'s' * (len(errors) > 1)} for {title}\n"
+                                   + "\n".join(lines))
+
+
+class MockValidationError(ValueError):
+    """model_validate's error where pydantic is not installed."""
+
+
+class _Absent(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """After the mock package's own files: a request-type module (`*_param`, `*_params`) is made on the fly, every
+    name in it a dict, as the real TypedDicts are; any other module the mock lacks is refused saying so, instead of
+    a bare "No module named"."""
+
+    def __init__(self, sdk: str, has: str):
+        self.sdk, self.has = sdk, has
+        self.testbench_mock_sdk = sdk
+
+    def find_spec(self, fullname, path=None, target=None):
+        if not fullname.startswith(self.sdk + ".") or not getattr(sys.modules.get(self.sdk), "TESTBENCH_MOCK", False):
+            return None                                  # not the mock's, or the real package is the one loaded
+        if re.search(r"_params?$", fullname):
+            return importlib.machinery.ModuleSpec(fullname, self)
+        raise ModuleNotFoundError(f"No module named {fullname!r}: the mock {self.sdk} package (agent-testbench) does "
+                                  f"not have it. It has {self.has}; every *_param module, its names plain dicts. "
+                                  "docs/mocks.md says what the mocks cover.", name=fullname)
+
+    def create_module(self, spec):
+        mod = types.ModuleType(spec.name, f"Request types of the mock {self.sdk}: plain dicts.")
+
+        def __getattr__(name):
+            if name.startswith("_"):
+                raise AttributeError(name)
+            return dict
+        mod.__getattr__ = __getattr__
+        return mod
+
+    def exec_module(self, module):
+        pass
+
+
+def absent_modules(sdk: str, has: str) -> None:
+    """Install _Absent for `sdk` once, last on sys.meta_path (after the finders that find the mock's files)."""
+    if not any(getattr(f, "testbench_mock_sdk", None) == sdk for f in sys.meta_path):     # also one from a reload
+        sys.meta_path.append(_Absent(sdk, has))
 
 
 def plain(v, drop_none=False):

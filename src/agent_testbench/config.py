@@ -28,6 +28,9 @@ DEFAULTS = {
 STEP_DEFAULTS = {"max_minutes": 10, "params": {}, "env": {}, "secrets": [], "pythonpath": [], "artifacts": [],
                  "expect": {}, "uploads": [], "cells": None, "colab_shim": True, "continue_on_failure": False,
                  "mocks": {}}
+NOTEBOOK_ONLY = {"params": "it sets a notebook's Colab form fields and papermill parameters",
+                 "cells": "it picks the notebook's code cells to run", "uploads": "it answers files.upload() in a notebook",
+                 "colab_shim": "it puts the google.colab stand-in in the notebook's kernel"}
 
 
 class ConfigError(ValueError):
@@ -161,6 +164,12 @@ def validate(raw: dict, root: Path) -> dict:
     return cfg
 
 
+def counted(n, one: str, many: str | None = None) -> str:
+    """A count with its noun, singular for exactly one: counted(1, "try", "tries") is "1 try", counted(3, "file") is
+    "3 files"."""
+    return (f"{n:g}" if isinstance(n, float) else str(n)) + " " + (one if n == 1 else many or one + "s")
+
+
 def number(v, positive: bool = False) -> bool:
     """A real number of dollars or minutes: not a bool, not NaN or infinity, not negative (not zero if positive).
     Every limit, price and duration goes through this, because NaN compares false with everything and would let a
@@ -187,9 +196,9 @@ def _sessions(s: dict) -> None:
         raise ConfigError("`sessions.secrets` is a list of secret NAMES, e.g. [HF_TOKEN]")
 
 
-NOTIFY_EVENTS = ("run_end", "loop_end", "approval_needed", "watch_run")
-NOTIFY_DEFAULT = NOTIFY_EVENTS[:3]            # watch_run (a watched run whose result changed) only when asked for
-NOTIFY_EXAMPLE = "{webhook_env: TESTBENCH_WEBHOOK, on: [run_end, loop_end, approval_needed]}"
+NOTIFY_EVENTS = ("run_end", "loop_rule", "loop_end", "approval_needed", "watch_run", "loop_try")
+NOTIFY_DEFAULT = NOTIFY_EVENTS[:4]            # watch_run and loop_try (one message per run) only when asked for
+NOTIFY_EXAMPLE = "{webhook_env: TESTBENCH_WEBHOOK, on: [run_end, loop_rule, loop_end, approval_needed]}"
 
 
 def _notify(n) -> dict | None:
@@ -223,6 +232,8 @@ def _notify(n) -> dict | None:
         raise ConfigError(f"`notify.on` lists the events to send, from {', '.join(NOTIFY_EVENTS)}"
                           + (f"; there is no {bad[0]!r}" if bad else "")
                           + f" (default: {', '.join(NOTIFY_DEFAULT)}), e.g. {NOTIFY_EXAMPLE}")
+    if "loop_end" in on:                           # a rule firing was sent as loop_end before loop_rule was its own
+        on = [*on, "loop_rule"]
     return {"webhook": url.strip() if url else None, "webhook_env": env or None, "on": list(dict.fromkeys(on))}
 
 
@@ -333,6 +344,13 @@ def _step(where: str, step: dict, root: Path) -> dict:
             near = difflib.get_close_matches(str(key), known, n=1)
             raise ConfigError(f"`{where}` ({step['name']}) has no {key!r}"
                               + (f" (did you mean {near[0]!r}?)" if near else "") + f"; a step takes {', '.join(known)}")
+    if kinds[0] != "notebook":                           # set on another step, these would be ignored without a word
+        for key, what in NOTEBOOK_ONLY.items():
+            if step.get(key, STEP_DEFAULTS[key]) not in (STEP_DEFAULTS[key], None):
+                raise ConfigError(f"`{where}` ({step['name']}) is a {kinds[0]}: step, and `{key}:` applies to notebook: "
+                                  f"steps only ({what}), so it would be ignored. Remove it"
+                                  + (", and give the command its values on its command line or in `env:`, e.g. "
+                                     "env: {EPOCHS: \"2\"}" if key == "params" else ""))
     s = {**copy.deepcopy(STEP_DEFAULTS), **step, "kind": kinds[0]}
     if not number(s["max_minutes"], positive=True):
         raise ConfigError(f"`{where}.max_minutes` must be a positive number; the step is stopped when it runs out")

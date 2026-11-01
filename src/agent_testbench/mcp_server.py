@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -25,7 +27,7 @@ except ImportError:                          # mcp 1.x
     from mcp.server.fastmcp import Context, FastMCP as _Server, Image
     from mcp.server.fastmcp.exceptions import ToolError
 
-from . import config as C
+from . import config as C, notify
 from .cli import render_exec
 
 INSTRUCTIONS = (
@@ -39,19 +41,21 @@ INSTRUCTIONS = (
 )
 MAX_IMAGES = 6
 MAX_IMAGE_BYTES = 2_000_000
+ASK_NOTICE_AFTER_S = 60.0     # a person asked directly who has not answered by then may be away: notify: tells them
 
 server = _Server(name="agent-testbench", instructions=INSTRUCTIONS)
 
 
-async def _cli(project_dir: str, argv: list[str], on_line=None) -> tuple[int, str]:
+async def _cli(project_dir: str, argv: list[str], on_line=None, env: dict | None = None) -> tuple[int, str]:
     """Run one CLI command in project_dir in its own process: (exit code, everything it printed). on_line, if given,
-    gets each line as it is printed (progress for long runs)."""
+    gets each line as it is printed (progress for long runs); env, variables to add to its environment."""
     cwd = Path(project_dir).expanduser()
     if not cwd.is_dir():
         return 2, f"testbench: project_dir {cwd} is not a folder; pass the project's folder (it holds testbench.yaml)"
     proc = await asyncio.create_subprocess_exec(sys.executable, "-m", "agent_testbench", *argv, cwd=str(cwd),
                                                 stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-                                                stderr=asyncio.subprocess.STDOUT, limit=2 ** 26)
+                                                stderr=asyncio.subprocess.STDOUT, limit=2 ** 26,
+                                                env={**os.environ, **env} if env else None)
     lines = []
     try:
         while line := await proc.stdout.readline():
@@ -99,15 +103,37 @@ def _can_ask(ctx) -> bool:
 
 async def _with_approval(ctx, project_dir: str, argv: list[str]) -> tuple[int, str]:
     """Run a launch; if it needs a person's approval, ask the person directly when the client can, and launch with
-    --approve only on their yes. The agent is never the one saying yes here."""
-    code, out = await _cli(project_dir, argv)
-    if code != 2 or "Needs approval:" not in out or "--approve" in argv or not _can_ask(ctx):
-        return code, out
-    cost = out.split("Needs approval:", 1)[1].split("Ask a person", 1)[0].strip()
+    --approve only on their yes. The agent is never the one saying yes here. The approval_needed notification
+    (notify:) waits ASK_NOTICE_AFTER_S for that answer: it goes out only if the person has not answered by then,
+    or could not be asked."""
+    if "--approve" in argv or not _can_ask(ctx):
+        return await _cli(project_dir, argv)
+    fd, name = tempfile.mkstemp(prefix="testbench-approval-", suffix=".json")
+    os.close(fd)
+    held = Path(name)
     try:
-        answer = await ctx.elicit(message=f"agent-testbench: {cost} Approve spending up to that?", schema=Approval)
-    except Exception as exc:
-        return code, out + f"\n(The person could not be asked directly: {exc}.)"
+        code, out = await _cli(project_dir, argv, env={notify.HOLD_ENV: str(held)})
+        if code != 2 or "Needs approval:" not in out:
+            return code, out
+        cost = out.split("Needs approval:", 1)[1].split("Ask a person", 1)[0].strip()
+        told, ask = False, None
+        try:
+            ask = asyncio.ensure_future(ctx.elicit(message=f"agent-testbench: {cost} Approve spending up to that?",
+                                                   schema=Approval))
+            done, _ = await asyncio.wait({ask}, timeout=ASK_NOTICE_AFTER_S)
+            if not done:                                 # nobody at the screen: tell them where they will see it
+                told = True
+                await asyncio.to_thread(notify.send_held, held, "The agent's client is asking you too.")
+            answer = await ask
+        except Exception as exc:
+            if not told:
+                await asyncio.to_thread(notify.send_held, held)
+            return code, out + f"\n(The person could not be asked directly: {exc}.)"
+        finally:
+            if ask is not None and not ask.done():       # the tool call itself was cancelled
+                ask.cancel()
+    finally:
+        held.unlink(missing_ok=True)
     data = getattr(answer, "data", None)
     if getattr(answer, "action", None) == "accept" and data is not None and data.approve:
         code, again = await _cli(project_dir, argv + ["--approve"])
@@ -257,9 +283,10 @@ async def lint_notebook(notebook: str, project_dir: str = ".") -> str:
     return _text(*await _cli(project_dir, ["lint", "--", notebook]))
 
 
-@server.tool(description="Find out why a notebook does not run, and what to do. Reads it (cells run out of order, "
-                         "names used before the cell that makes them, missing packages with their pip names, Colab-only "
-                         "parts, files it reads that are not there, input()), then runs it top to bottom in a fresh kernel "
+@server.tool(description="Find out why a notebook (.ipynb or percent-format .py) does not run, and what to do. Reads "
+                         "it (cells run out of order, names used before the cell that makes them, missing packages with "
+                         "their pip names, Colab-only parts, files it reads that are not there, input()), then runs it "
+                         "top to bottom in a fresh kernel "
                          "on this machine within timeout_seconds and diagnoses the first failing cell. Returns the "
                          "diagnosis and a plan to paste into testbench.yaml. fix_to writes a copy with mechanical fixes "
                          "only (never the original); run=false only reads it.")

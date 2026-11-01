@@ -577,6 +577,9 @@ def cmd_doctor(a):
     for mod, why in (("nbclient", "notebook steps"), ("ipykernel", "notebook steps"), ("playwright", "web steps"),
                      ("mcp", "the MCP server")):
         checks.append((f"{mod} ({why})", iu.find_spec(mod) is not None, "installed" if iu.find_spec(mod) else "missing"))
+        if mod == "playwright" and iu.find_spec(mod):
+            from .web import chromium_check
+            checks.append(("chromium (web steps)", *chromium_check()))
     checks.append(("ffprobe (media checks)", bool(shutil.which("ffprobe")), shutil.which("ffprobe") or "missing"))
     checks.append(("backends", True, ", ".join(backends.names())))
     for b in backends.registry().values():
@@ -773,7 +776,7 @@ def cmd_notify(a):
     if not cfg.get("notify"):
         print("testbench: testbench.yaml has no `notify:` section, so nothing is sent. Add one, e.g.\n"
               "  notify:\n    webhook_env: TESTBENCH_WEBHOOK      # an environment variable that holds the URL\n"
-              "    on: [run_end, loop_end, approval_needed]")
+              "    on: [run_end, loop_rule, loop_end, approval_needed]")
         return 2
     url, source = N.target(cfg)
     if not url:
@@ -1376,7 +1379,8 @@ def build_parser() -> argparse.ArgumentParser:
                                    "could not be read.")
     p.add_argument("notebook", metavar="NOTEBOOK")
     p.add_argument("--timeout", type=_number, default=120, metavar="SECONDS", help="seconds the run may take (default 120)")
-    p.add_argument("--fix", metavar="OUT.ipynb", help="also write a copy with mechanical fixes only (cells never moved)")
+    p.add_argument("--fix", metavar="OUT.ipynb", help="also write a copy with mechanical fixes only (cells never moved); "
+                   "for a percent-format .py notebook, OUT.py keeps it a .py")
     _json(p, "the diagnosis")
     p.add_argument("--no-run", action="store_true", help="only read it; run nothing (for a notebook nobody has reviewed)")
     p.set_defaults(fn=cmd_rescue)

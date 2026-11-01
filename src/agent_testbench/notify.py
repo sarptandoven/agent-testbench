@@ -1,9 +1,9 @@
-"""Notifications: a JSON POST to a webhook when a run ends, a loop ends, or a launch waits for a person's approval,
-so whoever left an agent working overnight hears about it without looking.
+"""Notifications: a JSON POST to a webhook when a run ends, a loop's stopping rule fires or the loop ends, or a
+launch waits for a person's approval, so whoever left an agent working overnight hears about it without looking.
 
     notify:
       webhook_env: TESTBENCH_WEBHOOK                  # the URL in an environment variable (or webhook: https://...)
-      on: [run_end, loop_end, approval_needed]         # which events (default: these three; watch_run is opt-in)
+      on: [run_end, loop_rule, loop_end, approval_needed]    # the default; watch_run and loop_try are opt-in
 
 The body is Slack-compatible ({"text": "..."}) and carries the same facts as fields (event, project, plan or loop,
 status, numbers, cost, run, report), so any service that takes a JSON POST can use it. Delivery never breaks or
@@ -30,6 +30,9 @@ from . import __version__, config as C
 EVENTS = C.NOTIFY_EVENTS
 TIMEOUT = 5.0                     # seconds for one delivery, all of it (connecting, sending, the answer)
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
+TOLD = "run_end.told"                         # in a run's folder once run_end (or watch_run) was dealt with
+HOLD_ENV = "TESTBENCH_HOLD_APPROVAL_NOTICE"    # an empty file: approval_needed goes there, for the MCP server to send
+                                               # only if the person it asks directly does not answer soon
 
 
 def log_path(root: Path) -> Path:
@@ -155,13 +158,25 @@ def _money(v) -> str:
 def run_end(root: Path, run_dir: Path, rep: dict | None = None, cfg: dict | None = None) -> None:
     """A run finished (passed, failed, cancelled, error): what it proved, what it cost, where its report is. A run
     `testbench watch` started is told only as watch_run, and only when its result differs from the run before it:
-    a watch runs on every save, and a message for each would be noise."""
+    a watch runs on every save, and a message for each would be noise. A loop's runs are told by the loop, as
+    loop_try once each is judged kept or reverted (a run's own PASSED cannot say which).
+
+    Once per run, whoever closes it: a cancel that gave up waiting for the driver, then the driver finishing after
+    all, both call this. The first to create the run's TOLD file (atomically: O_EXCL) is the one that tells."""
     from . import report as R, runs
     try:
+        try:
+            fd = os.open(Path(run_dir) / TOLD, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            return
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps({"time": dt.datetime.now().isoformat(timespec="seconds"), "pid": os.getpid()}) + "\n")
         state = runs.read_state(run_dir)
         rep = rep or R.load(run_dir) or {}
         status = state.get("status") or rep.get("status")
         event, origin = "run_end", state.get("origin") or {}
+        if origin.get("loop"):
+            return
         if origin.get("watch"):
             before = (rep.get("delta") or {}).get("previous_status")
             if status == "cancelled" or before is None or (before == "passed") == (status == "passed"):
@@ -178,8 +193,6 @@ def run_end(root: Path, run_dir: Path, rep: dict | None = None, cfg: dict | None
         cost = rep.get("cost_usd", state.get("cost_usd"))
         report = run_dir / "report.md"
         text = (f"run {run_dir.name} of plan {state.get('plan')} on {hw} {str(status).upper()}"
-                + ((f" (loop {origin['loop']}, " + ("the baseline)" if origin.get("try") == 0
-                                                      else f"try {origin.get('try')})")) if origin.get("loop") else "")
                 + (f" (testbench watch; the run before it {(rep.get('delta') or {}).get('previous_status')})"
                    if event == "watch_run" else "")
                 + f" after {rep.get('minutes', state.get('minutes', '?'))} min, about {_money(cost)}."
@@ -192,7 +205,6 @@ def run_end(root: Path, run_dir: Path, rep: dict | None = None, cfg: dict | None
             "plan": state.get("plan"), "status": status, "run_id": run_dir.name, "backend": state.get("backend"),
             "gpu": state.get("gpu"), "minutes": rep.get("minutes", state.get("minutes")), "cost_usd": cost,
             "numbers": numbers, "failed": (errors + failed)[:10], "stopped_because": why,
-            "loop": origin.get("loop"), "loop_try": origin.get("try"),
             **({"watch": origin["watch"], "previous_status": (rep.get("delta") or {}).get("previous_status")}
                if event == "watch_run" else {}),
             "report": rel(report, root) if report.exists() else None})
@@ -202,7 +214,9 @@ def run_end(root: Path, run_dir: Path, rep: dict | None = None, cfg: dict | None
 
 def approval_needed(root: Path, cfg: dict, message: str, est: dict, how: str) -> None:
     """A launch was refused until a person approves it: what, on what hardware, the worst case, how to say yes.
-    Other refusals (over a hard limit) are not a question for the person, so they are not sent."""
+    Other refusals (over a hard limit) are not a question for the person, so they are not sent. When the MCP server
+    is about to ask the person directly (HOLD_ENV), it is held for the server, which sends it only if that question
+    goes unanswered for a while (or cannot be asked): a person who answered at once needs no message."""
     if not str(message).startswith("Needs approval"):
         return
     hw = (est.get("backend") or "?") + (f" {est['gpu']}" if est.get("gpu") else "")
@@ -210,7 +224,24 @@ def approval_needed(root: Path, cfg: dict, message: str, est: dict, how: str) ->
     said = str(message).split(":", 1)[1].split(" Ask a person", 1)[0].strip()
     text = (f"needs your approval: {said} On {hw}. The agent was told to wait for a person's yes: tell it yes to let "
             f"it go ahead (`{how}`), or no.")
-    send(root, cfg, "approval_needed", text, {
-        "what": est.get("what"), "plan": est.get("plan"), "backend": est.get("backend"), "gpu": est.get("gpu"),
-        "status": "waiting for approval", "worst_case_usd": worst, "max_minutes": est.get("max_minutes"),
-        "message": message, "approve_with": how})
+    fields = {"what": est.get("what"), "plan": est.get("plan"), "backend": est.get("backend"), "gpu": est.get("gpu"),
+              "status": "waiting for approval", "worst_case_usd": worst, "max_minutes": est.get("max_minutes"),
+              "message": message, "approve_with": how}
+    held = os.environ.get(HOLD_ENV)
+    if held and Path(held).is_file() and not Path(held).stat().st_size:
+        try:                                             # the MCP server asks the person first; it sends this if
+            Path(held).write_text(json.dumps({"root": str(root), "text": text, "fields": fields}))  # nobody answers
+            return
+        except OSError:
+            pass
+    send(root, cfg, "approval_needed", text, fields)
+
+
+def send_held(held: Path, note: str = "") -> tuple[bool | None, str]:
+    """Send the approval_needed a launch left in `held` (see HOLD_ENV), with `note` after its text. Never raises."""
+    try:
+        data = json.loads(Path(held).read_text() or "null")
+        root, text, fields = Path(data["root"]), str(data["text"]), dict(data["fields"])
+    except (OSError, ValueError, TypeError, KeyError):
+        return None, "no approval was needed"
+    return send(root, None, "approval_needed", text + (f" {note}" if note else ""), fields)

@@ -43,6 +43,11 @@ def env(key: str) -> str:
     return os.environ.get(key) or ""
 
 
+def _counted(n: int, one: str) -> str:
+    """config.counted, here since this file imports nothing from the package: "1 file", "3 files"."""
+    return f"{n} {one}{'' if n == 1 else 's'}"
+
+
 # ---- what the runner says about this job ---------------------------------------------------------------------------
 
 def pull_request() -> dict | None:
@@ -266,7 +271,7 @@ def _ran(rep: dict, plan: str, status: str) -> str:
             + (f" in {minutes} min" if isinstance(minutes, (int, float)) else "")
             + (f", about ${cost:.3f}" if isinstance(cost, (int, float)) else "")
             + (f" (worst case ${worst:.2f})" if isinstance(worst, (int, float)) else "")
-            + (f"; {sum(1 for c in checks if c.get('ok'))} of {len(checks)} checks passed" if checks else "")
+            + (f"; {sum(1 for c in checks if c.get('ok'))} of {_counted(len(checks), 'check')} passed" if checks else "")
             + f". Run {code(rep.get('run_id'), 80)} on "
             + (f"commit `{str(src.get('commit'))[:12]}`" + (" with uncommitted changes" if src.get("dirty") else "")
                if src.get("commit") else "code outside git") + ".")
@@ -574,7 +579,7 @@ def cmd_attest_subjects() -> int:
         then = {str(e.get("path")): str(e.get("sha256")) for e in recorded if isinstance(e, dict)}
         wrong = sorted(p for p in set(now) | set(then) if now.get(p) != then.get(p))
         if wrong:
-            why = (f"No attestation: the evidence no longer matches report.json ({len(wrong)} files, first "
+            why = (f"No attestation: the evidence no longer matches report.json ({_counted(len(wrong), 'file')}, first "
                    f"{wrong[0]}), so it is not signed. `testbench verify {rep.get('run_id')}` lists them.")
             annotate("error", why)
             note(why)
@@ -591,7 +596,8 @@ def cmd_attest_subjects() -> int:
     out = work / "attestation-subjects.txt"
     out.write_text("".join(f"{sha}  {name}\n" for sha, name in subjects), encoding="utf-8")
     output(ready="true", checksums=str(out), subjects=str(len(subjects)))
-    print(f"attesting {len(subjects)} files: report.json and {len(subjects) - 1} evidence files of run {run_id}")
+    print(f"attesting {_counted(len(subjects), 'file')}: report.json and {_counted(len(subjects) - 1, 'evidence file')} "
+          f"of run {run_id}")
     return 0
 
 

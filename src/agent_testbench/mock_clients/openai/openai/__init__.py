@@ -17,7 +17,7 @@ import _testbench_mock as core
 from _testbench_mock import NOT_GIVEN, NotGiven, Omit, not_given, omit
 
 from . import types
-from .types import CompletionUsage, CreateEmbeddingResponse, Embedding
+from .types import CompletionUsage, CreateEmbeddingResponse, Embedding, _EmbeddingUsage
 from .types.chat import (ChatCompletion, ChatCompletionChunk, ChatCompletionMessage,
                          ChatCompletionMessageFunctionToolCall, ChoiceDelta, ChoiceDeltaToolCall, ChunkChoice, Function)
 from .types.chat import Choice as _Choice
@@ -31,6 +31,10 @@ __all__ = ["types", "OpenAI", "AsyncOpenAI", "Client", "AsyncClient", "Stream", 
            "DEFAULT_MAX_RETRIES"]
 DEFAULT_MAX_RETRIES = 2
 _MOCK = core.Mock("openai")
+core.absent_modules("openai", "openai.types (and its completion_usage, embedding and create_embedding_response "
+                    "modules) and openai.types.chat (and its chat_completion, chat_completion_message, "
+                    "chat_completion_message_tool_call, chat_completion_message_function_tool_call and "
+                    "chat_completion_chunk modules)")
 
 # the SDK's models (openai.types.ChatModel and EmbeddingModel); any other name is accepted and noted
 KNOWN_MODELS = (
@@ -547,7 +551,6 @@ def _chunks(comp, include_usage) -> list:
     return out
 
 
-_EmbeddingUsage = type("Usage", (core.Obj,), {})
 
 
 def _embeddings(req, n):

@@ -647,7 +647,7 @@ def test_attest_refuses_evidence_that_no_longer_matches_its_report(tmp_path, mon
     (tmp_path / "out").write_text("")
     assert GA.main(["attest-subjects"]) == 1
     said = capsys.readouterr().out
-    assert "No attestation: the evidence no longer matches report.json (1 files, first steps/01-train/log.txt)" in said
+    assert "No attestation: the evidence no longer matches report.json (1 file, first steps/01-train/log.txt)" in said
     assert "\ntrue\n" not in (tmp_path / "out").read_text()
 
 
