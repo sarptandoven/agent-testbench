@@ -1,5 +1,12 @@
 name: tests
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]           # other branches are tested through their pull request (one run per commit, not two)
+  pull_request:
+  workflow_dispatch:
+concurrency:                   # a newer commit cancels the runs it replaces
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ${{ matrix.os }}

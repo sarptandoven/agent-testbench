@@ -21,19 +21,27 @@ import shutil
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 from . import procs
 
 
+LOOPBACK = {"127.0.0.1", "localhost", "::1", "[::1]"}
+
+
 def _wait_up(url: str, seconds: float, proc) -> int | None:
+    """The HTTP status at url once something answers, None if nothing does in time. This machine's own ports are
+    asked directly: a proxy (HTTP_PROXY, or macOS's system settings, which urllib reads) cannot reach them."""
+    local = urllib.parse.urlsplit(url).hostname in LOOPBACK
+    opener = urllib.request.build_opener(*([urllib.request.ProxyHandler({})] if local else []))
     end = time.time() + seconds
     while time.time() < end:
         if proc is not None and proc.poll() is not None:
             return None
         try:
-            with urllib.request.urlopen(url, timeout=3) as r:
+            with opener.open(url, timeout=3) as r:
                 return r.status
         except urllib.error.HTTPError as exc:
             return exc.code
