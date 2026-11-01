@@ -223,4 +223,6 @@ def finalize(root: Path, run_dir: Path, rep: dict, cost_usd: float, cfg: dict | 
     budget.record(root, {"event": "finish", "run": run_dir.name, "plan": state["plan"], "backend": state["backend"],
                          "status": rep["status"], "minutes": rep.get("minutes"), "usd": round(cost_usd, 4)})
     notify.run_end(root, run_dir, rep, cfg)
+    from .export import after_run
+    after_run(root, run_dir)                         # testbench.yaml's export:, never raises or waits on a tracker
     return rep

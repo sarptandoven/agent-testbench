@@ -200,6 +200,14 @@ async def get_report(run: str = "", project_dir: str = ".", images: bool = True)
     return [_text(code, out), *shown] if shown else _text(code, out)
 
 
+@server.tool(description="Export a run (default: the latest; 'all' for every finished run) where people track "
+                         "experiments: to is mlflow, wandb, csv or jsonl (default: every target in testbench.yaml's "
+                         "export: section). It carries the plan, status, cost, commit, params, every checked number "
+                         "and the evidence; exporting a run again updates it instead of adding a duplicate.")
+async def export_run(run: str = "", to: str = "", project_dir: str = ".") -> str:
+    return _text(*await _cli(project_dir, ["export", *([_name(run, "run")] if run else []), *([f"--to={to}"] if to else [])]))
+
+
 @server.tool(description="Recent runs with status and cost.")
 async def list_runs(project_dir: str = ".", n: int = 10) -> str:
     return _text(*await _cli(project_dir, ["runs", "-n", str(n)]))

@@ -37,6 +37,7 @@ nav:
   - Loops: loops.md
   - Notifications: notify.md
   - Proof records: proof-records.md
+  - "Exports: MLflow, W&B, csv": export.md
   - CI: github-action.md
   - Reference: reference.md
   - Demos:
