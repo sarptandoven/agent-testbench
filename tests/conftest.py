@@ -160,4 +160,80 @@ def plugin(tmp_path) -> dict:
         fake = fakebench:backend
         broken = fakebench:no_such_thing
         """))
-    return {"PYTHONPATH": str(site)}
+    return {"PYTHONPATH": os.pathsep.join(p for p in (str(site), os.environ.get("PYTHONPATH")) if p)}
+
+
+SCORER = """\
+import json
+from settings import SCORE
+assert SCORE >= 0, "a negative score is a bug"
+json.dump({"score": SCORE}, open("metrics.json", "w"))
+print("score", SCORE)
+"""
+
+
+def git(root: Path, *args) -> str:
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
+
+
+@pytest.fixture
+def repo(tmp_path) -> Path:
+    """A small project in a git repository: a plan that writes a score and checks it (for loops)."""
+    root = tmp_path / "scoring"
+    root.mkdir()
+    (root / "score.py").write_text(SCORER)
+    (root / "settings.py").write_text("SCORE = 1\n")
+    (root / ".gitignore").write_text("metrics.json\n__pycache__/\n")
+    write_config(root, {"project": "scoring", "plans": {"score": {"steps": [
+        {"name": "score", "run": "python score.py", "max_minutes": 1,
+         "expect": {"json": {"metrics.json": {"score": ">= 0"}}}}]}}})
+    git(root, "init", "-q")
+    git(root, "add", "-A")
+    git(root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "start")
+    return root
+
+
+def score(root: Path, value) -> None:
+    (root / "settings.py").write_text(f"SCORE = {value}\n")
+
+
+class Webhook:
+    """A local stand-in for a webhook (Slack's, or any that takes a JSON POST): it keeps what it was sent and
+    answers with `status`; `hang` keeps it from answering at all."""
+    SECRET = "/services/T0SECRET/B0SECRET/xoxSECRETKEY"
+
+    def __init__(self):
+        import http.server
+        import threading
+        hook = self
+        self.bodies, self.status, self.hang = [], 200, False
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                hook.bodies.append({"path": self.path, **json.loads(data)})
+                if hook.hang:
+                    threading.Event().wait(30)
+                body = b"ok" if hook.status < 300 else b"no_service"
+                self.send_response(hook.status)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}{self.SECRET}"
+
+    def events(self, name=None) -> list[dict]:
+        return [b for b in self.bodies if name is None or b["event"] == name]
+
+
+@pytest.fixture
+def webhook():
+    hook = Webhook()
+    yield hook
+    hook.server.shutdown()

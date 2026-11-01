@@ -34,6 +34,9 @@ sessions:                # where `testbench session start` puts its kernel by de
 #   cpu: 2
 #   memory_gb: 8
 
+# notify:                # a JSON POST when a run or loop ends or a launch needs approval (`testbench notify test`)
+#   webhook_env: TESTBENCH_WEBHOOK      # the environment variable that holds the URL (e.g. a Slack webhook)
+
 plans:
 {plans}"""
 
@@ -494,11 +497,12 @@ def cmd_loop(a):
     try:
         if a.loop_cmd == "start":
             state = LP.start(root, cfg, a.plan, a.metric, a.budget_usd, goal=a.goal, max_hours=a.max_hours,
-                             min_delta=a.min_delta, approve=a.approve)
+                             min_delta=a.min_delta, approve=a.approve, target=a.target, patience=a.patience,
+                             max_tries=a.max_tries)
             print(f"[testbench] loop {state['id']} started on branch {state['branch']}; running the baseline "
                   f"(run {state['tries'][0]['run']})", flush=True)
         elif a.loop_cmd == "try":
-            state = LP.try_change(root, cfg, " ".join(a.description))
+            state = LP.try_change(root, cfg, " ".join(a.description), new_direction=a.new_direction)
             t = state["tries"][state["pending"]]
             print(f"[testbench] loop try {t['n']} committed as {t['commit'][:9]}; run {t['run']} started (loop spent "
                   f"${LP.spent(state):.3f} of ${state['budget_usd']:.2f})", flush=True)
@@ -521,6 +525,28 @@ def cmd_loop(a):
     last = state["tries"][-1]
     print("\n" + last["verdict"])
     return 0 if last.get("kept") else 1
+
+
+def cmd_notify(a):
+    from . import notify as N
+    root, cfg = _root_cfg()
+    if not cfg.get("notify"):
+        print("testbench: testbench.yaml has no `notify:` section, so nothing is sent. Add one, e.g.\n"
+              "  notify:\n    webhook_env: TESTBENCH_WEBHOOK      # an environment variable that holds the URL\n"
+              "    on: [run_end, loop_end, approval_needed]")
+        return 2
+    url, source = N.target(cfg)
+    if not url:
+        print(f"testbench: nothing was sent: {source}.")
+        return 2
+    ok, what = N.send(root, cfg, "test", f"a test message from `testbench notify test`. Notifications for "
+                      f"{', '.join(cfg['notify']['on'])} go here.", {"status": "test"}, force=True)
+    print(f"Test message {what}." + ("" if ok else " Check the URL and that the service takes a JSON POST; every "
+                                                     f"attempt is in {N.log_path(root).relative_to(root)}."))
+    if ok and cfg["notify"]["webhook"]:
+        print("The URL is written in testbench.yaml; if that file is committed or copied to other machines, so is "
+              "the webhook's secret. `webhook_env: NAME` reads it from an environment variable instead.")
+    return 0 if ok else 1
 
 
 DEMO_NEEDS = {"sklearn": "scikit-learn==1.5.2", "matplotlib": "matplotlib==3.9.2"}
@@ -731,13 +757,22 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--min-delta", type=_number, default=0.0, help="keep a try only if it beats the best by more than this")
     q.add_argument("--max-hours", type=_positive, default=8.0, help="no new tries after this long (default 8)")
     q.add_argument("--approve", action="store_true", help="a person approved the loop's total budget (never set this yourself)")
+    q.add_argument("--target", type=_number, metavar="VALUE", help="done when the best reaches this (>= for --goal "
+                                                                 "max, <= for min): further tries are refused")
+    q.add_argument("--patience", type=int, metavar="N", help="refuse a try after N tries in a row were not kept")
+    q.add_argument("--max-tries", type=int, metavar="N", help="refuse a try after N tries (the baseline not counted)")
     q.add_argument("--wait", type=_number, help="follow the baseline run at most this many seconds (default: until it ends)")
     q = lsub.add_parser("try", help="commit the edits as a try, run the plan, keep it or revert it")
     q.add_argument("description", nargs="+", help="what this try changed, in a few words")
     q.add_argument("--wait", type=_number, help="follow the run at most this many seconds (default: until it ends)")
+    q.add_argument("--new-direction", action="store_true", help="after --patience refused a try: this one is "
+                                                                 "different in kind, and the count starts again")
     lsub.add_parser("status", help="the loop's tries: kept or reverted, the metric, the cost")
     lsub.add_parser("stop", help="write the loop's report and go back to the branch it started from")
     p.set_defaults(fn=cmd_loop)
+    p = sub.add_parser("notify", help="notifications (testbench.yaml `notify:`): `notify test` sends one test message")
+    p.add_argument("notify_cmd", choices=["test"], help="test: send one test message and say whether it was accepted")
+    p.set_defaults(fn=cmd_notify)
     sub.add_parser("doctor", help="check what this machine can run").set_defaults(fn=cmd_doctor)
     p = sub.add_parser("demo", help="copy a small example project to DIR, run its free plan, and show what to try next")
     p.add_argument("dir", nargs="?", default="testbench-demo")

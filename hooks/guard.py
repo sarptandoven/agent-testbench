@@ -5,8 +5,8 @@ session_start MCP tools.
 Anywhere, it keeps the limits out of the agent's hands:
   1. an edit of testbench.yaml that raises a budget, lowers a backend's price (ssh/docker usd_per_hour, ...),
      changes `pricing:` or `guard:`, or loosens the docker sandbox (network: none, run_args, command, a plan
-     leaving it) asks the person first (lowering a budget or editing plans does not); so does any edit of
-     ~/.testbench/limits.yaml (the limits for every project on this machine) or ~/.testbench/prices.json;
+     leaving it) asks the person first (lowering a budget, or editing plans or `notify:`, does not); so does any
+     edit of ~/.testbench/limits.yaml (the limits for every project on this machine) or ~/.testbench/prices.json;
   2. editing or deleting a ledger (.testbench/ledger.jsonl, ~/.testbench/ledger.jsonl) is refused, and so is a
      command that points testbench at another limits folder (TESTBENCH_USER_DIR, HOME);
   3. a run, session or loop with --approve (or approved_by_person=true) becomes a question to the person, and
@@ -14,7 +14,7 @@ Anywhere, it keeps the limits out of the agent's hands:
 Inside a project with a testbench.yaml, it also acts on:
   4. raw cloud launches (`modal run/deploy/serve/shell`, `colab new/run/ssh/exec`) are refused, because
      `testbench run` is what enforces the budget and keeps the evidence;
-  5. commands that would print secrets (.env files, printenv, echo $..._KEY) are refused;
+  5. commands that would print secrets (.env files, printenv, echo $..._KEY or $..._WEBHOOK) are refused;
   6. commands listed under `guard.ask` in testbench.yaml (default: git push, gh repo create, ...) ask first.
 Anything else gets no decision from this hook. If the hook itself fails, it stays out of the way. It is a safety
 net against an agent changing its own limits, not a sandbox: code an agent runs can still do anything (a script
@@ -38,9 +38,9 @@ REDIRECT_LIMITS = re.compile(r"(^|[\s;&|(])(export\s+)?(TESTBENCH_USER_DIR|HOME)
 RAW_LAUNCH = re.compile(r"(^|[;&|(\s])(python3?\s+-m\s+)?(modal\s+(run|deploy|serve|shell|launch)|colab\s+(new|run|ssh|exec|console))\b")
 SECRET_READ = [
     re.compile(r"\b(cat|less|more|head|tail|bat|strings|xxd|grep|rg|sed|awk)\b[^|;&]*(^|[\s/'\"])\.env(\.[\w.-]+)?\b"),
-    re.compile(r"(^|[;&|\s])printenv(\s*$|\s*[;&|]|\s+\w*(KEY|TOKEN|SECRET|PASS))", re.I),
+    re.compile(r"(^|[;&|\s])printenv(\s*$|\s*[;&|]|\s+\w*(KEY|TOKEN|SECRET|PASS|WEBHOOK))", re.I),
     re.compile(r"(^|[;&|]\s*)env\s*($|[;&|])"),
-    re.compile(r"\becho\b[^;&|]*\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD|PASSWD)\w*", re.I),
+    re.compile(r"\becho\b[^;&|]*\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|WEBHOOK)\w*", re.I),
     re.compile(r"\bmodal\s+secret\s+create\b.*=", re.I),
     re.compile(r"\b(cat|less|more|head|tail)\b[^|;&]*(\.modal\.toml|\.netrc|credentials(\.json)?|id_rsa|id_ed25519)\b"),
 ]

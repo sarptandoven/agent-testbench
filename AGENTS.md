@@ -19,7 +19,11 @@
 - Processes: `procs.py` (start, check and stop background work and lock files - the same on Linux, macOS and
   Windows; never `os.kill(pid, 0)` on Windows, it ends the process). `scaffold.py`: what `testbench init` writes.
 - CI: `action.yml` (the GitHub Action) and `.github/workflows/action.yml` (its self-test).
-- Loops: `loop.py` (`testbench loop`: tries on a git branch, kept or reverted by a plan run's metric).
+- Loops: `loop.py` (`testbench loop`: tries on a git branch, kept or reverted by a plan run's metric; stopping
+  rules --target, --patience, --max-tries).
+- Notifications: `notify.py` (testbench.yaml `notify:`; run_end from `runs.finalize`, loop_end from `loop.py`,
+  approval_needed from launches refused with "Needs approval"). Delivery never raises or blocks for long, and only a
+  webhook URL's scheme and host are ever shown. Tests post to a local server (the `webhook` fixture), never a real one.
 - Sessions: `kernelkit/` (the launcher and client that run on the session's machine), `session_backends.py`
   (local, Modal Sandbox, Colab CLI), `sessions.py` (state, budget, supervisor).
 - `claude plugin validate . && claude plugin validate .claude-plugin/plugin.json --strict` after plugin changes.

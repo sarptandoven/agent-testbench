@@ -296,22 +296,32 @@ async def session_stop(session: str = "", project_dir: str = ".", all_sessions: 
                          "and metric (FILE:KEY of a number a json expectation of the plan checks, e.g. "
                          "outputs/metrics.json:accuracy, or check:SUBSTRING for the number of the check whose name "
                          "contains it, e.g. check:val_loss) beats the best so far, else reverts it. budget_usd bounds the "
-                         "whole loop. Above the approval threshold the person is asked directly when the client "
-                         "supports it; otherwise it needs approved_by_person=true, set only after the person agreed.")
+                         "whole loop. Stopping rules, for a loop left to run: target (done once the best reaches it; "
+                         "null for none), patience (refuse a try after that many in a row were not kept) and "
+                         "max_tries (0 for none). Above the approval threshold the person is asked directly when the "
+                         "client supports it; otherwise it needs approved_by_person=true, set only after the person "
+                         "agreed.")
 async def loop_start(plan: str, metric: str, budget_usd: float, goal: str = "max", max_hours: float = 8.0,
-                     min_delta: float = 0.0, project_dir: str = ".", approved_by_person: bool = False,
-                     ctx: Context = None) -> str:
+                     min_delta: float = 0.0, target: float | None = None, patience: int = 0, max_tries: int = 0,
+                     project_dir: str = ".", approved_by_person: bool = False, ctx: Context = None) -> str:
     argv = ["loop", "start", _name(plan, "plan"), f"--metric={metric}", "--budget-usd", str(budget_usd), f"--goal={goal}",
-            "--max-hours", str(max_hours), "--min-delta", str(min_delta)] + (["--approve"] if approved_by_person else [])
+            "--max-hours", str(max_hours), "--min-delta", str(min_delta)] \
+        + ([f"--target={target}"] if target is not None else []) \
+        + (["--patience", str(patience)] if patience else []) + (["--max-tries", str(max_tries)] if max_tries else []) \
+        + (["--approve"] if approved_by_person else [])
     return _text(*await _with_approval(ctx, project_dir, argv))
 
 
 @server.tool(description="Try the edits made since the loop's best commit: commit them, run the plan (passing on "
                          "progress), and keep the try (exit 0) or revert it (exit 1); describe what changed in a few "
                          "words. wait_seconds=0 follows the run until it ends; if it is still running (exit 3), "
-                         "loop_status judges it later.")
-async def loop_try(description: str, wait_seconds: int = 0, project_dir: str = ".", ctx: Context = None) -> str:
-    argv = ["loop", "try"] + (["--wait", str(wait_seconds)] if wait_seconds else []) + ["--", description]
+                         "loop_status judges it later. A try is refused (exit 2) once a stopping rule fires: stop "
+                         "the loop and report; after patience ran out, new_direction=true is for an idea different "
+                         "in kind.")
+async def loop_try(description: str, wait_seconds: int = 0, new_direction: bool = False, project_dir: str = ".",
+                   ctx: Context = None) -> str:
+    argv = ["loop", "try"] + (["--wait", str(wait_seconds)] if wait_seconds else []) \
+        + (["--new-direction"] if new_direction else []) + ["--", description]
     return _text(*await _cli(project_dir, argv, on_line=_progress(ctx)))
 
 

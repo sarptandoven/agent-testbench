@@ -1,6 +1,7 @@
 """testbench loop: an agent's improvement loop, judged by proof runs and held inside a budget.
 
     testbench loop start PLAN --metric outputs/metrics.json:accuracy --budget-usd 5 [--goal max] [--max-hours 8]
+                         [--target 0.95] [--patience 4] [--max-tries 20]       # stopping rules, for overnight
     (edit the code)
     testbench loop try "lower the learning rate to 3e-4"   # commit, run the plan, keep it or revert it
     testbench loop status                                  # every try: kept or reverted, its metric, its cost
@@ -14,6 +15,11 @@ checks, so it reads the same on every backend: FILE:KEY of a json expectation, o
 name contains SUBSTRING (a junit count, a number printed to the log). The person approves the loop's total budget
 once; each run is still checked against max_run_usd and the day limits, and the loop refuses a try its budget has no
 room for.
+
+Stopping rules tell an agent working alone when it is done: once the best reaches --target, after --max-tries tries,
+or after --patience tries in a row that were not kept, the next try is refused with a message that says why and
+what to do (for patience: stop, or try something different in kind with --new-direction). When a rule fires and
+when the loop stops, testbench.yaml's `notify:` webhook hears about it (loop_end).
 """
 from __future__ import annotations
 
@@ -25,7 +31,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import budget, config as C, report as R, runs
+from . import budget, config as C, notify, report as R, runs
 
 ACTIVE = "running"
 OWN = ":(exclude).testbench"       # testbench's own folder (runs, notes, this loop) is never tried or reverted
@@ -158,12 +164,126 @@ def _fmt(v) -> str:
     return "none" if v is None else f"{v:.4g}"
 
 
+def _desc(t: dict) -> str:
+    return ("[new direction] " if t.get("new_direction") else "") + t["description"]
+
+
+def _why(t: dict) -> str:
+    """Why a try was reverted, from its verdict."""
+    return re.sub(r"^REVERTED try \d+: ", "", t.get("verdict", "")).split(" The branch")[0]
+
+
+def _streak(state: dict) -> list[dict]:
+    """The latest finished tries that were not kept, in a row: back to the last kept one, or to a --new-direction
+    try (which starts the count again)."""
+    out = []
+    for t in reversed(state["tries"][1:]):
+        if t["status"] == "running" or t.get("kept"):
+            break
+        out.append(t)
+        if t.get("new_direction"):
+            break
+    return out[::-1]
+
+
+def _best_at(state: dict) -> str:
+    b = state["best"]
+    if b["try"] is None:
+        return f"at {b['commit'][:9]}, no passing run yet"
+    return (f"{'the baseline' if b['try'] == 0 else 'try ' + str(b['try'])}, commit {b['commit'][:9]}, "
+            f"run {state['tries'][b['try']]['run']}")
+
+
+STOP = "stop the loop with `testbench loop stop` and report"
+
+
+def _halt(state: dict) -> tuple[str, str, str] | None:
+    """The stopping rule that refuses another try, if one does: (status, what a verdict says, what a refusal says)."""
+    key, best, goal = state["key"], state["best"]["value"], state["goal"]
+    target = state.get("target")
+    if target is not None and best is not None and (best >= target if goal == "max" else best <= target):
+        rule = f"{key} {'>=' if goal == 'max' else '<='} {target:g}"
+        return ("target_reached", f"Target reached ({rule}): {STOP}.",
+                f"the loop's target is reached: best {key} {_fmt(best)} ({_best_at(state)}), and the target was "
+                f"{rule}. No new try is made; {STOP} the result.")
+    most = state.get("max_tries")
+    made = [t for t in state["tries"][1:] if t["status"] != "running"]
+    if most and len(made) >= most:
+        tries = f"{most} {'try' if most == 1 else 'tries'}"
+        return ("max_tries_made", f"That was the last try the loop may make (--max-tries {most}): {STOP}.",
+                f"the loop has made its {tries} (--max-tries {most}); best {key} {_fmt(best)} ({_best_at(state)}). "
+                f"{STOP[0].upper() + STOP[1:]}.")
+    patience, streak = state.get("patience"), _streak(state)
+    if patience and len(streak) >= patience:
+        tried = "\n".join(f"  try {t['n']}: {t['description']} - {_why(t)}" for t in streak)
+        return ("out_of_patience",
+                f"That is {len(streak)} tries in a row not kept (--patience {patience}): {STOP}, or try something "
+                "different in kind with `testbench loop try --new-direction \"...\"`.",
+                f"{len(streak)} tries in a row were not kept (--patience {patience}):\n{tried}\nBest {key} so far: "
+                f"{_fmt(best)} ({_best_at(state)}). More of the same is unlikely to help. Either {STOP}, or try an "
+                "idea different in kind from these with `testbench loop try --new-direction \"what is different\"` "
+                "(the count starts again from it).")
+    return None
+
+
+def _rules(state: dict, when: str = "now") -> str:
+    """The loop's stopping rules and where it stands on each, or "" for a loop without any."""
+    out = []
+    if state.get("target") is not None:
+        out.append(f"target {state['key']} {'>=' if state['goal'] == 'max' else '<='} {state['target']:g}")
+    if state.get("patience"):
+        out.append(f"patience {state['patience']} ({len(_streak(state))} in a row not kept {when})")
+    if state.get("max_tries"):
+        out.append(f"at most {state['max_tries']} tries "
+                   f"({len([t for t in state['tries'][1:] if t['status'] != 'running'])} made)")
+    return "; ".join(out)
+
+
+ENDED = {"stopped": "stopped", "target_reached": "reached its target", "out_of_patience": "ran out of patience",
+         "max_tries_made": "made all its tries", "no_budget_left": "has no budget left for another try",
+         "out_of_time": "is past its --max-hours"}
+HALTED = {"target_reached": "reached its target", "out_of_patience": "run out of patience",
+          "max_tries_made": "made all its tries"}
+
+
+def _tell(root: Path, cfg: dict, state: dict, status: str, why: str, report: Path | None = None) -> None:
+    """loop_end, once for each reason the loop ended or a rule fired (the person may be asleep; one message is
+    enough)."""
+    mark = f"{status}@{len(state['tries']) - 1}"
+    if mark in state.setdefault("notified", []):
+        return
+    state["notified"].append(mark)
+    _save(state)
+    tries = state["tries"][1:]
+    base = state["tries"][0].get("value") if state["tries"] else None
+    best = state["best"]
+    kept = len([t for t in tries if t.get("kept")])
+    then = {"stopped": "", "out_of_patience": " The agent was told to stop the loop, or to try something different "
+            "in kind."}.get(status, " The agent was told to stop the loop and report.")
+    text = (f"loop {state['id']} on plan {state['plan']} {ENDED[status]}: {state['key']} {_fmt(base)} -> "
+            f"{_fmt(best['value'])} ({state['goal']}) in {len(tries)} tries, {kept} kept, ${spent(state):.3f} of "
+            f"${state['budget_usd']:.2f}." + (f" {why}" if why else "") + then
+            + (f" Best: {_best_at(state)}." if best["try"] is not None else "")
+            + (f" Report: {notify.rel(report, root)}" if report else ""))
+    notify.send(root, cfg, "loop_end", text, {
+        "loop": state["id"], "plan": state["plan"], "status": status, "why": why, "metric": state["metric"],
+        "goal": state["goal"], "baseline": base, "best": best["value"], "best_commit": best["commit"],
+        "best_run": state["tries"][best["try"]]["run"] if best["try"] is not None else None, "tries": len(tries),
+        "kept": kept, "cost_usd": spent(state), "budget_usd": state["budget_usd"], "branch": state["branch"],
+        "report": notify.rel(report, root) if report else None})
+
+
 def start(root: Path, cfg: dict, plan: str, metric: str, budget_usd: float, goal: str = "max",
-          max_hours: float = 8.0, min_delta: float = 0.0, approve: bool = False) -> dict:
+          max_hours: float = 8.0, min_delta: float = 0.0, approve: bool = False, target: float | None = None,
+          patience: int | None = None, max_tries: int | None = None) -> dict:
     if plan not in cfg["plans"]:
         raise LoopError(f"No plan {plan!r}. Plans: {', '.join(cfg['plans'])}")
     if goal not in ("max", "min"):
         raise LoopError("--goal is max (a higher metric is better) or min (lower is better)")
+    for flag, n, what in (("--patience", patience, "tries in a row may be reverted before the loop refuses another"),
+                          ("--max-tries", max_tries, "tries the loop may make, the baseline not counted")):
+        if n is not None and (isinstance(n, bool) or not isinstance(n, int) or n < 1):
+            raise LoopError(f"{flag} is a whole number, 1 or more: how many {what}")
     path, key = parse_metric(metric)
     checked = any(key in ((s["expect"].get("json") or {}).get(path) or {}) for s in cfg["plans"][plan]["steps"])
     if path != CHECK and not checked:
@@ -186,8 +306,19 @@ def start(root: Path, cfg: dict, plan: str, metric: str, budget_usd: float, goal
         raise LoopError(message)
     ask, where = budget.limits(cfg)["ask_above_usd"]
     if budget_usd > ask and not approve:
-        raise LoopError(f"Needs approval: a loop on plan {plan} could spend up to ${budget_usd:.2f} in total (each run "
-                        f"up to ${worst:.2f}), above {where}. Ask a person; if they agree, rerun with --approve.")
+        message = (f"Needs approval: a loop on plan {plan} could spend up to ${budget_usd:.2f} in total (each run up "
+                   f"to ${worst:.2f}), above {where}. Ask a person; if they agree, rerun with --approve.")
+        given = (("max-hours", max_hours, 8.0), ("min-delta", min_delta, 0.0), ("target", target, None),
+                 ("patience", patience, None), ("max-tries", max_tries, None))
+        how = " ".join([f"testbench loop start {plan} --metric {metric} --budget-usd {budget_usd:g}"]
+                       + ([f"--goal {goal}"] if goal != "max" else [])
+                       + [f"--{k} {v:g}" for k, v, usual in given if v != usual] + ["--approve"])
+        p = cfg["plans"][plan]
+        notify.approval_needed(root, cfg, message, {"what": f"a loop on plan {plan}", "plan": plan,
+                                                    "backend": p["backend"], "gpu": p.get("gpu"),
+                                                    "worst_case_usd": float(budget_usd),
+                                                    "max_minutes": float(max_hours) * 60}, how)
+        raise LoopError(message)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     lid = f"{stamp}-{plan}"
     branch = f"testbench-loop/{lid}"
@@ -200,7 +331,8 @@ def start(root: Path, cfg: dict, plan: str, metric: str, budget_usd: float, goal
                    "goal": goal, "min_delta": float(min_delta), "budget_usd": float(budget_usd), "approved": bool(approve),
                    "deadline": time.time() + float(max_hours) * 3600, "branch": branch, "original_branch": original,
                    "base": base, "best": {"commit": base, "value": None, "try": None}, "tries": [], "pending": None,
-                   "started": time.time()})
+                   "started": time.time(), "target": None if target is None else float(target), "patience": patience,
+                   "max_tries": max_tries, "notified": []})
     return _launch(root, cfg, state, "baseline (the code as it was)", base)
 
 
@@ -215,27 +347,39 @@ def _room(cfg: dict, state: dict) -> float:
     return worst
 
 
-def _launch(root: Path, cfg: dict, state: dict, description: str, commit: str) -> dict:
+def _launch(root: Path, cfg: dict, state: dict, description: str, commit: str, new_direction: bool = False) -> dict:
     worst = _room(cfg, state)
     run_cfg = copy.deepcopy(cfg)
     run_cfg["plans"][state["plan"]]["workdir"] = "copy"         # runs leave the project folder alone
+    n = len(state["tries"])
     try:
-        run_dir = runs.launch(root, run_cfg, state["plan"], approve=state["approved"])
+        run_dir = runs.launch(root, run_cfg, state["plan"], approve=state["approved"],
+                              origin={"loop": state["id"], "try": n})
     except runs.LaunchRefused as exc:
         raise LoopError(str(exc)) from None
-    n = len(state["tries"])
     state["tries"].append({"n": n, "description": description, "commit": commit, "run": run_dir.name,
-                           "status": "running", "worst_case_usd": worst, "started": time.time()})
+                           "status": "running", "worst_case_usd": worst, "started": time.time(),
+                           **({"new_direction": True} if new_direction else {})})
     state["pending"] = n
     return _save(state)
 
 
-def try_change(root: Path, cfg: dict, description: str) -> dict:
+def try_change(root: Path, cfg: dict, description: str, new_direction: bool = False) -> dict:
     state = judge(root, cfg, _current(root))
     if state["pending"] is not None:
         t = state["tries"][state["pending"]]
         raise LoopError(f"try {t['n']} is still running (run {t['run']}); wait for it (`testbench wait {t['run']}`, then "
                         "`testbench loop status`) before the next try")
+    halt = _halt(state)
+    if halt and not (new_direction and halt[0] == "out_of_patience"):
+        left = _changes(root)
+        raise LoopError(halt[2] + (" The edits made for this try are still there, uncommitted: undo them "
+                                   "(`git checkout -- .`, or edit them back) before `testbench loop stop`."
+                                   if left else ""))
+    if new_direction and not halt:
+        raise LoopError("--new-direction is for the try after --patience refused one, and this try is not refused"
+                        + (f" ({len(_streak(state))} of {state['patience']} tries in a row not kept so far)"
+                           if state.get("patience") else " (this loop has no --patience)") + "; try it without")
     top = _git(root, "rev-parse", "--show-toplevel")
     inside = _changes(root)
     elsewhere = [ln for ln in _changes(root, top) if ln not in inside]
@@ -244,12 +388,16 @@ def try_change(root: Path, cfg: dict, description: str) -> dict:
                         + "\n  ".join(elsewhere[:10]))
     if not inside:
         raise LoopError("nothing changed since the best commit; edit the code, then `testbench loop try \"what changed\"`")
-    _room(cfg, state)
+    try:
+        _room(cfg, state)
+    except LoopError as exc:
+        _tell(root, cfg, state, "no_budget_left" if "no room" in str(exc) else "out_of_time", str(exc))
+        raise
     _git(root, "add", "-A", "--", ".", *_own(root))
     n = len(state["tries"])
     _git(root, *_identity(root), "commit", "-q", "-m", f"testbench loop try {n}: {description}")
     try:
-        return _launch(root, cfg, state, description, _git(root, "rev-parse", "HEAD"))
+        return _launch(root, cfg, state, description, _git(root, "rev-parse", "HEAD"), new_direction)
     except LoopError:
         _git(root, "reset", "-q", "--soft", "HEAD~1")       # refused: the edits stay, uncommitted, as they were
         raise
@@ -313,8 +461,14 @@ def judge(root: Path, cfg: dict, state: dict) -> dict:
             t["verdict"] = f"REVERTED try {t['n']}: {why}. The branch is back at {state['best']['commit'][:9]}." \
                 + _revert(root, state, t["n"])
     state["pending"] = None
+    halt = _halt(state)
+    if halt:
+        t["verdict"] += " " + halt[1]
     _note(root, f"loop {state['id']} " + t["verdict"].split(". The branch")[0] + f" - {t['description']}")
-    return _save(state)
+    _save(state)
+    if halt:
+        _tell(root, cfg, state, halt[0], halt[1].split(":")[0] + ".")
+    return state
 
 
 def follow(root: Path, cfg: dict, state: dict, timeout: float | None, on_line=print) -> dict:
@@ -338,12 +492,16 @@ def describe(state: dict) -> str:
              f"{len(state['tries']) - 1 if state['tries'] else 0} tries, {len(kept)} kept; ${used:.3f} of "
              f"${state['budget_usd']:.2f} spent" + (f"; {left:.1f} h left" if state["status"] == ACTIVE else ""),
              f"branch {state['branch']} (from {state['original_branch']} at {state['base'][:9]})"]
+    if _rules(state):
+        halt = _halt(state) if state["status"] == ACTIVE else None
+        lines.append(f"stopping rules: {_rules(state)}" + (f"\n  -> {halt[1]}" if halt else ""))
     for t in state["tries"]:
         mark = "running" if t["status"] == "running" else ("kept" if t.get("kept") else "reverted")
         if t["n"] == 0:
             mark = "baseline"
         cost = f"${t['cost_usd']:.3f}" if t.get("cost_usd") is not None else f"up to ${t['worst_case_usd']:.2f}"
-        lines.append(f"  {t['n']:>3}  {mark:<9} {state['key']}={_fmt(t.get('value'))}  {cost}  {t['run']}  {t['description']}")
+        lines.append(f"  {t['n']:>3}  {mark:<9} {state['key']}={_fmt(t.get('value'))}  {cost}  {t['run']}  "
+                     + _desc(t))
     return "\n".join(lines)
 
 
@@ -360,9 +518,12 @@ def stop(root: Path, cfg: dict) -> tuple[dict, Path]:
     state["status"], state["stopped"] = "stopped", time.time()
     if state["original_branch"] != "HEAD":
         _git(root, "checkout", "-q", state["original_branch"])
+    halt = _halt(state)
+    state["ended_by"] = halt[0] if halt else None
     path = Path(state["dir"]) / "report.md"
     path.write_text(render(state))
     _save(state)
+    _tell(root, cfg, state, "stopped", f"It had {HALTED[halt[0]]}." if halt else "", path)
     return state, path
 
 
@@ -375,12 +536,16 @@ def render(state: dict) -> str:
            f"{_fmt(state['best']['value'])} ({state['goal']})", "",
            f"{len(tries)} tries, {len(kept)} kept, ${spent(state):.3f} of ${state['budget_usd']:.2f}, {hours:.1f} h. "
            f"Branch `{state['branch']}` from `{state['original_branch']}` at `{state['base'][:9]}`.", ""]
+    if _rules(state):
+        ended = state.get("ended_by")
+        out[-1:] = [f"Stopping rules: {_rules(state, 'at the end')}."
+                    + (f" It had {HALTED[ended]} when it was stopped." if ended else ""), ""]
     if kept:
         out += ["## Kept", ""]
         prev = base
         for t in kept:
             moved = f" ({t['value'] - prev:+.4g})" if prev is not None and t.get("value") is not None else ""
-            out.append(f"- try {t['n']} `{t['commit'][:9]}`: {t['description']} - {state['key']} {_fmt(prev)} -> "
+            out.append(f"- try {t['n']} `{t['commit'][:9]}`: {_desc(t)} - {state['key']} {_fmt(prev)} -> "
                        f"{_fmt(t.get('value'))}{moved}, run `{t['run']}`, ${t.get('cost_usd', 0):.3f}")
             prev = t.get("value")
         out.append("")
@@ -388,8 +553,7 @@ def render(state: dict) -> str:
     if reverted:
         out += ["## Tried and reverted", ""]
         for t in reverted:
-            why = re.sub(r"^REVERTED try \d+: ", "", t.get("verdict", "")).split(" The branch")[0]
-            out.append(f"- try {t['n']}: {t['description']} - {why}")
+            out.append(f"- try {t['n']}: {_desc(t)} - {_why(t)}")
         out.append("")
     out += ["## Next", "",
             f"- review: `git log --oneline {state['base'][:9]}..{state['branch']}` and "
