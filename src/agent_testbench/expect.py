@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import glob
 import json
+import math
+import os
 import re
 import shutil
 import subprocess
@@ -62,7 +64,19 @@ def rule_error(rule) -> str | None:
     if isinstance(rule, (dict, list, tuple, set)):
         return (f"a rule is one value such as \">= 0.9\", \"~= 0.93 +- 0.01\" or \"between 0.8 and 0.95\" "
                 f"(or a bare value meaning equality); got {rule!r}")
-    if not isinstance(rule, str) or not re.match(r"\s*(~=|between\b)", rule, re.I):
+    if isinstance(rule, float) and math.isnan(rule):
+        return "a rule of .nan never holds, since nothing equals NaN; write the value to compare with"
+    if not isinstance(rule, str):
+        return None
+    typo = re.match(r"\s*(=>|=<|===|=(?!=)|≥|≤|≠)", rule)
+    if typo:
+        return f"{rule!r}: {typo.group(1)} is not a comparison; use >=, <=, ==, !=, > or <, e.g. \">= 0.9\""
+    op = RULE.match(rule)
+    if re.match(r"\s*[<>=!]", rule) and (not op or op.group(2).strip()[:1] in ("", "<", ">", "=")):
+        return f"{rule!r} has no value after its comparison; write one, e.g. \">= 0.9\""
+    if op and op.group(1) != "!=" and isinstance(_num(op.group(2)), float) and math.isnan(_num(op.group(2))):
+        return f"{rule!r} never holds, since nothing equals or orders against NaN (\"!= nan\" asks for a number)"
+    if not re.match(r"\s*(~=|between\b)", rule, re.I):
         return None
     m = NEAR.match(rule) or BETWEEN.match(rule)
     try:
@@ -72,6 +86,8 @@ def rule_error(rule) -> str | None:
     if a is None:
         return (f"{rule!r} is neither a tolerance such as \"~= 0.93 +- 0.01\" (or \"~= 100 +- 5%\") nor a range "
                 "such as \"between 0.8 and 0.95\"")
+    if math.isnan(a) or math.isnan(b) or m.re is NEAR and not (math.isfinite(a) and math.isfinite(b)):
+        return f"{rule!r}: its numbers must be real numbers" + (" (a range may end at inf)" if m.re is BETWEEN else "")
     if m.re is BETWEEN and a > b:
         return f"{rule!r}: write the low end first, \"between {m.group(2)} and {m.group(1)}\""
     if m.re is NEAR and b < 0:
@@ -87,26 +103,46 @@ def compare(actual, rule) -> tuple[bool, str]:
         return False, f"{actual!r}, but the rule cannot be checked: {bad}"
     near = NEAR.match(rule) if isinstance(rule, str) else None
     span = BETWEEN.match(rule) if isinstance(rule, str) else None
+    m = RULE.match(rule) if isinstance(rule, str) and not (near or span) else None
+    op, target = (m.group(1), _num(m.group(2))) if m else ("==", rule)
+    a = _num(actual)
+    if isinstance(a, float) and not math.isfinite(a) and (near or span or isinstance(actual, float) or _real(target)):
+        return False, f"{actual!r} is not a finite number, so it does not satisfy {rule}"      # a NaN loss passes nothing
     if near or span:
-        a = _num(actual)
         want = f"{near.group(1)} ± {near.group(2)}{near.group(3)}" if near else \
             f"between {span.group(1)} and {span.group(2)}"
-        if not isinstance(a, (int, float)) or isinstance(a, bool):
+        if not _real(a):
             return False, f"{actual!r} is not a number, so it cannot be compared with {want}"
+        x = _float(a)
         if span:
-            return float(span.group(1)) <= a <= float(span.group(2)), f"{actual!r} (wanted {want})"
+            return float(span.group(1)) <= x <= float(span.group(2)), f"{actual!r} (wanted {want})"
         center, tol = float(near.group(1)), float(near.group(2))
         tol = abs(center) * tol / 100 if near.group(3) else tol
-        ok = abs(a - center) <= tol + 1e-12 * max(1.0, abs(center), tol)        # 0.94 is within 0.93 +- 0.01
-        return ok, f"{actual!r} (wanted {want}; differs by {a - center:+.4g})"
-    m = RULE.match(rule) if isinstance(rule, str) else None
-    op, target = (m.group(1), _num(m.group(2))) if m else ("==", rule)
+        slack = 4 * math.ulp(max(abs(x), abs(center), tol))      # rounding only (0.94 is within 0.93 +- 0.01), at any scale
+        ok = math.isfinite(x) and abs(x - center) <= tol + slack
+        return ok, f"{actual!r} (wanted {want}; differs by {x - center:+.4g})"
+    if isinstance(a, bool) and isinstance(target, str) and target.lower() in ("true", "false"):
+        target = target.lower() == "true"                                                # "== true" for a JSON true
+    if isinstance(a, bool) != isinstance(target, bool):                    # true is not 1, and not a number to order
+        if op in ("==", "!="):
+            return op == "!=", f"{actual!r} (wanted {op} {target!r})"
+        return False, f"{actual!r} cannot be compared with {op} {target!r}"
     try:
-        a = _num(actual)
         ok = OPS[op](a, target)
     except TypeError:
         return False, f"{actual!r} cannot be compared with {op} {target!r}"
     return bool(ok), f"{actual!r} (wanted {op} {target!r})"
+
+
+def _real(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _float(x) -> float:
+    try:
+        return float(x)
+    except OverflowError:                                # an integer too big for a float
+        return math.inf if x > 0 else -math.inf
 
 
 def _num(x):
@@ -156,8 +192,11 @@ def _read(source: str, workdir: Path, result: dict) -> tuple[str | None, str | N
     f = workdir / source
     if not f.is_file():
         return None, "file missing"
-    stale = _stale(f, result.get("run_started"))
-    return (None, stale) if stale else (f.read_text(errors="replace"), None)
+    try:
+        stale = _stale(f, result.get("run_started"))
+        return (None, stale) if stale else (f.read_text(errors="replace"), None)
+    except OSError as exc:
+        return None, f"cannot be read: {exc}"
 
 
 def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
@@ -183,7 +222,7 @@ def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
     for path, rules in (expect.get("json") or {}).items():
         f = workdir / path
         if any(c in str(path) for c in "*?["):           # a pattern, e.g. **/metrics.json: it must name one file
-            hits = sorted(glob.glob(str(workdir / path), recursive=True))
+            hits = sorted({os.path.realpath(h): h for h in glob.glob(str(workdir / path), recursive=True)}.values())
             if len(hits) != 1:
                 found = ", ".join(Path(h).relative_to(workdir).as_posix() for h in hits[:5])
                 for key in rules:
@@ -192,13 +231,14 @@ def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
                 continue
             f = Path(hits[0])
         try:
-            stale = _stale(f, since)
+            stale = _stale(f, result.get("run_started"))
             data = None if stale else json.loads(f.read_text())
         except FileNotFoundError:
-            for key in rules:
-                add(f"{path}: {key}", False, "file missing")
+            stale = "file missing"
+        except OSError as exc:
+            add(f"{path}", False, f"cannot be read: {exc}")
             continue
-        except json.JSONDecodeError as exc:
+        except (ValueError, RecursionError) as exc:      # bad JSON, not UTF-8, a number too long to read
             add(f"{path}", False, f"not valid JSON: {exc}")
             continue
         if stale:
@@ -212,7 +252,7 @@ def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
                 ok, detail = False, f"no {key!r} in the file"
             add(f"{path}: {key} {rule}", ok, detail)
     for source, needles in (expect.get("text") or {}).items():
-        text, why = _read(source, workdir, result)
+        text, why = _read(source, workdir, result)       # a log left by an earlier run does not count
         for needle in ([needles] if isinstance(needles, str) else needles):
             if text is None:
                 add(f"{source} contains {needle!r}", False, why)
@@ -367,13 +407,14 @@ def read_junit(path: Path) -> dict:
         raise ValueError(f"the root element is <{root.tag}>, not <testsuites> or <testsuite>")
     out = {"tests": 0, "passed": 0, "failures": 0, "errors": 0, "skipped": 0, "failing": [], "erroring": []}
     cases = list(root.iter("testcase"))
-    if not cases:                                                # only totals: the innermost suites' own counts
-        suites = [s for s in root.iter("testsuite") if s.find("testsuite") is None] or [root]
-        for key in ("tests", "failures", "errors", "skipped"):
-            out[key] = sum(_int(s.get(key)) for s in suites)
-        out["passed"] = max(0, out["tests"] - out["failures"] - out["errors"] - out["skipped"])
-        return out
-    out["tests"] = len(cases)
+    suites = [s for s in root.iter("testsuite") if s.find("testsuite") is None] or [root]
+    for s in suites:
+        if s.find(".//testcase") is None:                        # only totals: the suite's own counts
+            got = {key: _int(s.get(key)) for key in ("tests", "failures", "errors", "skipped")}
+            for key, n in got.items():
+                out[key] += n
+            out["passed"] += max(0, got["tests"] - got["failures"] - got["errors"] - got["skipped"])
+    out["tests"] += len(cases)
     for case in cases:
         tags = {c.tag for c in case}
         out["skipped"] += "skipped" in tags
@@ -383,6 +424,11 @@ def read_junit(path: Path) -> dict:
             if el is not None:
                 out[key] += 1
                 out[names].append(f"{_case_name(case)} ({_case_why(el)})")
+    for key, names in (("failures", "failing"), ("errors", "erroring")):
+        said = sum(_int(s.get(key)) for s in suites)             # e.g. a suite that failed before its cases ran
+        if said > out[key]:
+            out[names].append(f"{said - out[key]} more in the suites' totals than among their test cases")
+            out[key] = said
     return out
 
 

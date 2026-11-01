@@ -565,8 +565,11 @@ class DockerBackend(Backend):
             v = d.get(key)
             if v is None:
                 v = d[key] = []
-            if isinstance(v, str):
-                v = d[key] = shlex.split(v)
+            try:
+                v = d[key] = shlex.split(v) if isinstance(v, str) else v
+            except ValueError as exc:                    # an unclosed quote
+                raise ConfigError(f"`docker.{key}` {v!r} cannot be split into arguments ({exc}); write it as a list, "
+                                  f"e.g. {example}") from None
             if not isinstance(v, list) or not all(isinstance(x, (str, int, float)) for x in v):
                 raise ConfigError(f"`docker.{key}` is a list of arguments, e.g. {example}")
             d[key] = [str(x) for x in v]

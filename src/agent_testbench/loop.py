@@ -26,6 +26,7 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import json
+import math
 import re
 import subprocess
 import time
@@ -106,11 +107,12 @@ def parse_metric(spec: str) -> tuple[str, str]:
     if spec.startswith(CHECK + ":") and spec[len(CHECK) + 1:].strip():
         return CHECK, spec[len(CHECK) + 1:].strip()
     path, sep, key = spec.rpartition(":")
+    path, key = path.strip(), key.strip()                # "check: " would match every check
     if not sep or not path or not key:
         raise LoopError(f"--metric is FILE:KEY, the file and key one of the plan's json expectations checks (e.g. "
                         f"outputs/metrics.json:accuracy), or check:SUBSTRING for the number of the check whose name "
                         f"contains SUBSTRING (e.g. check:val_loss); got {spec!r}")
-    return path.strip(), key.strip()
+    return path, key
 
 
 def metric_value(report: dict, path: str, key: str) -> float | None:
@@ -119,7 +121,8 @@ def metric_value(report: dict, path: str, key: str) -> float | None:
     value = None
     for s in report.get("steps", []):
         for c in s.get("expectations") or []:
-            if (key in c["check"]) if path == CHECK else c["check"].startswith(f"{path}: {key} "):
+            name = str(c.get("check", ""))
+            if (key in name) if path == CHECK else name.startswith(f"{path}: {key} "):
                 n = R.check_number(c)
                 value = value if n is None else n
     return value
@@ -284,6 +287,9 @@ def start(root: Path, cfg: dict, plan: str, metric: str, budget_usd: float, goal
                           ("--max-tries", max_tries, "tries the loop may make, the baseline not counted")):
         if n is not None and (isinstance(n, bool) or not isinstance(n, int) or n < 1):
             raise LoopError(f"{flag} is a whole number, 1 or more: how many {what}")
+    for flag, v, least in (("--budget-usd", budget_usd, 0), ("--max-hours", max_hours, 1e-9), ("--min-delta", min_delta, 0)):
+        if not (isinstance(v, (int, float)) and math.isfinite(v) and v >= least):      # nan would pass every limit
+            raise LoopError(f"{flag} is a number of {'at least 0' if least == 0 else 'more than 0'}; got {v!r}")
     path, key = parse_metric(metric)
     checked = any(key in ((s["expect"].get("json") or {}).get(path) or {}) for s in cfg["plans"][plan]["steps"])
     if path != CHECK and not checked:

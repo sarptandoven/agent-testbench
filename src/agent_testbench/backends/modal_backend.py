@@ -231,16 +231,32 @@ class Modal(Backend):
 
     @property
     def gpus(self) -> tuple[str, ...]:
-        """The built-in GPUs, and any a fetched price catalog added."""
-        fetched = (prices.cached().get("modal") or {}).get("gpu_per_s") or {}
+        """The built-in GPUs, and any a fetched price catalog added with a price (one without would cost nothing)."""
+        fetched = prices.raised({}, (prices.cached().get("modal") or {}).get("gpu_per_s"))
         return self.built_in_gpus + tuple(g for g in fetched if g not in self.built_in_gpus)
+
+    def validate(self, cfg: dict) -> None:
+        from ..config import ConfigError, _finite
+        m = cfg["modal"]
+        sizes = [("modal", m)] + [(f"plans.{n}", p) for n, p in cfg["plans"].items() if p["backend"] == "modal"] \
+            + ([("sessions", cfg["sessions"])] if cfg["sessions"].get("backend") == "modal" else [])
+        for where, section in sizes:                     # a negative or NaN size would make the worst case negative
+            for key, what in (("cpu", "CPU cores"), ("memory_gb", "GB of memory")):
+                v = section.get(key)
+                if (v is not None or where == "modal") and not (_finite(v) and v > 0):
+                    raise ConfigError(f"`{where}.{key}` is {v!r}; write a positive number of {what}, e.g. "
+                                      f"{self.config_defaults['modal'][key]}")
+        for key, example in (("pip", "[numpy==2.2.6]"), ("apt", "[ffmpeg]"), ("run_commands", '["echo ready"]')):
+            if not isinstance(m.get(key) or [], list) or not all(isinstance(x, str) for x in m.get(key) or []):
+                raise ConfigError(f"`modal.{key}` is a list of texts, e.g. {example}")
+        self._rates(cfg)                                 # pricing: overrides are numbers where one is meant
 
     def _rates(self, cfg: dict) -> tuple[dict, float, float]:
         own = cfg.get("pricing") or {}
         cat = prices.cached().get("modal") or {}
-        gpu = {**prices.raised(GPU_PER_S, cat.get("gpu_per_s")), **(own.get("modal_gpu_per_s") or {})}
-        cpu = float(own.get("modal_cpu_core_per_s", prices.raised_value(CPU_CORE_PER_S, cat.get("cpu_core_per_s"))))
-        mem = float(own.get("modal_mem_gib_per_s", prices.raised_value(MEM_GIB_PER_S, cat.get("mem_gib_per_s"))))
+        gpu = {**prices.raised(GPU_PER_S, cat.get("gpu_per_s")), **prices.own_table(own, "modal_gpu_per_s")}
+        cpu = prices.own_price(own, "modal_cpu_core_per_s", prices.raised_value(CPU_CORE_PER_S, cat.get("cpu_core_per_s")))
+        mem = prices.own_price(own, "modal_mem_gib_per_s", prices.raised_value(MEM_GIB_PER_S, cat.get("mem_gib_per_s")))
         return gpu, cpu, mem
 
     def rate_per_minute(self, cfg: dict, hardware: dict) -> float:

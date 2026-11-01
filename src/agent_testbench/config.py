@@ -6,6 +6,7 @@ will fix the file from the message alone.
 from __future__ import annotations
 
 import copy
+import difflib
 import math
 import re
 from pathlib import Path
@@ -46,10 +47,55 @@ def load(root: str | Path) -> dict:
     root = Path(root)
     path = root / CONFIG_NAME
     try:
-        raw = yaml.safe_load(path.read_text()) or {}
-    except yaml.YAMLError as exc:
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ConfigError(f"{path} cannot be read ({exc}); it must be a UTF-8 text file") from None
+    try:
+        raw = _parse(text)
+    except ConfigError as exc:
+        raise ConfigError(f"{path} {exc}") from None
+    except RecursionError:
+        raise ConfigError(f"{path} nests too deeply to read; testbench.yaml needs only a few levels") from None
+    except (yaml.YAMLError, ValueError) as exc:                  # ValueError: an integer too long to read
         raise ConfigError(f"{path} is not valid YAML: {exc}") from None
-    return validate(raw, root)
+    return validate({} if raw is None else raw, root)
+
+
+def _parse(text: str):
+    """yaml.safe_load, refusing a key given twice in one mapping: YAML keeps only the last, so the first (a plan, a
+    budget, a set of checks) would be dropped without a word."""
+    loader = yaml.SafeLoader(text)
+    try:
+        node = loader.get_single_node()
+        todo, done = [node], set()
+        while todo:
+            n = todo.pop()
+            if n is None or id(n) in done:
+                continue
+            done.add(id(n))
+            if isinstance(n, yaml.MappingNode):
+                seen = {}
+                for k, v in n.value:
+                    if isinstance(k, yaml.ScalarNode) and k.tag != "tag:yaml.org,2002:merge":
+                        if (k.tag, k.value) in seen:
+                            raise ConfigError(f"line {k.start_mark.line + 1}: {k.value!r} is given twice in the same "
+                                              f"mapping (also on line {seen[k.tag, k.value]}); YAML keeps only the last, "
+                                              "so the first would be ignored. Keep one, or merge them")
+                        seen[k.tag, k.value] = k.start_mark.line + 1
+                    todo += [k, v]
+            elif isinstance(n, yaml.SequenceNode):
+                todo += n.value
+        return None if node is None else loader.construct_document(node)
+    finally:
+        loader.dispose()
+
+
+def _finite(v) -> bool:
+    """A real number: not true/false, .nan or .inf (which slip past every limit), nor too big for a float."""
+    try:
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    except OverflowError:
+        return False
 
 
 def _merge(base: dict, over: dict) -> dict:
@@ -67,6 +113,13 @@ def validate(raw: dict, root: Path) -> dict:
     for b in B.registry().values():                     # each backend brings its own section (modal:, colab:, ...)
         defaults = _merge(defaults, b.config_defaults)
     cfg = _merge(defaults, raw)
+    sections = (k for b in B.registry().values() for k in b.config_defaults)     # modal:, ssh:, docker:, ...
+    for key in ("budget", "sessions", "pricing", "guard", *sections):
+        if cfg.get(key) is None:                         # `budget:` with every line under it commented out
+            cfg[key] = copy.deepcopy(defaults[key])
+        elif not isinstance(cfg[key], dict):
+            raise ConfigError(f"`{key}:` is a mapping of settings (`{key}:`, then indented `name: value` lines); got "
+                              f"{cfg[key]!r}")
     project = cfg.get("project")
     if not project or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,40}", str(project)):
         raise ConfigError("`project:` must be a short name of letters, digits, - or _ (it names the Modal app and volume)")
@@ -79,6 +132,13 @@ def validate(raw: dict, root: Path) -> dict:
         if not number(cfg["budget"].get(key)):
             raise ConfigError(f"`budget.{key}` must be a number of US dollars, e.g. {DEFAULTS['budget'][key]}")
     _sessions(cfg["sessions"])
+    for key, value in cfg["pricing"].items():
+        for name, price in value.items() if isinstance(value, dict) else [(None, value)]:
+            if not number(price):
+                raise ConfigError(f"`pricing.{key}{'' if name is None else '.' + str(name)}` is {price!r}; a price is a "
+                                  "number of 0 or more, e.g. modal_gpu_per_s: {T4: 0.000164}")
+    if not isinstance(cfg["guard"].get("ask"), list) or not all(isinstance(x, str) for x in cfg["guard"]["ask"]):
+        raise ConfigError("`guard.ask` is a list of commands the hook asks about first, e.g. [git push, gh pr merge]")
     cfg["notify"] = _notify(cfg.get("notify"))
     cfg["export"] = check_export(cfg.get("export"))
     plans = cfg.get("plans") or {}
@@ -100,8 +160,9 @@ def number(v, positive: bool = False) -> bool:
 
 def check_hardware(where: str, backend: str, gpu) -> None:
     from . import backends as B
-    if backend not in B.names():
-        hint = f" ({B.broken()[backend]})" if backend in B.broken() else ", or install the package that provides it"
+    if not isinstance(backend, str) or backend not in B.names():
+        why = B.broken().get(backend) if isinstance(backend, str) else None
+        hint = f" ({why})" if why else ", or install the package that provides it"
         raise ConfigError(f"`{where}.backend` is {backend!r}; use one of {', '.join(B.names())}{hint}")
     B.get(backend).check_hardware(where, gpu)
 
@@ -111,6 +172,8 @@ def _sessions(s: dict) -> None:
     for key in ("idle_minutes", "max_minutes"):
         if not number(s.get(key), positive=True):
             raise ConfigError(f"`sessions.{key}` must be a positive number of minutes")
+    if not isinstance(s.get("secrets") or [], list):
+        raise ConfigError("`sessions.secrets` is a list of secret NAMES, e.g. [HF_TOKEN]")
 
 
 NOTIFY_EVENTS = ("run_end", "loop_end", "approval_needed")
@@ -206,8 +269,9 @@ def check_export(e) -> dict:
 
 def _plan(name: str, plan: dict, root: Path) -> dict:
     where = f"plans.{name}"
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,40}", str(name)):
-        raise ConfigError(f"`{where}`: plan names use letters, digits, - or _")
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,40}", name):
+        raise ConfigError(f"`{where}`: plan names use letters, digits, - or _" + ("" if isinstance(name, str) else
+                          f" (quote it, \"{name}\":, so YAML does not read it as a number, a date or true/false)"))
     if not isinstance(plan, dict):
         raise ConfigError(f"`{where}` must be a mapping with `backend:` and `steps:`")
     plan = {"backend": "local", "gpu": None, "workdir": None, "description": "", **plan}
@@ -227,15 +291,36 @@ def _plan(name: str, plan: dict, root: Path) -> dict:
             raise ConfigError(f"`{where}`: two steps are named {s['name']!r}; names must be unique within a plan")
         seen.add(s["name"])
         plan["steps"].append(s)
+    _plain_data(where, plan, ())
     return plan
+
+
+def _plain_data(where: str, x, inside: tuple) -> None:
+    """A run carries its plan as JSON: a YAML date (START: 2024-01-01), set or binary would stop it at launch."""
+    if isinstance(x, (dict, list)):
+        if id(x) in inside:
+            raise ConfigError(f"`{where}` contains itself (a YAML alias inside its own anchor); write the value out")
+        for k, v in x.items() if isinstance(x, dict) else enumerate(x):
+            _plain_data(f"{where}.{k}" if isinstance(x, dict) else f"{where}[{k}]", v, inside + (id(x),))
+    elif not isinstance(x, (str, int, float, bool, type(None))):
+        raise ConfigError(f"`{where}` is {x!r}, which a plan cannot carry; write it in quotes, e.g. \"{x}\"")
 
 
 def _step(where: str, step: dict, root: Path) -> dict:
     if not isinstance(step, dict) or not step.get("name"):
         raise ConfigError(f"`{where}` needs a `name:`")
+    if not isinstance(step["name"], (str, int)) or isinstance(step["name"], bool):
+        raise ConfigError(f"`{where}.name` is a short text naming the step, e.g. train")
+    step = {**step, "name": str(step["name"])}
     kinds = [k for k in STEP_KINDS if k in step]
     if len(kinds) != 1:
         raise ConfigError(f"`{where}` ({step['name']}) needs exactly one of `notebook:`, `run:` or `web:`")
+    known = ["name", *STEP_KINDS, *STEP_DEFAULTS]
+    for key in step:
+        if key not in known:                             # a misspelt `expect:` would leave the step with no checks
+            near = difflib.get_close_matches(str(key), known, n=1)
+            raise ConfigError(f"`{where}` ({step['name']}) has no {key!r}"
+                              + (f" (did you mean {near[0]!r}?)" if near else "") + f"; a step takes {', '.join(known)}")
     s = {**copy.deepcopy(STEP_DEFAULTS), **step, "kind": kinds[0]}
     if not number(s["max_minutes"], positive=True):
         raise ConfigError(f"`{where}.max_minutes` must be a positive number; the step is stopped when it runs out")
@@ -245,9 +330,17 @@ def _step(where: str, step: dict, root: Path) -> dict:
     _expect(f"{where}.expect", s["expect"])
     s["mocks"] = _mocks(f"{where}.mocks", s["mocks"], root)
     for key in ("secrets", "pythonpath", "artifacts", "uploads"):
-        if not isinstance(s[key], list):
-            raise ConfigError(f"`{where}.{key}` must be a list")
+        paths = key in ("pythonpath", "artifacts")
+        if not isinstance(s[key], list) or paths and not all(isinstance(x, str) for x in s[key]):
+            raise ConfigError(f"`{where}.{key}` must be a list" + (" of paths" if paths else ""))
+    if not all(isinstance(k, str) for k in s["env"]):
+        raise ConfigError(f"`{where}.env` maps variable NAMES to values, e.g. {{SEED: \"1\"}}")
+    for key in ("colab_shim", "continue_on_failure"):
+        if not isinstance(s[key], bool):
+            raise ConfigError(f"`{where}.{key}` is true or false")
     if s["kind"] == "notebook":
+        if not isinstance(s["notebook"], str):
+            raise ConfigError(f"`{where}.notebook` is the notebook's path, e.g. notebooks/train.ipynb")
         nb = root / s["notebook"]
         if not nb.is_file():
             raise ConfigError(f"`{where}.notebook`: {s['notebook']} does not exist (paths are relative to {root})")
@@ -267,6 +360,12 @@ def _step(where: str, step: dict, root: Path) -> dict:
         if not isinstance(w, dict) or not w.get("url"):
             raise ConfigError(f"`{where}.web` needs at least `url:` (and usually `serve:`, the command that starts the app)")
         s["web"] = {"serve": None, "ready_timeout": 30, "actions": [], "screenshot": True, "viewport": [1280, 800], **w}
+        s["web"]["actions"] = [] if s["web"]["actions"] is None else s["web"]["actions"]
+        vp, wait = s["web"]["viewport"], s["web"]["ready_timeout"]
+        if not isinstance(w["url"], str) or not isinstance(s["web"]["actions"], list) or not _finite(wait) or wait <= 0 \
+                or not (isinstance(vp, list) and len(vp) == 2 and all(_finite(x) and x > 0 for x in vp)):
+            raise ConfigError(f"`{where}.web` is {{url: \"http://...\", actions: [...], viewport: [1280, 800], "
+                              "ready_timeout: 30}: a url, a list of actions, a width and height, and seconds to wait")
     if s["kind"] == "run" and not isinstance(s["run"], str):
         raise ConfigError(f"`{where}.run` is a shell command string")
     for name in s["secrets"]:
@@ -319,10 +418,12 @@ def _rule(where: str, rule) -> None:
         raise ConfigError(f"`{where}`: {bad}")
 
 
-def _table(where: str, value, example: str, keys=None) -> dict:
-    """A mapping; with keys, each of its values is a rule and only those keys are allowed."""
+def _table(where: str, value, example: str, keys=None, some=False) -> dict:
+    """A mapping; with keys, each of its values is a rule and only those keys are allowed; with some, not empty."""
     if not isinstance(value, dict):
         raise ConfigError(f"`{where}` must be a mapping, e.g. {example}")
+    if some and not value:                               # {metrics.json: {}} would check nothing, even a missing file
+        raise ConfigError(f"`{where}` is empty, so nothing would be checked; e.g. {example}")
     for k, rule in value.items() if keys else ():
         if k not in keys:
             raise ConfigError(f"`{where}` has no {k!r}; use {', '.join(keys)}, e.g. {example}")
@@ -336,42 +437,55 @@ def _expect(where: str, e: dict) -> None:
     for key in e:
         if key not in X.KINDS:
             raise ConfigError(f"`{where}` has no {key!r} check; expectations are {', '.join(X.KINDS)}")
+    for kind in ("json", "text", "media", "metrics", "image"):          # keyed by a file (or stdout)
+        for k in e[kind] if isinstance(e.get(kind), dict) else ():
+            if not isinstance(k, str) or not k.strip():
+                raise ConfigError(f"`{where}.{kind}` has {k!r} where a file's path" + (" (or stdout)" if kind in
+                                  ("text", "metrics") else "") + " goes; write the path in quotes")
     if "exit_code" in e and (not isinstance(e["exit_code"], int) or isinstance(e["exit_code"], bool)):
         raise ConfigError(f"`{where}.exit_code` is the code the command must exit with, a whole number such as 0")
     if "no_errors" in e and not isinstance(e["no_errors"], bool):
         raise ConfigError(f"`{where}.no_errors` is true or false")
-    if not isinstance(e.get("files", []), list) or not all(isinstance(f, str) for f in e.get("files", [])):
+    if not isinstance(e.get("files", []), list) or not all(isinstance(f, str) and f.strip() for f in e.get("files", [])):
         raise ConfigError(f"`{where}.files` is a list of paths or globs, e.g. [outputs/model.pt, \"plots/*.png\"]")
     for path, rules in _table(f"{where}.json", e.get("json") or {}, '{metrics.json: {accuracy: ">= 0.9"}}').items():
-        for key, rule in _table(f"{where}.json.{path}", rules, '{accuracy: ">= 0.9", "losses.-1": "< 0.5"}').items():
+        for key, rule in _table(f"{where}.json.{path}", rules, '{accuracy: ">= 0.9", "losses.-1": "< 0.5"}', some=True).items():
             _rule(f"{where}.json.{path}.{key}", rule)
     for source, needles in _table(f"{where}.text", e.get("text") or {}, '{stdout: ["epoch 10"]}').items():
         needles = [needles] if isinstance(needles, str) else needles
-        if not isinstance(needles, list) or not all(isinstance(n, str) for n in needles):
-            raise ConfigError(f"`{where}.text.{source}` is the text to find, or a list of texts, e.g. [\"epoch 10\"]")
+        if not isinstance(needles, list) or not needles or not all(isinstance(n, str) and n for n in needles):
+            raise ConfigError(f"`{where}.text.{source}` is the text to find, or a list of texts, e.g. [\"epoch 10\"] "
+                              "(an empty text is found in anything)")
     for path, rules in _table(f"{where}.media", e.get("media") or {}, '{out/video.mp4: {frames: ">= 120"}}').items():
-        _table(f"{where}.media.{path}", rules, '{frames: ">= 120", width: 1920, audio: true}', X.MEDIA_KEYS)
+        _table(f"{where}.media.{path}", rules, '{frames: ">= 120", width: 1920, audio: true}', X.MEDIA_KEYS, some=True)
     web = _table(f"{where}.web", e.get("web") or {}, '{status: 200, text: ["Count: 2"]}')
     for k in web:
         if k not in X.WEB_KEYS:
             raise ConfigError(f"`{where}.web` has no {k!r}; use {', '.join(X.WEB_KEYS)}")
     _rule(f"{where}.web.status", web.get("status"))
-    if not isinstance(web.get("text", []), list):
+    if not isinstance(web.get("text", []), list) or not all(isinstance(t, str) and t for t in web.get("text", [])):
         raise ConfigError(f"`{where}.web.text` is a list of texts the page must show, e.g. [\"Count: 2\"]")
+    if "title" in web and not (isinstance(web["title"], str) and web["title"]):
+        raise ConfigError(f"`{where}.web.title` is text the page's title contains, e.g. Counter")
+    if not isinstance(web.get("no_console_errors", True), bool):
+        raise ConfigError(f"`{where}.web.no_console_errors` is true or false")
     junit, example = e.get("junit"), '{path: report.xml, failures: 0, tests: ">= 10"}'
     if junit is not None and not isinstance(junit, (str, dict, list)):
         raise ConfigError(f"`{where}.junit` is the report's path or {example}")
-    for i, spec in enumerate(X.junit_specs(junit)):
+    for i, spec in enumerate(X.junit_specs(junit) or ([None] if isinstance(junit, (str, dict)) else [])):
         at = f"{where}.junit" + (f"[{i}]" if isinstance(junit, list) else "")
-        if not isinstance(spec, dict) or not isinstance(spec.get("path"), str):
+        if not isinstance(spec, dict) or not isinstance(spec.get("path"), str) or not spec["path"].strip():
             raise ConfigError(f"`{at}` needs `path:`, the JUnit XML file the test command writes, e.g. {example} "
                               "(pytest: --junitxml=report.xml)")
         _table(at, {k: v for k, v in spec.items() if k != "path"}, example, X.JUNIT_KEYS)
     example = '{"val_loss=([0-9.eE+-]+)": "< 0.3"}'
     for source, patterns in _table(f"{where}.metrics", e.get("metrics") or {}, f"{{stdout: {example}}}").items():
-        for pattern, rule in _table(f"{where}.metrics.{source}", patterns, example).items():
+        for pattern, rule in _table(f"{where}.metrics.{source}", patterns, example, some=True).items():
+            if not isinstance(pattern, str):
+                raise ConfigError(f"`{where}.metrics.{source}` has {pattern!r} where a regular expression goes; write it "
+                                  f"in quotes, e.g. {example}")
             try:
-                re.compile(str(pattern))
+                re.compile(pattern)
             except re.error as exc:
                 raise ConfigError(f"`{where}.metrics.{source}`: {pattern!r} is not a regular expression ({exc}); its "
                                   "first group is the number, e.g. \"val_loss=([0-9.eE+-]+)\"") from None
@@ -416,4 +530,4 @@ def parse_cells(spec, where="cells") -> list[int]:
 
 
 def plan_minutes(plan: dict) -> float:
-    return float(sum(s["max_minutes"] for s in plan["steps"]))
+    return float(sum(float(s["max_minutes"]) for s in plan["steps"]))     # huge whole numbers add up to inf, not a crash

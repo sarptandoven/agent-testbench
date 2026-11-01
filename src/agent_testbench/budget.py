@@ -188,8 +188,9 @@ def check(cfg: dict, est: dict, approve: bool, how_to_lower: str) -> tuple[bool,
     lim = limits(cfg)
     cost, what = est["worst_case_usd"], est["what"]
     if not C.number(cost) or not all(C.number(v) for v, _ in lim.values()):
-        return False, (f"Refused: the worst case of {what} is not a number of dollars (${cost}); a price, a "
-                       "max_minutes or a budget in testbench.yaml or the backend is not a real number. Fix it."), est
+        return False, (f"Refused: the worst case of {what} cannot be priced: it came to {cost!r}, not a number of "
+                       f"dollars. Its minutes ({est.get('max_minutes')!r}), the prices and the budget must be numbers "
+                       "of 0 or more; `testbench prices` shows the prices in use."), est
     most, where = lim["max_run_usd"]
     if cost > most:
         return False, (f"Refused: {what} could cost up to ${cost:.2f} ({est['max_minutes']:.0f} min at "

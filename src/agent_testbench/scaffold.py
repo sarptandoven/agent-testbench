@@ -13,6 +13,8 @@ import json
 import re
 from pathlib import Path
 
+import yaml
+
 SKIP = {".git", ".testbench", ".venv", "venv", "env", "node_modules", ".ipynb_checkpoints", "__pycache__",
         "site-packages", ".tox", "build", "dist", ".mypy_cache", ".pytest_cache", ".claude"}
 WRITTEN = re.compile(r"""["']([\w./-]+\.(?:json|png|jpg|jpeg|csv|pt|pth|pkl|npy|mp4|gif|html))["']""")
@@ -41,13 +43,16 @@ def _notebook(root: Path, nb: Path) -> tuple[str, str, str]:
         cells, found = [c.source for c in parsed.cells if c.cell_type == "code"], NB.fields(parsed)
     except Exception:
         cells, found = [], []
+    cells = [src for src in cells if isinstance(src, str)]           # a hand-made notebook may hold anything
     fields = {f["name"]: f["value"] for f in found}
     forms, papermill = (sum(f["kind"] == k for f in found) for k in ("form", "parameter"))
     made = sorted({m for src in cells for m in WRITTEN.findall(src) if not m.startswith(("http", "/"))})
     name = f"{_slug(nb.stem)}-local"
-    lines = [f"  {name}:", "    backend: local", f"    description: lint {rel}, then run it top to bottom on this machine",
-             "    steps:", "      - name: lint", f"        run: testbench lint {_q(rel)}", "        max_minutes: 1",
-             f"      - name: {_slug(nb.stem)}", f"        notebook: {_q(rel)}", "        max_minutes: 20"]
+    step = _slug(nb.stem) if _slug(nb.stem) != "lint" else "notebook"       # lint.ipynb: two steps named lint
+    lines = [f"  {name}:", "    backend: local",
+             f"    description: {_plain(f'lint {rel}, then run it top to bottom on this machine')}",
+             "    steps:", "      - name: lint", f"        run: {_plain(f'testbench lint {_q(rel)}')}", "        max_minutes: 1",
+             f"      - name: {_plain(step)}", f"        notebook: {_q(rel)}", "        max_minutes: 20"]
     if fields:
         shown = ", ".join(f"{k}: {v}" for k, v in list(fields.items())[:6])
         what = "its form fields" if not papermill else "its papermill parameters" if not forms else "its parameters"
@@ -79,13 +84,35 @@ def _percent_notebooks(root: Path, limit: int) -> list[Path]:
     return out
 
 
-def _q(text: str) -> str:
-    return json.dumps(text) if re.search(r"[\s:#{}\[\],*&!|>'\"%@`]", text) else text
+def _q(text: str, always: bool = False) -> str:
+    """text as a YAML value, in JSON's double quotes (which YAML reads) when it has to be quoted."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:                           # a file name that is not UTF-8: YAML reads \udcXX back
+        return json.dumps(text)
+    return json.dumps(text, ensure_ascii=False) if always or re.search(r"[\s:#{}\[\],*&!|>'\"%@`]", text) else text
+
+
+def _plain(text: str) -> str:
+    """text as a YAML value: as it is when YAML reads it back the same (a sentence, a command), else quoted."""
+    try:
+        if yaml.safe_load(f"k: {text}") == {"k": text}:
+            return text
+    except yaml.YAMLError:
+        pass
+    return _q(text, always=True)
+
+
+def _text(f: Path) -> str:
+    try:
+        return f.read_text(errors="replace")
+    except OSError:                                      # unreadable: as if it said nothing
+        return ""
 
 
 def _pytest(root: Path) -> tuple[str, str, str] | None:
     tests = _walk(root, "test_*.py", 1) or _walk(root, "*_test.py", 1)
-    configured = any((root / f).is_file() and "pytest" in (root / f).read_text(errors="replace")
+    configured = any((root / f).is_file() and "pytest" in _text(root / f)
                      for f in ("pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini"))
     if not tests and not configured:
         return None
@@ -99,9 +126,11 @@ def _web(root: Path) -> tuple[str, str, str] | None:
     pkg = root / "package.json"
     if pkg.is_file():
         try:
-            scripts = json.loads(pkg.read_text()).get("scripts") or {}
-        except ValueError:
-            scripts = {}
+            data = json.loads(pkg.read_text())
+        except (OSError, ValueError, RecursionError):
+            data = {}
+        scripts = data.get("scripts") if isinstance(data, dict) else None
+        scripts = scripts if isinstance(scripts, dict) else {}           # package.json may be anything
         script = next((s for s in ("dev", "start", "preview") if s in scripts), None)
         if script:
             text = ("  ui:\n    backend: local\n    description: open the app in a headless browser and check the page\n"

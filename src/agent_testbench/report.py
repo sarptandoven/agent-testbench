@@ -8,33 +8,65 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
+import re
 from pathlib import Path
 
 ICON = {"passed": "PASS", "failed": "FAIL", "timeout": "TIMEOUT", "error": "ERROR", "cancelled": "CANCELLED",
         "running": "RUNNING", "queued": "QUEUED"}
+NOT_XML = re.compile(f"[^\t\n\r -{chr(0xD7FF)}{chr(0xE000)}-{chr(0xFFFD)}{chr(0x10000)}-{chr(0x10FFFF)}]")  # control chars, surrogates
+
+
+def _icon(status) -> str:
+    return ICON.get(status, str(status).upper())
+
+
+def _line(text) -> str:
+    """On one line: a line break in a name or detail would start a heading or a list item of its own."""
+    return " ".join(str(text).splitlines())
+
+
+def _cell(text) -> str:
+    """One markdown table cell: a | in a step's name would shift the columns."""
+    return _line(text).replace("|", "\\|")
+
+
+def _g(v) -> str:
+    return f"{v:g}" if isinstance(v, (int, float)) else str(v)
+
+
+def _encodable(text: str) -> str:
+    """Text that can be written as UTF-8 (a file name that is not UTF-8 reaches the report as a lone surrogate)."""
+    return text.encode("utf-8", "replace").decode("utf-8")
 
 
 def load(run_dir: Path) -> dict | None:
+    """The run's report, or None when there is none or it cannot be read (cut short, or not a report)."""
     p = Path(run_dir) / "report.json"
-    return json.loads(p.read_text()) if p.exists() else None
+    try:
+        rep = json.loads(p.read_text())
+    except (OSError, ValueError, RecursionError):
+        return None
+    return rep if isinstance(rep, dict) else None
 
 
 def check_number(c: dict) -> float | None:
     """The number a check found, or None: a measuring check's detail starts with it ("0.93 (wanted >= 0.9)")."""
     head = str(c.get("detail", "")).split(" (wanted")[0].strip().strip("'\"")
     try:
-        return float(head)
+        n = float(head)
     except ValueError:
         return None
+    return n if math.isfinite(n) else None                       # nan is no number to track or to loop on
 
 
 def _metrics(report: dict) -> dict:
     """Numbers checked by expectations, keyed by step and check: what a change moved."""
     out = {}
-    for s in report.get("steps", []):
-        for c in s.get("expectations", []) or []:
-            if (n := check_number(c)) is not None:
-                out[f"{s['name']} | {c['check']}"] = n
+    for s in report.get("steps") or []:
+        for c in (s.get("expectations") or []) if isinstance(s, dict) else []:
+            if isinstance(c, dict) and (n := check_number(c)) is not None:
+                out[f"{s.get('name')} | {c.get('check')}"] = n
     return out
 
 
@@ -74,7 +106,7 @@ def render(report: dict) -> str:
         lines += ["## Could not start", "", r["launch_error"], ""]
     failing = [s for s in r.get("steps", []) if s["status"] != "passed"]
     for s in failing:
-        lines += [f"## {ICON[s['status']]}: {s['name']}", ""]
+        lines += [f"## {_icon(s['status'])}: {_line(s['name'])}", ""]
         e = s.get("error") or {}
         if e:
             where = f"cell {e['cell']}" if e.get("cell") else s["kind"]
@@ -88,7 +120,7 @@ def render(report: dict) -> str:
                           "", "</details>"]
         bad = [c for c in s.get("expectations", []) or [] if not c["ok"]]
         for c in bad:
-            lines += [f"- expected {c['check']}: {c['detail']}"]
+            lines += [f"- expected {_line(c['check'])}: {_line(c['detail'])}"]
         web = s.get("web") or {}
         for key in ("console_errors", "page_errors", "failed_requests", "action_errors"):
             for item in web.get(key, [])[:5]:
@@ -106,7 +138,7 @@ def render(report: dict) -> str:
             if d.get(key):
                 lines += [f"- {label}: {', '.join(d[key])}"]
         for k, (a, b) in (d.get("metrics_moved") or {}).items():
-            lines += [f"- {k}: {a:g} -> {b:g}"]
+            lines += [f"- {k}: {_g(a)} -> {_g(b)}"]
         if not any(d.get(k) for k in ("fixed", "broke", "still_failing", "metrics_moved")):
             lines += ["- no change in step results or checked numbers"]
         lines += [""]
@@ -115,10 +147,10 @@ def render(report: dict) -> str:
         checks = s.get("expectations") or []
         ok = sum(1 for c in checks if c["ok"])
         gpu = s.get("gpu") or {}
-        lines += [f"| {ICON[s['status']]} | {s['name']} | {s.get('minutes', 0):.2f} | {ok}/{len(checks)} | "
+        lines += [f"| {_icon(s['status'])} | {_cell(s['name'])} | {s.get('minutes', 0):.2f} | {ok}/{len(checks)} | "
                   f"{str(gpu.get('busy_pct')) + '%' if gpu else '-'} |"]
     for name in r.get("skipped", []):
-        lines += [f"| SKIPPED | {name} | | | |"]
+        lines += [f"| SKIPPED | {_cell(name)} | | | |"]
     lines += [""]
     shown = []
     for s in r.get("steps", []):
@@ -134,9 +166,9 @@ def render(report: dict) -> str:
         lines += ["## Passed checks", ""]
         for s in passing:
             for c in s.get("expectations", []) or []:
-                lines += [f"- {s['name']}: {c['check']} - {c['detail']}"]
+                lines += [f"- {_line(s['name'])}: {_line(c['check'])} - {_line(c['detail'])}"]
         lines += [""]
-    return "\n".join(lines).rstrip() + "\n"
+    return _encodable("\n".join(lines).rstrip() + "\n")
 
 
 def write(run_dir: Path, report: dict) -> None:
@@ -171,9 +203,9 @@ IMAGES_TOTAL = 12_000_000
 
 def page(title: str, body: str) -> str:
     import html
-    return (f"<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,"
-            f"initial-scale=1'><title>{html.escape(title)}</title><style>{CSS}</style></head><body><main>{body}</main>"
-            "</body></html>\n")
+    return _encodable(f"<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width="
+                      f"device-width,initial-scale=1'><title>{html.escape(title)}</title><style>{CSS}</style></head><body>"
+                      f"<main>{body}</main></body></html>\n")
 
 
 def render_html(report: dict, run_dir: Path) -> str:
@@ -200,7 +232,7 @@ def render_html(report: dict, run_dir: Path) -> str:
     if r.get("launch_error"):
         out += ["<h2>Could not start</h2>", f"<pre>{e(r['launch_error'])}</pre>"]
     for s in [s for s in r.get("steps", []) if s["status"] != "passed"]:
-        out.append(f"<h2><span class='{e(s['status'])}'>{e(ICON[s['status']])}</span>: {e(s['name'])}</h2>")
+        out.append(f"<h2><span class='{e(s['status'])}'>{e(_icon(s['status']))}</span>: {e(s['name'])}</h2>")
         err = s.get("error") or {}
         if err:
             where = f"cell {err['cell']}" if err.get("cell") else s["kind"]
@@ -220,7 +252,7 @@ def render_html(report: dict, run_dir: Path) -> str:
     if d:
         items = [e(f"{label}: {', '.join(d[key])}") for label, key in (("Fixed", "fixed"), ("Broke", "broke"),
                                                                        ("Still failing", "still_failing")) if d.get(key)]
-        items += [f"{e(k)}: {a:g} &rarr; {b:g}" for k, (a, b) in (d.get("metrics_moved") or {}).items()]
+        items += [f"{e(k)}: {e(_g(a))} &rarr; {e(_g(b))}" for k, (a, b) in (d.get("metrics_moved") or {}).items()]
         out += [f"<h2>Compared with <code>{e(str(d.get('previous_run')))}</code> ({e(str(d.get('previous_status')))})</h2>",
                 "<ul>" + "".join(f"<li>{x}</li>" for x in items) + "</ul>"
                 if items else "<p class=muted>no change in step results or checked numbers</p>"]
@@ -228,7 +260,7 @@ def render_html(report: dict, run_dir: Path) -> str:
     for s in r.get("steps", []):
         checks = s.get("expectations") or []
         gpu = s.get("gpu") or {}
-        rows.append(f"<tr><td class='{e(s['status'])}'>{e(ICON[s['status']])}</td><td>{e(s['name'])}</td>"
+        rows.append(f"<tr><td class='{e(s['status'])}'>{e(_icon(s['status']))}</td><td>{e(s['name'])}</td>"
                     f"<td>{s.get('minutes', 0):.2f}</td><td>{sum(c['ok'] for c in checks)}/{len(checks)}</td>"
                     f"<td>{e(str(gpu.get('busy_pct')) + '%' if gpu else '-')}</td></tr>")
     rows += [f"<tr><td class=muted>SKIPPED</td><td>{e(n)}</td><td></td><td></td><td></td></tr>" for n in r.get("skipped", [])]
@@ -264,8 +296,8 @@ def render_html(report: dict, run_dir: Path) -> str:
     if files:
         out += [f"<details><summary>{len(files)} evidence files (sizes and sha256)</summary><div class=scroll><table>"
                 "<tr><th>file</th><th>bytes</th><th>sha256</th></tr>"
-                + "".join(f"<tr><td><a href='{e(x['path'])}'>{e(x['path'])}</a></td><td>{x['bytes']}</td>"
-                          f"<td><code>{x['sha256'][:16]}</code></td></tr>" for x in files) + "</table></div></details>"]
+                + "".join(f"<tr><td><a href='{e(x['path'])}'>{e(x['path'])}</a></td><td>{e(str(x['bytes']))}</td>"
+                          f"<td><code>{e(x['sha256'][:16])}</code></td></tr>" for x in files) + "</table></div></details>"]
     if src or env:
         out += ["<h2>Provenance</h2><pre>" + e(json.dumps({"source": src, "environment": env,
                                                            "evidence_sha256": r.get("evidence_sha256")}, indent=1)) + "</pre>"]
@@ -309,6 +341,10 @@ def render_junit(report: dict) -> str:
     for name in r.get("skipped", []):
         ET.SubElement(ET.SubElement(suite, "testcase", classname=str(r.get("plan")), name=name), "skipped",
                       message="an earlier step did not pass")
+    for el in root.iter():                     # colored output (ESC) and other control characters are not XML
+        el.text = el.text and NOT_XML.sub("", el.text)
+        for k, v in el.attrib.items():
+            el.set(k, NOT_XML.sub("", v))
     ET.indent(root)
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode") + "\n"
 
@@ -318,10 +354,11 @@ def history(reports: list[dict]) -> dict:
     rows, series = [], {}
     for rep in reports:
         m = _metrics(rep)
-        src = rep.get("source") or {}
+        src = rep.get("source") if isinstance(rep.get("source"), dict) else {}
+        minutes = rep.get("minutes") if isinstance(rep.get("minutes"), (int, float)) else None    # an unreadable one
         rows.append({"run_id": rep.get("run_id"), "started": rep.get("started"), "status": rep.get("status"),
-                     "minutes": rep.get("minutes"), "cost_usd": rep.get("cost_usd"), "backend": rep.get("backend"),
-                     "commit": (src.get("commit") or "")[:9] + ("+" if src.get("dirty") else ""), "metrics": m})
+                     "minutes": minutes, "cost_usd": rep.get("cost_usd"), "backend": rep.get("backend"),
+                     "commit": str(src.get("commit") or "")[:9] + ("+" if src.get("dirty") else ""), "metrics": m})
         for k in m:
             series.setdefault(k, [])
     for k in series:

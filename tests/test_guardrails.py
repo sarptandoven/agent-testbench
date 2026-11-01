@@ -99,8 +99,10 @@ def test_options_are_spelled_out(tmp_path):
 
 def test_a_catalog_cannot_add_cheap_hardware():
     built = {"T4": 0.0001, "H100": 0.001}
-    out = prices.raised(built, {"H100!": 0.0, "X9": 0.005, "T4": float("nan"), "H100": float("inf")})
-    assert out["H100!"] == 0.001 and out["X9"] == 0.005, "a new name costs at least the dearest known hardware"
+    out = prices.raised(built, {"H100!": 0.0, "h100x": 0.0000001, "X9": 0.005, "T4": float("nan"),
+                                "H100": float("inf")})
+    assert "H100!" not in out, "hardware added for free is not offered"
+    assert out["H100X"] == 0.001 and out["X9"] == 0.005, "a new name costs at least the dearest known hardware"
     assert out["T4"] == 0.0001 and out["H100"] == 0.001, "NaN and infinity change nothing"
 
 
