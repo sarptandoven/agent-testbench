@@ -90,7 +90,7 @@ def cmd_init(a):
     for name in ("AGENTS.md", "CLAUDE.md"):
         f = root / name
         text = f.read_text() if f.exists() else ""
-        if "<!-- agent-testbench -->" not in text:
+        if "<!-- agent-testbench" not in text:          # init's section, or the one `testbench connect` writes
             body = AGENTS_SECTION if name == "AGENTS.md" else "See AGENTS.md for how to work in this project (agent-testbench).\n"
             f.write_text((text.rstrip() + "\n\n" if text.strip() else "") + body)
     first = next(iter(C.load(root)["plans"]))
@@ -575,6 +575,11 @@ def cmd_mcp(a):
     return 0
 
 
+def cmd_connect(a):
+    from .connect import main as connect
+    return connect(a.clients, user=a.user, dry_run=a.dry_run, list_=a.list)
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="testbench", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--version", action="version", version=f"agent-testbench {__version__}")
@@ -716,6 +721,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--host", default="127.0.0.1", help="with --http (default 127.0.0.1: this machine only)")
     p.add_argument("--port", type=int, default=8765, help="with --http (default 8765)")
     p.set_defaults(fn=cmd_mcp)
+    p = sub.add_parser("connect", help="set up a coding agent to use testbench: its MCP config and AGENTS.md "
+                                       "(claude, cursor, vscode, codex, gemini); --list shows each one's state")
+    p.add_argument("clients", nargs="*", metavar="CLIENT", help="claude, cursor, vscode, codex or gemini")
+    p.add_argument("--user", action="store_true", help="the client's config for every project of this user, "
+                                                       "instead of this project's")
+    p.add_argument("--dry-run", action="store_true", help="show what would change; write nothing")
+    p.add_argument("--list", action="store_true", help="each client: on this machine?, set up here?, for the user?")
+    p.set_defaults(fn=cmd_connect)
     return ap
 
 
