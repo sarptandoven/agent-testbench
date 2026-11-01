@@ -79,3 +79,18 @@ def test_state_files_survive_writers_and_readers_at_once(tmp_path):
     [t.join() for t in threads]
     assert not errors, errors
     assert not list(tmp_path.glob("*.tmp")), "no temp file left behind"
+
+
+def test_two_processes_changing_one_run_state_lose_nothing(tmp_path):
+    """The CLI writes a run's driver pid while the driver writes its status: each change is kept (an unlocked
+    read-change-write lost one, and a run whose pid was lost read as one whose driver had died)."""
+    from agent_testbench import runs
+    runs.write_state(tmp_path, status="queued", created=time.time())
+    code = ("import sys\nfrom agent_testbench import runs\n"
+            "for i in range(150):\n    runs.write_state(sys.argv[1], **{sys.argv[2] + str(i): i})\n")
+    procs_ = [subprocess.Popen([sys.executable, "-c", code, str(tmp_path), who]) for who in ("cli", "driver")]
+    assert all(p.wait(120) == 0 for p in procs_)
+    s = runs.read_state(tmp_path)
+    assert all(f"{who}{i}" in s for who in ("cli", "driver") for i in range(150)), "every change from both is there"
+    assert not runs.driver_gone({**s, "status": "running"}), "no pid yet, just created: starting, not lost"
+    assert runs.driver_gone({**s, "status": "running", "created": time.time() - 120}), "no pid for two minutes: lost"

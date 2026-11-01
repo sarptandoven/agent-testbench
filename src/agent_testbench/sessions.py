@@ -34,9 +34,10 @@ def read(sdir: Path) -> dict:
 
 def write(sdir: Path, **changes) -> dict:
     p = Path(sdir) / "state.json"
-    state = json.loads(procs.read_text_retry(p)) if p.exists() else {}
-    state.update(changes)
-    procs.write_text_atomic(p, json.dumps(state, indent=1))
+    with procs.exclusive(Path(sdir) / ".state.lock"):          # the CLI, the supervisor and the MCP server write it
+        state = json.loads(procs.read_text_retry(p)) if p.exists() else {}
+        state.update(changes)
+        procs.write_text_atomic(p, json.dumps(state, indent=1))
     return state
 
 

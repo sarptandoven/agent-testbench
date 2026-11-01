@@ -2,6 +2,10 @@
 
 ## 0.2.0 - not yet released
 
+- A run's state is changed under a lock: the CLI writing the driver's pid and the driver writing its status at the
+  same moment could lose one of the two, and a run whose pid was lost read as a dead driver and was closed as an
+  error (seen as loop tries reverted with "the run error" on Windows CI). A run with no pid yet in its first minute
+  is starting, not lost. Sessions' state is locked the same way.
 - Release readiness: the PyPI page's links point at GitHub (the README's relative links are rewritten at build
   time), local builds leave out `.env` and caches, `release.yml` publishes only from a published GitHub release whose
   tag, versions and dated changelog agree (actions pinned to commit SHAs), and a test keeps the version equal in

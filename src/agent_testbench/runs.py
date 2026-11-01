@@ -27,15 +27,29 @@ def runs_dir(root: Path) -> Path:
 
 
 def read_state(run_dir: Path) -> dict:
-    return json.loads((Path(run_dir) / "state.json").read_text())
+    return json.loads(procs.read_text_retry(Path(run_dir) / "state.json"))
 
 
 def write_state(run_dir: Path, **changes) -> dict:
+    """Merge changes into the run's state.json. Locked: the CLI, the run's driver and the MCP server each change it,
+    and an unlocked read-change-write loses one of two at once (the driver's pid, say, which then reads as a dead
+    driver)."""
     p = Path(run_dir) / "state.json"
-    state = json.loads(procs.read_text_retry(p)) if p.exists() else {}
-    state.update(changes)
-    procs.write_text_atomic(p, json.dumps(state, indent=1))
+    with procs.exclusive(Path(run_dir) / ".state.lock"):
+        state = json.loads(procs.read_text_retry(p)) if p.exists() else {}
+        state.update(changes)
+        procs.write_text_atomic(p, json.dumps(state, indent=1))
     return state
+
+
+def driver_gone(s: dict) -> bool:
+    """A queued or running run whose driver process is gone without finishing it. A run with no driver pid yet is
+    starting (its pid is written just after the driver starts), unless that was over a minute ago."""
+    if s.get("foreground") or s.get("status") not in ("queued", "running"):
+        return False
+    if not s.get("driver_pid"):
+        return time.time() - float(s.get("created") or 0) > 60
+    return not alive(s.get("driver_pid"))
 
 
 def all_runs(root: Path) -> list[Path]:
@@ -134,7 +148,7 @@ def kill_group(pid: int | None, hard: bool = False) -> None:
 def status_line(run_dir: Path) -> str:
     s = read_state(run_dir)
     st = s.get("status")
-    if st in ("queued", "running") and not alive(s.get("driver_pid")) and not s.get("foreground"):
+    if driver_gone(s):
         st = "lost (driver exited without finishing; see driver.log)"
     events = progress(run_dir)
     step = next((e for e in reversed(events) if e.get("event") == "step_start"), None)
@@ -196,7 +210,7 @@ def wait(run_dir: Path, timeout: float, on_line=print) -> dict:
 def settle(run_dir: Path) -> dict:
     """The run's state now. A run whose driver exited without finishing it is closed here, as an error (and told)."""
     state = read_state(run_dir)
-    if state.get("status") in ("queued", "running") and not alive(state.get("driver_pid")) and not state.get("foreground"):
+    if driver_gone(state):
         time.sleep(1)
         state = read_state(run_dir)
         if state.get("status") not in DONE:
