@@ -179,9 +179,9 @@ def _sessions(s: dict) -> None:
         raise ConfigError("`sessions.secrets` is a list of secret NAMES, e.g. [HF_TOKEN]")
 
 
-NOTIFY_EVENTS = ("run_end", "loop_end", "approval_needed", "watch_run")
-NOTIFY_DEFAULT = NOTIFY_EVENTS[:3]            # watch_run (a watched run whose result changed) only when asked for
-NOTIFY_EXAMPLE = "{webhook_env: TESTBENCH_WEBHOOK, on: [run_end, loop_end, approval_needed]}"
+NOTIFY_EVENTS = ("run_end", "loop_rule", "loop_end", "approval_needed", "watch_run", "loop_try")
+NOTIFY_DEFAULT = NOTIFY_EVENTS[:4]            # watch_run and loop_try (one message per run) only when asked for
+NOTIFY_EXAMPLE = "{webhook_env: TESTBENCH_WEBHOOK, on: [run_end, loop_rule, loop_end, approval_needed]}"
 
 
 def _notify(n) -> dict | None:
@@ -215,6 +215,8 @@ def _notify(n) -> dict | None:
         raise ConfigError(f"`notify.on` lists the events to send, from {', '.join(NOTIFY_EVENTS)}"
                           + (f"; there is no {bad[0]!r}" if bad else "")
                           + f" (default: {', '.join(NOTIFY_DEFAULT)}), e.g. {NOTIFY_EXAMPLE}")
+    if "loop_end" in on:                           # a rule firing was sent as loop_end before loop_rule was its own
+        on = [*on, "loop_rule"]
     return {"webhook": url.strip() if url else None, "webhook_env": env or None, "on": list(dict.fromkeys(on))}
 
 

@@ -18,8 +18,9 @@ room for.
 
 Stopping rules tell an agent working alone when it is done: once the best reaches --target, after --max-tries tries,
 or after --patience tries in a row that were not kept, the next try is refused with a message that says why and
-what to do (for patience: stop, or try something different in kind with --new-direction). When a rule fires and
-when the loop stops, testbench.yaml's `notify:` webhook hears about it (loop_end).
+what to do (for patience: stop, or try something different in kind with --new-direction). When a rule fires or a
+try is refused for want of budget or time, testbench.yaml's `notify:` webhook hears about it (loop_rule: the loop is
+still open), and again when the loop stops (loop_end); each try's verdict, when asked for (loop_try).
 """
 from __future__ import annotations
 
@@ -254,8 +255,8 @@ HALTED = {"target_reached": "reached its target", "out_of_patience": "run out of
 
 
 def _tell(root: Path, cfg: dict, state: dict, status: str, why: str, report: Path | None = None) -> None:
-    """loop_end, once for each reason the loop ended or a rule fired (the person may be asleep; one message is
-    enough)."""
+    """loop_rule once for each rule that fired or reason a try was refused (the loop is still open: the agent was
+    told what to do; the person may be asleep, and one message is enough), loop_end when the loop is stopped."""
     mark = f"{status}@{len(state['tries']) - 1}"
     if mark in state.setdefault("notified", []):
         return
@@ -272,8 +273,9 @@ def _tell(root: Path, cfg: dict, state: dict, status: str, why: str, report: Pat
             f"${state['budget_usd']:.2f}." + (f" {why}" if why else "") + then
             + (f" Best: {_best_at(state)}." if best["try"] is not None else "")
             + (f" Report: {notify.rel(report, root)}" if report else ""))
-    notify.send(root, cfg, "loop_end", text, {
-        "loop": state["id"], "plan": state["plan"], "status": status, "why": why, "metric": state["metric"],
+    notify.send(root, cfg, "loop_end" if status == "stopped" else "loop_rule", text, {
+        "loop": state["id"], "plan": state["plan"], "status": status, "why": why, "open": status != "stopped",
+        "ended_by": state.get("ended_by") if status == "stopped" else None, "metric": state["metric"],
         "goal": state["goal"], "baseline": base, "best": best["value"], "best_commit": best["commit"],
         "best_run": state["tries"][best["try"]]["run"] if best["try"] is not None else None, "tries": len(tries),
         "kept": kept, "cost_usd": spent(state), "budget_usd": state["budget_usd"], "branch": state["branch"],
@@ -476,6 +478,11 @@ def judge(root: Path, cfg: dict, state: dict) -> dict:
         t["verdict"] += " " + halt[1]
     _note(root, f"loop {state['id']} " + t["verdict"].split(". The branch")[0] + f" - {t['description']}")
     _save(state)
+    notify.send(root, cfg, "loop_try", f"loop {state['id']} on plan {state['plan']}: {t['verdict']} ({_desc(t)})", {
+        "loop": state["id"], "plan": state["plan"], "try": t["n"], "description": t["description"],
+        "status": "baseline" if baseline else "kept" if t["kept"] else "reverted", "run_id": t["run"],
+        "run_status": t["status"], "metric": state["metric"], "value": value, "best": state["best"]["value"],
+        "best_commit": state["best"]["commit"], "cost_usd": t["cost_usd"], "new_direction": bool(t.get("new_direction"))})
     if halt:
         _tell(root, cfg, state, halt[0], halt[1].split(":")[0] + ".")
     return state

@@ -107,14 +107,15 @@ for when it is done or when to give up. Give it one or more at `loop start` (the
 ## Notifications
 
 With a `notify:` webhook in testbench.yaml ([Notifications](notify.md)), the person hears about the loop without
-looking: a `loop_end` message when a stopping rule fires, when a try is refused because the budget or
-`--max-hours` is used up, and when the loop is stopped (with the report's path); a `run_end` for each of its runs
-(marked with the loop and the try); and `approval_needed` if the loop's budget needs a person's yes.
+looking: a `loop_rule` message when a stopping rule fires or a try is refused because the budget or
+`--max-hours` is used up (the loop is still open; the agent was told what to do), a `loop_end` when the loop is
+stopped (with the report's path), and `approval_needed` if the loop's budget needs a person's yes. A loop's runs
+send no `run_end`; list `loop_try` for one message per try with its verdict (kept or reverted, and why).
 
 ```yaml
 notify:
   webhook_env: TESTBENCH_WEBHOOK
-  on: [loop_end, approval_needed]      # leave out run_end for a long loop: one message per try is a lot
+  on: [run_end, loop_rule, loop_end, approval_needed]      # the default; add loop_try to follow every try
 ```
 
 ## Leaving a loop overnight

@@ -81,5 +81,5 @@ from the run before it.
 ```yaml
 notify:
   webhook_env: TESTBENCH_WEBHOOK
-  on: [run_end, loop_end, approval_needed, watch_run]
+  on: [run_end, loop_rule, loop_end, approval_needed, watch_run]
 ```

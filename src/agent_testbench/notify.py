@@ -1,9 +1,9 @@
-"""Notifications: a JSON POST to a webhook when a run ends, a loop ends, or a launch waits for a person's approval,
-so whoever left an agent working overnight hears about it without looking.
+"""Notifications: a JSON POST to a webhook when a run ends, a loop's stopping rule fires or the loop ends, or a
+launch waits for a person's approval, so whoever left an agent working overnight hears about it without looking.
 
     notify:
       webhook_env: TESTBENCH_WEBHOOK                  # the URL in an environment variable (or webhook: https://...)
-      on: [run_end, loop_end, approval_needed]         # which events (default: these three; watch_run is opt-in)
+      on: [run_end, loop_rule, loop_end, approval_needed]    # the default; watch_run and loop_try are opt-in
 
 The body is Slack-compatible ({"text": "..."}) and carries the same facts as fields (event, project, plan or loop,
 status, numbers, cost, run, report), so any service that takes a JSON POST can use it. Delivery never breaks or
@@ -157,13 +157,16 @@ def _money(v) -> str:
 def run_end(root: Path, run_dir: Path, rep: dict | None = None, cfg: dict | None = None) -> None:
     """A run finished (passed, failed, cancelled, error): what it proved, what it cost, where its report is. A run
     `testbench watch` started is told only as watch_run, and only when its result differs from the run before it:
-    a watch runs on every save, and a message for each would be noise."""
+    a watch runs on every save, and a message for each would be noise. A loop's runs are told by the loop, as
+    loop_try once each is judged kept or reverted (a run's own PASSED cannot say which)."""
     from . import report as R, runs
     try:
         state = runs.read_state(run_dir)
         rep = rep or R.load(run_dir) or {}
         status = state.get("status") or rep.get("status")
         event, origin = "run_end", state.get("origin") or {}
+        if origin.get("loop"):
+            return
         if origin.get("watch"):
             before = (rep.get("delta") or {}).get("previous_status")
             if status == "cancelled" or before is None or (before == "passed") == (status == "passed"):
@@ -180,8 +183,6 @@ def run_end(root: Path, run_dir: Path, rep: dict | None = None, cfg: dict | None
         cost = rep.get("cost_usd", state.get("cost_usd"))
         report = run_dir / "report.md"
         text = (f"run {run_dir.name} of plan {state.get('plan')} on {hw} {str(status).upper()}"
-                + ((f" (loop {origin['loop']}, " + ("the baseline)" if origin.get("try") == 0
-                                                      else f"try {origin.get('try')})")) if origin.get("loop") else "")
                 + (f" (testbench watch; the run before it {(rep.get('delta') or {}).get('previous_status')})"
                    if event == "watch_run" else "")
                 + f" after {rep.get('minutes', state.get('minutes', '?'))} min, about {_money(cost)}."
@@ -194,7 +195,6 @@ def run_end(root: Path, run_dir: Path, rep: dict | None = None, cfg: dict | None
             "plan": state.get("plan"), "status": status, "run_id": run_dir.name, "backend": state.get("backend"),
             "gpu": state.get("gpu"), "minutes": rep.get("minutes", state.get("minutes")), "cost_usd": cost,
             "numbers": numbers, "failed": (errors + failed)[:10], "stopped_because": why,
-            "loop": origin.get("loop"), "loop_try": origin.get("try"),
             **({"watch": origin["watch"], "previous_status": (rep.get("delta") or {}).get("previous_status")}
                if event == "watch_run" else {}),
             "report": rel(report, root) if report.exists() else None})
