@@ -48,7 +48,8 @@ except Exception as exc:
 def install_command(deps: bool = False) -> str:
     """The command that installs Chromium (or, with deps, the system libraries it needs) for this Python's
     Playwright: a bare `playwright` on PATH may belong to another Python, with another Playwright."""
-    return f"{shlex.quote(sys.executable)} -m playwright {'install-deps' if deps else 'install'} chromium"
+    exe = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
+    return f"{exe} -m playwright {'install-deps' if deps else 'install'} chromium"
 
 
 def explain_launch_error(error: str) -> str:

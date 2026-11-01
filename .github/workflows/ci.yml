@@ -36,7 +36,12 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: tests
         # in parallel: a pytest-xdist worker per vCPU (-n auto counts physical cores, which can be half of them; the
-        # tests mostly wait on processes they start); tests marked serial (Docker) still run one at a time
-        run: python -m pytest -q -p no:warnings -n logical
+        # tests mostly wait on processes they start); tests marked serial (Docker) still run one at a time. Windows
+        # runs them one by one: there, tests side by side share one console, and the console break one test sends
+        # to stop its processes is not yet shown to stay out of the others'.
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then python -m pytest -q -p no:warnings
+          else python -m pytest -q -p no:warnings -n logical; fi
         env:
           PYTHONUTF8: "1"           # Windows: in-process tests too (the CLI switches itself)

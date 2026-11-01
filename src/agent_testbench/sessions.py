@@ -29,16 +29,14 @@ def sessions_dir(root: Path) -> Path:
 
 
 def read(sdir: Path) -> dict:
-    return json.loads((Path(sdir) / "state.json").read_text())
+    return json.loads(procs.read_text_retry(Path(sdir) / "state.json"))
 
 
 def write(sdir: Path, **changes) -> dict:
     p = Path(sdir) / "state.json"
-    state = json.loads(p.read_text()) if p.exists() else {}
+    state = json.loads(procs.read_text_retry(p)) if p.exists() else {}
     state.update(changes)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=1))
-    tmp.replace(p)
+    procs.write_text_atomic(p, json.dumps(state, indent=1))
     return state
 
 

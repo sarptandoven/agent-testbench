@@ -18,6 +18,36 @@ from pathlib import Path
 WINDOWS = os.name == "nt"
 
 
+def write_text_atomic(path, text: str) -> None:
+    """Replace a small file (state.json) so a reader sees the old text or the new, never half: through a temp file of
+    this process and thread's own, then os.replace. On Windows a file another process has open cannot be replaced
+    for that moment, so it tries again briefly."""
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_text(text)
+    for attempt in range(60):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if not WINDOWS or attempt == 59:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.05)
+
+
+def read_text_retry(path) -> str:
+    """Read a small file another process may be replacing at this moment (on Windows that is a PermissionError)."""
+    for attempt in range(60):
+        try:
+            return Path(path).read_text()
+        except PermissionError:
+            if not WINDOWS or attempt == 59:
+                raise
+            time.sleep(0.05)
+    return Path(path).read_text()
+
+
 def group_kwargs() -> dict:
     """Popen arguments that start a process in a group of its own, so stop_group() reaches what it starts."""
     return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {"start_new_session": True}

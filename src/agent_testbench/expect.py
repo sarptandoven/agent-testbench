@@ -503,7 +503,8 @@ def _case_name(case, suites: list[str] | None = None) -> str:
     if name == cls or name.startswith(cls + " "):
         return name
     words = re.search(r"\s", cls) or re.search(r"\s", name.split("[", 1)[0])
-    return f"{cls} > {name}" if words or JS_FILE.search(cls) else f"{cls}.{name}"
+    js = JS_FILE.search(cls) or JS_FILE.search(case.get("file") or "")      # node 24 names the file on each case
+    return f"{cls} > {name}" if words or js else f"{cls}.{name}"
 
 
 GENERIC_WHY = {"failed", "failure", "error", "build error"}         # gotestsum's and go-junit-report's messages

@@ -234,6 +234,12 @@ REPORTS = {     # file: tests, passed, failures, errors, skipped, and how the fa
     "node-test-pass.xml": (3, 2, 0, 0, 1, [], []),
     "node-test-fail.xml": (4, 1, 2, 0, 1, [
         "test/broken.test.js (test failed)", "sum > adds 1 + 2 to equal 3 (Expected values to be strictly equal:3 !== 4)"], []),
+    "node20-test-fail.xml": (2, 0, 2, 0, 0, [                  # node 20: classname "test", the suite from its parent
+        "sum > adds (Expected values to be strictly equal:2 !== 3)",
+        "sum > adds negatives (Expected values to be strictly equal:1 !== -2)"], []),
+    "node24-test-fail.xml": (2, 0, 2, 0, 0, [                  # node 24: classname is the suite, file= on each case
+        "sum > adds (Expected values to be strictly equal: 2 !== 3)",
+        "sum > adds negatives (Expected values to be strictly equal: 1 !== -2)"], []),
     "playwright-pass.xml": (3, 2, 0, 0, 1, [], []),
     "playwright-fail.xml": (4, 2, 1, 0, 1, [                   # its flaky test passed on a retry: it counts as passed
         'home.spec.ts > home › has title (expect(page).toHaveTitle(expected) failed Expected: "Other App" '

@@ -57,3 +57,25 @@ def test_the_launcher_interrupts_its_kernel_on_request(tmp_path):
         assert after["result"] == "2", "the kernel survives the interrupt"
     finally:
         procs.stop_and_wait(launcher.pid, proc=launcher)      # this process's child: waited on, not its grace
+
+
+def test_state_files_survive_writers_and_readers_at_once(tmp_path):
+    """state.json is written by a run's driver, the CLI and the MCP server at once: each write goes through a temp file
+    of its own, and a reader never sees half a file (on Windows a busy file is tried again for a moment)."""
+    import json
+    import threading
+    from agent_testbench import runs
+    errors = []
+
+    def writer(n):
+        try:
+            for i in range(40):
+                runs.write_state(tmp_path, **{f"w{n}": i})
+                json.loads(procs.read_text_retry(tmp_path / "state.json"))
+        except Exception as exc:                       # noqa: BLE001 - any error fails the test below
+            errors.append(exc)
+    threads = [threading.Thread(target=writer, args=(n,)) for n in range(6)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert not errors, errors
+    assert not list(tmp_path.glob("*.tmp")), "no temp file left behind"
