@@ -203,11 +203,8 @@ def exec_code(root: Path, cfg: dict, sdir: Path, code: str, timeout: float = 600
 
 
 def exec_cells(root: Path, cfg: dict, sdir: Path, nb_path: Path, spec, params: dict, timeout: float) -> list[dict]:
-    """Run a notebook's code cells (numbered from 1) in the session, with form fields set; stop at the first error."""
-    import nbformat
-    nb = nbformat.read(str(nb_path), as_version=4)
-    code = [c.source for c in nb.cells if c.cell_type == "code"]
-    code = NB.set_params(code, params or {})
+    """Run a notebook's code cells (numbered from 1) in the session, with params set; stop at the first error."""
+    code = NB.cell_sources(NB.read(nb_path), params or {})
     numbers = C.parse_cells(spec) if spec else list(range(1, len(code) + 1))
     bad = [x for x in numbers if x > len(code)]
     if bad:

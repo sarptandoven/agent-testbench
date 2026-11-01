@@ -215,8 +215,8 @@ async def spend(project_dir: str = ".") -> str:
     return _text(*await _cli(project_dir, ["spend"]))
 
 
-@server.tool(description="Check a notebook for Colab and headless pitfalls (big outputs, embedded video, secrets "
-                         "without fallback, unpinned installs, settable form fields).")
+@server.tool(description="Check a notebook (.ipynb or percent-format .py) for Colab and headless pitfalls (big outputs, "
+                         "embedded video, secrets without fallback, unpinned installs, settable form fields and parameters).")
 async def lint_notebook(notebook: str, project_dir: str = ".") -> str:
     return _text(*await _cli(project_dir, ["lint", "--", notebook]))
 
@@ -242,8 +242,8 @@ async def session_start(name: str = "main", backend: str = "", gpu: str = "", id
 
 
 @server.tool(description="Run Python in a live session's kernel - variables persist between calls, like notebook cells. "
-                         "Pass code, or notebook (e.g. train.ipynb) with cells (e.g. '3-5') and params (form fields as a JSON "
-                         "object string). Returns what it printed, the last value, the images it displayed (as images), "
+                         "Pass code, or notebook (train.ipynb, or a percent-format train.py) with cells (e.g. '3-5') and "
+                         "params (Colab form fields or papermill parameters, as a JSON object string). Returns what it printed, the last value, the images it displayed (as images), "
                          "and errors with the line that raised them; as_json=true returns the raw results instead. A call "
                          "longer than timeout_seconds is interrupted; the kernel survives. Other tools keep working "
                          "meanwhile (session_stop ends it).")

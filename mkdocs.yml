@@ -27,6 +27,7 @@ nav:
   - Getting started: getting-started.md
   - Recipes: recipes.md
   - Expectations: expectations.md
+  - Notebooks: notebooks.md
   - Backends:
       - Overview: backends.md
       - Docker: docker.md

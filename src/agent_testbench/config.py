@@ -190,6 +190,12 @@ def _step(where: str, step: dict, root: Path) -> dict:
         nb = root / s["notebook"]
         if not nb.is_file():
             raise ConfigError(f"`{where}.notebook`: {s['notebook']} does not exist (paths are relative to {root})")
+        if nb.suffix.lower() == ".py":
+            from .notebook import plain_python
+            if plain_python(nb):
+                raise ConfigError(f"`{where}.notebook`: {s['notebook']} is a plain Python file, not a notebook (no "
+                                  f"`# %%` cell markers). Use a run: step instead (run: python {s['notebook']}), or "
+                                  "mark its cells with `# %%` to run it as a notebook")
         if s["cells"] is not None:
             s["cells"] = parse_cells(s["cells"], where)
         for group in s["uploads"]:
