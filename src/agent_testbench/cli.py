@@ -571,6 +571,11 @@ def cmd_note(a):
     return 0
 
 
+def cmd_selftest(a):
+    from .selftest import main
+    return main(keep=a.keep)
+
+
 def cmd_doctor(a):
     import importlib.util as iu
     import shutil
@@ -986,6 +991,7 @@ GROUPS = {   # `testbench --help`: the commands as README's Commands table group
         "recipes": "ready plans for a goal, each with its worst-case cost",
         "connect": "set up Cursor, VS Code, Codex, Gemini or Claude Code to use it",
         "doctor": "check what this machine can run, and what to fix",
+        "selftest": "a minute or so: check the main promises hold on this machine",
         "mcp": "serve these commands as MCP tools"},
     "plans": {
         "plans": "the plans, their hardware and worst-case cost",
@@ -1037,6 +1043,9 @@ exit codes: 0 passed or done, 1 failed, 2 refused or bad input (nothing ran),
 All of them: https://sarptandoven.github.io/agent-testbench/reference/#commands"""
 
 EXAMPLES = """
+selftest
+  testbench selftest                     # ten checks in a temporary folder
+  testbench selftest --keep              # and keep that folder and its runs
 init
   testbench init                         # a plan for each thing it finds here
   testbench init --recipe pytorch-train  # start from a recipe instead
@@ -1507,6 +1516,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="test: send one test message and say whether it was accepted")
     p.set_defaults(fn=cmd_notify)
     sub.add_parser("doctor", help="check what this machine can run; each `no` line says what to do").set_defaults(fn=cmd_doctor)
+    p = sub.add_parser("selftest", help="a minute or so, local and free: check that the main promises hold on this "
+                                        "machine, one line each")
+    p.add_argument("--keep", action="store_true", help="keep the temporary project and its runs to look at")
+    p.set_defaults(fn=cmd_selftest)
     p = sub.add_parser("demo", help="copy a small example project to DIR, run its free plan, and show what to try next")
     p.add_argument("name", nargs="?", metavar="NAME", help=f"the example: {', '.join(DEMOS)} (default tiny-model)")
     p.add_argument("dir", nargs="?", metavar="DIR", help="a new folder (default: testbench-demo for tiny-model, the "

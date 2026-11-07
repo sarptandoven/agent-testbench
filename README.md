@@ -34,6 +34,7 @@ was made, the code and Python it ran, the evidence hash, and the confusion matri
 
 ```bash
 pip install "agent-testbench[all]"         # or: uv tool install "agent-testbench[all]"
+testbench selftest                         # ten checks of the main promises on this machine, in under a minute
 testbench demo                             # a small project, run for free here - see it work in a minute
 testbench demo llm-app                     # or web-app, test-suite: your kind of project (testbench demo --list)
 cd your-project && testbench init          # looks at the project and writes plans that already check something

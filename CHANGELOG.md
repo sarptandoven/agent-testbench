@@ -2,6 +2,11 @@
 
 ## 0.2.0 - not yet released
 
+- `testbench selftest`: ten checks of the main promises in a temporary folder, local and free, in under a minute:
+  a plan passes, a broken change fails with the reason, evidence is fingerprinted, costs are refused or asked about
+  before anything starts, a NaN budget is refused, a live kernel answers, the mock LLM SDK, a loop keeps and
+  reverts, an HTML report, the MCP server. It uses empty limits and ledger of its own. docs/verify.md: checking a
+  release yourself in five minutes.
 - A run's state is changed under a lock: the CLI writing the driver's pid and the driver writing its status at the
   same moment could lose one of the two, and a run whose pid was lost read as a dead driver and was closed as an
   error (seen as loop tries reverted with "the run error" on Windows CI). A run with no pid yet in its first minute
