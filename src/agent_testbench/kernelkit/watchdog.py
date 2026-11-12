@@ -184,12 +184,23 @@ def release_colab(state_dir: Path) -> bool:
     return False
 
 
+def _tick(text) -> float:
+    """Seconds between checks: 15, or less when TESTBENCH_WATCHDOG_SECONDS says so (tests). Never more, and never a
+    value that would stop the watchdog (NaN or a negative number makes time.sleep raise): the environment a run or
+    session was started from can set it, and the hard stop must not depend on it."""
+    try:
+        v = float(text) if text is not None else 15.0
+    except ValueError:
+        return 15.0
+    return min(max(v, 0.01), 15.0) if math.isfinite(v) else 15.0
+
+
 def watch(state_dir, max_minutes: float, idle_minutes: float | None = None, kill_group: int | None = None,
           interrupt_pid: int | None = None, release: str | None = None) -> str:
     state_dir = Path(state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
     began = time.time()
-    tick = float(os.environ.get("TESTBENCH_WATCHDOG_SECONDS", 15))
+    tick = _tick(os.environ.get("TESTBENCH_WATCHDOG_SECONDS"))
     if not (math.isfinite(max_minutes) and max_minutes >= 0):
         _log(state_dir, f"max_minutes {max_minutes!r} is not a number of minutes: stopping at once")
         max_minutes = 0.0
@@ -215,7 +226,7 @@ def watch(state_dir, max_minutes: float, idle_minutes: float | None = None, kill
                 reason = f"no command for {idle_minutes:g} min, checked on the machine itself"
         if reason:
             break
-        time.sleep(tick)
+        time.sleep(max(0.01, min(tick, began + max_minutes * 60 - now)))     # awake at max_minutes, whatever the tick
     try:
         (state_dir / "watchdog_stopped").write_text(reason + "\n")
     except OSError:

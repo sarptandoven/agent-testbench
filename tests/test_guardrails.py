@@ -54,7 +54,7 @@ def test_the_check_fails_closed_on_numbers_that_are_not_numbers(tmp_path):
     est = budget.worst_case(cfg, "big")
     for bad in (float("nan"), float("inf"), -1.0):
         ok, msg, _ = budget.check(cfg, {**est, "worst_case_usd": bad}, True, "Lower it")
-        assert not ok and "not a number of dollars" in msg, msg
+        assert not ok and "cannot be priced" in msg and "must be a number of dollars" in msg, msg
     cfg["budget"]["ask_above_usd"] = float("nan")             # past validation somehow: still refused
     ok, msg, _ = budget.check(cfg, {**est, "worst_case_usd": 0.1}, False, "Lower it")
     assert not ok

@@ -15,6 +15,9 @@
   every remote run or session must have a hard stop on the remote side. Every budget, price and time limit goes
   through `config.number` (NaN compares false with every limit), and an MCP tool argument that ends up on the
   command line is a value, never an option (`mcp_server._name`, `--opt=value`, or after `--`).
+- Trust: `docs/threat-model.md` names the test behind every guarantee (`tests/test_trust.py` checks each exists); a
+  new guardrail gets a line there. Fuzz tests are `tests/test_fuzz_*.py` (`TESTBENCH_FUZZ_EXAMPLES=N` for a long hunt);
+  `python tools/mutate.py --jobs 2` mutation-tests budget.py and hooks/guard.py (by hand: many minutes).
 - Core and layers (`core.py`, the base for plug-ins; `docs/architecture.md`): the core is `config`, `budget`,
   `prices`, `backends/__init__` and `backends/local`, `runs`, `driver`, `executor`, `expect`, `provenance`, `report`,
   `procs` and `core` itself - load a config, price and check a launch, run a plan on this machine, check it, write and

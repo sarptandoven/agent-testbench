@@ -144,9 +144,11 @@ def _read(p: Path) -> list[dict]:
             row = json.loads(line)
         except ValueError:
             row = None
-        cost = row.get("worst_case_usd" if row.get("event") == "launch" else "usd", 0) if isinstance(row, dict) else None
-        if not isinstance(row, dict) or not isinstance(row.get("time"), str) or not C.number(cost) or (
-                row.get("event") in ("launch", "finish") and not isinstance(row.get("run"), str)):
+        event = row.get("event") if isinstance(row, dict) else None
+        key = {"launch": "worst_case_usd", "finish": "usd"}[event] if event in ("launch", "finish") else None
+        cost = row.get(key or "usd", 0) if isinstance(row, dict) else None       # key: what _committed_today adds up
+        if not isinstance(row, dict) or not isinstance(row.get("time"), str) or not C.number(cost) or key and (
+                key not in row or not isinstance(row.get("run"), str)):
             raise C.ConfigError(f"{p} line {n} is not a ledger entry testbench wrote ({line[:80]!r}); what was spent "
                                 "cannot be counted, so nothing can launch until a person fixes or removes that line")
         rows.append(row)
@@ -162,13 +164,9 @@ def _committed_today(rows: list[dict]) -> float:
     today = dt.date.today().isoformat()
     runs: dict[tuple, float] = {}
     for e in rows:
-        if not e["time"].startswith(today):
-            continue
-        key = (e.get("root"), e["run"])
-        if e["event"] == "launch":
-            runs[key] = e["worst_case_usd"]
-        elif e["event"] == "finish":
-            runs[key] = e["usd"]
+        if e.get("event") not in ("launch", "finish") or not e["time"].startswith(today):
+            continue                                 # another kind of entry costs nothing (and may have no run)
+        runs[(e.get("root"), e["run"])] = e["worst_case_usd" if e["event"] == "launch" else "usd"]
     return round(sum(runs.values()), 4)
 
 
@@ -199,14 +197,17 @@ def check(cfg: dict, est: dict, approve: bool, how_to_lower: str, command: str =
     again is the command that checks again without launching (`testbench estimate smoke`)."""
     lim = limits(cfg)
     cost, what = est["worst_case_usd"], est["what"]
-    if not C.number(cost) or not all(C.number(v) for v, _ in lim.values()):
-        return False, (f"Refused: the worst case of {what} cannot be priced: it came to {cost!r}, not a number of "
-                       f"dollars. Its minutes ({est.get('max_minutes')!r}), the prices and the budget must be numbers "
-                       "of 0 or more; `testbench prices` shows the prices in use."), est
+    numbers = (cost, est.get("max_minutes"), est.get("usd_per_minute"), *(v for v, _ in lim.values()))
+    if not all(C.number(v) for v in numbers):            # NaN passes every comparison below; so would a bad rate
+        return False, (f"Refused: the worst case of {what} cannot be priced: ${cost!r} for {est.get('max_minutes')!r} "
+                       f"min at ${est.get('usd_per_minute')!r} a minute, where each must be a number of dollars or "
+                       "minutes, 0 or more (and so must the budget's limits). `testbench prices` shows the prices in "
+                       "use; `testbench plans` the minutes."), est
     most, where = lim["max_run_usd"]
     if cost > most:
         rate = est["usd_per_minute"]
-        fit = int(est["max_minutes"] + (most - cost) / rate) if rate > 0 else 0     # whole minutes, start-up paid
+        fit = est["max_minutes"] + (most - cost) / rate if rate > 0 else 0.0
+        fit = int(fit) if C.number(fit) else 0                                     # whole minutes, start-up paid
         fixes = [how_to_lower.format(fit=fit)] * (fit >= 1) + ["use a cheaper GPU or backend",
                                                                _raise("max_run_usd", where)]
         fix = ", ".join(fixes[:-1]) + ", or " + fixes[-1]

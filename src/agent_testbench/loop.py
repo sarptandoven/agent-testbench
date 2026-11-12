@@ -302,7 +302,7 @@ def start(root: Path, cfg: dict, plan: str, metric: str, budget_usd: float, goal
         if n is not None and (isinstance(n, bool) or not isinstance(n, int) or n < 1):
             raise LoopError(f"{flag} is a whole number, 1 or more: how many {what}")
     for flag, v, least in (("--budget-usd", budget_usd, 0), ("--max-hours", max_hours, 1e-9), ("--min-delta", min_delta, 0)):
-        if not (isinstance(v, (int, float)) and math.isfinite(v) and v >= least):      # nan would pass every limit
+        if not (C.number(v) and v >= least):         # nan would pass every limit; true is not 1 dollar here
             raise LoopError(f"{flag} is a number of {'at least 0' if least == 0 else 'more than 0'}; got {v!r}")
     path, key = parse_metric(metric)
 

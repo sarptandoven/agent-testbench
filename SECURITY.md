@@ -4,8 +4,9 @@ Please report security problems privately through GitHub's
 [private vulnerability reporting](https://github.com/sarptandoven/agent-testbench/security/advisories/new),
 not in a public issue.
 
-agent-testbench runs code you point it at, on your machine or on cloud machines in your own accounts. Things worth
-knowing:
+agent-testbench runs code you point it at, on your machine or on cloud machines in your own accounts.
+[The threat model](docs/threat-model.md) says who can do what, what testbench stops and which test proves it. Things
+worth knowing:
 
 - It never asks for or stores secret values; plans and sessions refer to secrets by name, and values come from
   your environment, Modal secrets or Colab.
