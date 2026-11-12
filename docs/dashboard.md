@@ -46,6 +46,11 @@ evidence images inline, links to every evidence file and, for a step that kept a
 **The static pages** (`/ui/index.html`) are the ones `testbench ui` writes - every plan with a trend line per checked
 number, every run, the loops and the sessions - rebuilt when you open them.
 
+Every page works from the keyboard and with a screen reader: Tab walks the links (each run in the lists is one, in
+reading order) with a visible focus ring, and an update every 1.5 seconds keeps focus on the link you were on.
+Results are words (PASS, FAIL, LOST) as well as colours, tables have headers, and text is 4.5:1 or more against its
+background in light and dark.
+
 ## Read-only, and this machine only
 
 The dashboard shows; it never acts. No page launches, approves, cancels or spends anything, and there are no buttons

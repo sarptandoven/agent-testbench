@@ -532,6 +532,15 @@ def cmd_ui(a):
 
 def cmd_verify(a):
     from . import provenance
+    if a.source is not None:                         # a bundle `testbench share` published: no project needed
+        if a.run or a.attestation or a.repo:
+            print("testbench: --from checks a published bundle on its own; RUN, --attestation and --repo go without "
+                  f"it: `testbench verify --from {a.source}`", file=sys.stderr)
+            return 2
+        from . import share
+        code, lines = share.verify_from(a.source)
+        print("\n".join(lines))
+        return code
     if a.repo and not a.attestation:
         fix = shlex.join(["testbench", "verify", *([a.run] if a.run else []), "--attestation", "--repo", a.repo])
         print(f"testbench: --repo goes with --attestation (whose workflow should have signed the report): `{fix}`",
@@ -570,6 +579,38 @@ def cmd_verify(a):
     code, text = provenance.verify_attestation(run_dir, rep, a.repo or provenance.github_repo(root))
     print(f"{run_dir.name}: {text}")
     return code
+
+
+def cmd_share(a):
+    from . import share
+    root, cfg = _root_cfg()
+    try:
+        return share.share(root, cfg, a.run, a.to, dry_run=a.dry_run, yes=a.yes, keep_paths=a.keep_paths,
+                           max_file_mb=a.max_file_mb)
+    except share.ShareError as exc:
+        print(f"testbench: {exc}")
+        return exc.code
+
+
+def cmd_badge(a):
+    from . import badge
+    root, cfg = _root_cfg()
+    rep = badge.latest(root, a.plan)
+    if a.plan and a.plan not in cfg["plans"] and rep is None:
+        print(C.no_plan(cfg, a.plan))
+        return 2
+    svg, alt = badge.for_report(rep)
+    out = Path(a.output) if a.output else root / badge.file_name(a.plan or (rep or {}).get("plan"))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(svg, encoding="utf-8")
+    try:
+        image = Path(os.path.relpath(out.resolve(), root.resolve())).as_posix()
+    except ValueError:                               # another drive, on Windows
+        image = out.name
+    print(f"wrote {out}: \"{alt}\" ({'from run ' + rep['run_id'] if rep else 'no finished run yet'})\n"
+          f"For README.md in {root}:\n  {badge.markdown(alt, image, a.link)}\n"
+          "Run it again after each run to keep it current; `testbench share` puts one next to the page it publishes.")
+    return 0
 
 
 def cmd_cancel(a):
@@ -1196,6 +1237,8 @@ GROUPS = {   # `testbench help --all`: every command, in the groups README's Com
     "proof": {
         "report": "a run's report: markdown, json, html or junit",
         "verify": "check a run's evidence against its recorded hashes",
+        "share": "publish a run's proof as a page anyone can open and check",
+        "badge": "a README badge (SVG) of a plan's latest run",
         "diff": "what changed between two runs",
         "history": "a plan's runs over time, with the numbers its checks found",
         "ui": "every run as a page, or a live dashboard (--serve)",
@@ -1290,6 +1333,14 @@ report
 verify
   testbench verify                       # the latest run's evidence files
   testbench verify 20261101-0916 --attestation --repo OWNER/REPO
+  testbench verify --from ./public/20261101-091600-smoke   # a shared run
+share
+  testbench share --to ./public --dry-run   # every file, its size and why
+  testbench share --to git:gh-pages/runs    # commit it there; you push
+  testbench share last~1 --to s3://my-bucket/runs   # with the aws CLI
+badge
+  testbench badge                        # the latest run's plan
+  testbench badge smoke -o docs/badge.svg
 diff
   testbench diff                         # the latest run and the one before it
   testbench diff smoke                   # the plan's last two finished runs
@@ -1571,7 +1622,37 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--repo", metavar="OWNER/REPO",
                            help="with --attestation: the repository whose workflow made it (default: "
                                 "GITHUB_REPOSITORY, else the origin remote)")
+            p.add_argument("--from", dest="source", metavar="URL_OR_FOLDER",
+                           help="check a run `testbench share` published - its folder or its URL - with no project: "
+                                "every file against its manifest, the evidence against the sha256 the run recorded")
         p.set_defaults(fn=fn)
+    p = sub.add_parser("share", help="publish a run's proof as a static page anyone can open and check",
+                       description="Publish one run's proof as a static page others can open and check: its report "
+                                   "as one page (with its tear sheet), report.json, a badge, the evidence files the "
+                                   "page links and a manifest of their sha256, in DEST/RUN/. Every file is listed "
+                                   "with its size and why first; nothing goes out without a person's yes. Never "
+                                   "published: state, plans, ledgers, limits, notes, .env files and keys, secret and "
+                                   "env: values; the page is scrubbed of this machine's paths. Exit 0 published (or "
+                                   "listed), 1 it failed or the evidence changed, 2 refused.")
+    p.add_argument("run", nargs="?", metavar="RUN", help=RUN)
+    p.add_argument("--to", required=True, metavar="DEST",
+                   help="a folder (./public), a branch of this git repository (git:gh-pages/runs: committed, never "
+                        "pushed) or s3://BUCKET/PREFIX (with the aws CLI); the run goes in DEST/RUN/")
+    p.add_argument("--dry-run", action="store_true", help="list every file, its size and why, and publish nothing")
+    p.add_argument("--yes", action="store_true",
+                   help="a person read the list and agreed to publish it (never set this yourself)")
+    p.add_argument("--keep-paths", action="store_true",
+                   help="also publish evidence files that hold this machine's paths, as they are (they cannot be "
+                        "scrubbed: their sha256 is the proof)")
+    p.add_argument("--max-file-mb", type=_positive, default=25.0, metavar="MB",
+                   help="leave out evidence files larger than this (default 25)")
+    p.set_defaults(fn=cmd_share)
+    p = sub.add_parser("badge", help="a README badge (SVG) of a plan's latest run: checks passed, failed, or no runs")
+    p.add_argument("plan", nargs="?", metavar="PLAN", help="a plan in testbench.yaml (default: the latest run's plan)")
+    p.add_argument("-o", "--output", metavar="SVG", help="write it here (default testbench-PLAN.svg in the project)")
+    p.add_argument("--link", metavar="URL", help="where the badge links in the markdown line it prints (e.g. the page "
+                                                 "`testbench share` published)")
+    p.set_defaults(fn=cmd_badge)
     p = sub.add_parser("prices", help="the prices estimates use and where each comes from; --update fetches the catalog")
     p.add_argument("--update", action="store_true", help="fetch the price catalog (it can raise prices, never lower them)")
     p.add_argument("--url", default=None, help="fetch the catalog from here instead of the repository")

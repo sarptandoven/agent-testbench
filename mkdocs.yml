@@ -50,6 +50,7 @@ nav:
   - "Watch: rerun on change": watch.md
   - Notifications: notify.md
   - Proof records: proof-records.md
+  - "Share a run: a page, a badge": share.md
   - Live dashboard: dashboard.md
   - "Exports: MLflow, W&B, csv": export.md
   - CI: github-action.md

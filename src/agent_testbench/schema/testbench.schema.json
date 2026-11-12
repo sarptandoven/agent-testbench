@@ -131,7 +131,7 @@
           "description": "Commands the hook asks a person about first, e.g. [git push, gh pr merge]",
           "type": "array",
           "items": {"type": "string"},
-          "default": ["git push", "gh repo create", "gh pr merge", "gh release create"]
+          "default": ["git push", "gh repo create", "gh pr merge", "gh release create", "testbench share"]
         }
       }
     },

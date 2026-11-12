@@ -294,9 +294,17 @@ code{font-size:13px}.passed,.PASS{color:var(--pass);font-weight:600}.failed,.err
 .badge{display:inline-block;padding:1px 8px;border-radius:99px;border:1px solid currentColor;font-size:13px}
 figure{margin:12px 0}figure img{max-width:100%;border:1px solid var(--line);border-radius:6px;background:#fff}
 figcaption{font-size:12px;color:var(--muted)}.scroll{overflow-x:auto}
+:focus-visible{outline:2px solid var(--link);outline-offset:2px}.vh{position:absolute;width:1px;height:1px;margin:-1px;
+padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 """
 IMAGE_LIMIT = 1_500_000
 IMAGES_TOTAL = 12_000_000
+
+
+def head(*cols: str) -> str:
+    """A table's header row: a th with scope=col for each column; the empty one of the result column (PASS, FAIL)
+    still says what it holds to a screen reader. cols are HTML, escaped by the caller."""
+    return "<tr>" + "".join(f"<th scope=col>{c or '<span class=vh>result</span>'}</th>" for c in cols) + "</tr>"
 
 
 def page(title: str, body: str, head: str = "") -> str:
@@ -312,10 +320,13 @@ def render_html(report: dict, run_dir: Path) -> str:
     return page(f"{ICON.get(r['status'], r['status'])} {r.get('plan')} {r.get('run_id')}", html_body(report, run_dir))
 
 
-def html_body(report: dict, run_dir: Path) -> str:
-    """What render_html's page holds (the live dashboard shows it under its own header)."""
+def html_body(report: dict, run_dir: Path, published: set | None = None) -> str:
+    """What render_html's page holds (the live dashboard shows it under its own header). With `published` (the
+    evidence paths `testbench share` publishes next to the page), images are links to those files rather than
+    inline, and evidence that is not published is listed without a link."""
     import base64
     import html
+    import urllib.parse
     e = html.escape
     r, run_dir = report, Path(run_dir)
     when = dt.datetime.fromtimestamp(r["started"]).strftime("%Y-%m-%d %H:%M") if r.get("started") else "?"
@@ -370,8 +381,8 @@ def html_body(report: dict, run_dir: Path) -> str:
     windows = [w for w in r.get("windows") or [] if isinstance(w, dict)]
     if windows:
         out += [f"<h2>Walk-forward: {e(counted(len(windows), 'window'))}, "
-                f"{sum(w.get('status') == 'passed' for w in windows)} passed</h2><div class=scroll><table><tr><th></th>"
-                "<th>window</th><th>train</th><th>test</th><th>rows (train / test)</th></tr>"
+                f"{sum(w.get('status') == 'passed' for w in windows)} passed</h2><div class=scroll><table>"
+                + head("", "window", "train", "test", "rows (train / test)")
                 + "".join(f"<tr><td class='{e(str(w.get('status')))}'>{e(_icon(w.get('status')))}</td>"
                           f"<td>{e(str(w.get('window')))}</td><td>{e(str(w.get('train_start')))} to "
                           f"{e(str(w.get('train_end')))}</td><td>{e(str(w.get('test_start')))} to "
@@ -385,17 +396,18 @@ def html_body(report: dict, run_dir: Path) -> str:
                     f"<td>{s.get('minutes', 0):.2f}</td><td>{sum(c['ok'] for c in checks)}/{len(checks)}</td>"
                     f"<td>{e(str(gpu.get('busy_pct')) + '%' if gpu else '-')}</td></tr>")
     rows += [f"<tr><td class=muted>SKIPPED</td><td>{e(n)}</td><td></td><td></td><td></td></tr>" for n in r.get("skipped", [])]
-    out += ["<h2>Steps</h2><div class=scroll><table><tr><th></th><th>step</th><th>minutes</th><th>checks</th>"
-            "<th>GPU busy</th></tr>" + "".join(rows) + "</table></div>"]
+    out += ["<h2>Steps</h2><div class=scroll><table>" + head("", "step", "minutes", "checks", "GPU busy")
+            + "".join(rows) + "</table></div>"]
     checks = [(s["name"], c) for s in r.get("steps", []) for c in s.get("expectations") or []]
     if checks:
-        out += ["<h2>Checks</h2><div class=scroll><table><tr><th></th><th>step</th><th>check</th><th>found</th></tr>"
+        out += ["<h2>Checks</h2><div class=scroll><table>" + head("", "step", "check", "found")
                 + "".join(f"<tr><td class='{'passed' if c['ok'] else 'failed'}'>{'ok' if c['ok'] else 'missed'}</td>"
                           f"<td>{e(n)}</td><td>{e(c['check'])}</td><td>{e(c['detail'])}</td></tr>" for n, c in checks)
                 + "</table></div>"]
     out.append(_strategy(r, run_dir, "html"))
     import hashlib
     shown, seen, budget_left = [], set(), IMAGES_TOTAL
+    link = lambda path: e(urllib.parse.quote(path, safe="/", errors="surrogatepass"))  # noqa: E731 - a relative URL
     for s in r.get("steps", []):
         names = list(s.get("images", [])) + list((s.get("web") or {}).get("screenshots", []))
         names += [f"artifacts/{a}" for a in s.get("artifacts", []) if "(not copied" not in a]
@@ -404,21 +416,28 @@ def html_body(report: dict, run_dir: Path) -> str:
             mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(f.suffix.lower())
             if not mime or not inside(run_dir, f) or f.stat().st_size > min(IMAGE_LIMIT, budget_left):
                 continue
+            rel = f.resolve().relative_to(run_dir.resolve()).as_posix()
+            if published is not None and rel not in published:
+                continue
             raw = f.read_bytes()
             if hashlib.sha256(raw).digest() in seen:                 # a plot shown in a cell and saved as a file
                 continue
             seen.add(hashlib.sha256(raw).digest())
             budget_left -= len(raw)
-            data = base64.b64encode(raw).decode()
-            shown.append(f"<figure><img alt='{e(name)}' src='data:{mime};base64,{data}'><figcaption>{e(s['name'])}: "
+            src = link(rel) if published is not None else f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+            shown.append(f"<figure><img alt='{e(s['name'])}: {e(name)}' src='{src}'><figcaption>{e(s['name'])}: "
                          f"{e(name)}</figcaption></figure>")
     if shown:
         out += ["<h2>Evidence to look at</h2>"] + shown
     files = r.get("evidence") or []
     if files:
+        def where(x) -> str:
+            if published is None or x["path"] in published:
+                return f"<a href='{link(x['path'])}'>{e(x['path'])}</a>"
+            return f"{e(x['path'])} <span class=muted>(not published)</span>"
         out += [f"<details><summary>{len(files)} evidence files (sizes and sha256)</summary><div class=scroll><table>"
-                "<tr><th>file</th><th>bytes</th><th>sha256</th></tr>"
-                + "".join(f"<tr><td><a href='{e(x['path'])}'>{e(x['path'])}</a></td><td>{e(str(x['bytes']))}</td>"
+                + head("file", "bytes", "sha256")
+                + "".join(f"<tr><td>{where(x)}</td><td>{e(str(x['bytes']))}</td>"
                           f"<td><code>{e(x['sha256'][:16])}</code></td></tr>" for x in files) + "</table></div></details>"]
     if src or env:
         env = {k: v for k, v in env.items() if k != "package_versions"}      # for testbench diff; too long for here

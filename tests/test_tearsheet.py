@@ -165,17 +165,17 @@ def test_the_monthly_table_of_a_hand_made_series(tmp_path):
     assert m["years"] == pytest.approx({2023: 0.0, 2024: 0.155, 2025: -0.1})
     page = T.fragment(T.sheet(tmp_path / "equity.csv"))
     table = re.search(r"<table class=ts-months>(.*?)</table>", page, re.S).group(1)
-    row = re.search(r"<tr><th>2024</th>(.*?)</tr>", table).group(1)
+    row = re.search(r"<tr><th scope=row>2024</th>(.*?)</tr>", table).group(1)
     cells = re.findall(r"<td([^>]*)>([^<]*)</td>", row)
     assert [html.unescape(text) for _, text in cells] == ["+10.0%", "\u22125.0%", "", "+10.5%"] + [""] * 8 + \
         ["+15.5%"], "Jan to Dec, then the year (115.5 / 100 - 1)"
     assert [re.search(r"class='?([\w-]+)", attrs).group(1) for attrs, _ in cells[:4]] == \
         ["ts-u3", "ts-d3", "ts-none", "ts-u3"]
     assert "title='January 2024: +10.00%'" in row and "ts-year ts-u3" in row
-    assert re.search(r"<tr><th>2023</th><td class=ts-none></td>(<td class=ts-none></td>){10}<td class=ts-z "
+    assert re.search(r"<tr><th scope=row>2023</th><td class=ts-none></td>(<td class=ts-none></td>){10}<td class=ts-z "
                      r"title='December 2023: \+0\.00%'>0\.0%</td>", table), "a month that rounds to 0 shows 0.0%"
-    assert re.search(r"<tr><th>2025</th><td class=ts-d3 title='January 2025: &#8722;10\.00%'>&#8722;10\.0%</td>",
-                     table)
+    assert re.search(r"<tr><th scope=row>2025</th><td class=ts-d3 title='January 2025: &#8722;10\.00%'>"
+                     r"&#8722;10\.0%</td>", table)
     assert [T.shade(r) for r in (0.0004, 0.01, 0.03, 0.06, -0.01, -0.03, -0.06)] == \
         ["ts-z", "ts-u1", "ts-u2", "ts-u3", "ts-d1", "ts-d2", "ts-d3"]
 

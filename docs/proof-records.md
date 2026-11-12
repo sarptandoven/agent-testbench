@@ -1,8 +1,8 @@
 # Proof records
 
 <!-- From README.md, "Proof records", and docs/reference.md, "Proof records" and "Run folder". Edit them there.
-     "Comparing two runs" is this page's own. The screenshots are made by docs/assets/make_screenshots.py from the
-     runs of docs/tour.md. -->
+     "Checking a run away from its project" and "Comparing two runs" are this page's own. The screenshots are made
+     by docs/assets/make_screenshots.py from the runs of docs/tour.md. -->
 --8<-- "README.md#proof-records"
 
 `testbench ui` for the demo project after the runs of [the tour](tour.md) (a screenshot):
@@ -21,6 +21,23 @@ loop's best run in the tour):
 ## The run folder
 
 --8<-- "docs/reference.md#run-folder"
+
+## Checking a run away from its project: verify --from
+
+`testbench verify` checks a run in its project. A run published with [`testbench share`](share.md) - a folder, a
+branch for GitHub Pages, a bucket - is checked from its address or a downloaded copy, with no project at all:
+
+```
+$ testbench verify --from https://ada.github.io/proj/runs/20261112-094032-p/
+https://ada.github.io/proj/runs/20261112-094032-p/: run 20261112-094032-p (plan p, passed): all 8 files the manifest lists match it; 5 of the run's 8 evidence files were published, each matching the sha256 the run recorded, and the run's list adds up to its evidence_sha256 66f75f520455b8e8 (3 left out when it was shared: the manifest says why).
+This shows the files are the ones published and agree with the report. Someone who rewrote report.json together with the evidence would pass it too, so compare that evidence_sha256 with the one the run printed when it ended (in its report.md, the CI log, or the commit that published it).
+```
+
+It checks every file against the bundle's `testbench-manifest.json` (sha256 and size), the report's list of evidence
+hashes against its `evidence_sha256`, and each published evidence file against the sha256 the run recorded. Exit 0
+when it all holds, 1 naming each file that does not (`changed: ...`, `missing: ...`, `not in the manifest: ...`), 2
+when it could not be checked. Evidence left out when the run was shared (a file holding a secret's value or this
+machine's paths) is counted, not checked: the manifest says why each was left out.
 
 ## Comparing two runs: testbench diff
 

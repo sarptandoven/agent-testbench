@@ -216,6 +216,8 @@ running, its log as it grows, sessions, the loop, and today's spend against your
 machine only ([docs/dashboard.md](docs/dashboard.md)). `testbench export --to mlflow|wandb|csv|jsonl` (or `export:` in testbench.yaml,
 after every run) puts runs where you already track experiments, with the evidence attached
 ([docs/export.md](docs/export.md)).
+`testbench share --to git:gh-pages/runs` publishes a run as a page anyone can open, with a README badge, and
+`testbench verify --from URL` checks it there - no project needed ([docs/share.md](docs/share.md)).
 
 ## Loops
 
@@ -285,7 +287,7 @@ The rest, for setup, money, notebooks and more (`testbench help --all` lists eve
 |---|---|
 | `testbench init [--recipe]` / `recipes` / `schema` / `connect` / `selftest` / `mcp [--http]` / `plugins` / `plugin test` | set up a project and your agents, editor autocomplete for testbench.yaml, check the promises hold here, serve MCP, list plug-ins and check one keeps its contract |
 | `testbench wait` / `status` / `runs` / `cancel` / `watch` | follow, list and stop runs; run a free plan again on every change |
-| `testbench diff` / `history` / `export` | what changed between runs, the checked numbers over time, MLflow / W&B / csv / jsonl |
+| `testbench diff` / `history` / `export` / `share` / `badge` | what changed between runs, the checked numbers over time, MLflow / W&B / csv / jsonl, a run as a page others can check, a README badge |
 | `testbench files` / `notify test` | files on a session's machine; a test message to the `notify:` webhook |
 | `testbench spend [--modal]` / `prices [--update]` | money |
 | `testbench lint` / `rescue` / `nb split/build/fields` / `note` | notebooks and the lab notebook |

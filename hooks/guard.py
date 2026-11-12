@@ -10,12 +10,14 @@ Anywhere, it keeps the limits out of the agent's hands:
   2. editing or deleting a ledger (.testbench/ledger.jsonl, ~/.testbench/ledger.jsonl) is refused, and so is a
      command that points testbench at another limits folder (TESTBENCH_USER_DIR, HOME);
   3. a run, watch, session or loop with --approve (or approved_by_person=true) becomes a question to the person, and
-     so does `testbench prices --update --url` (prices from somewhere else);
+     so do `testbench prices --update --url` (prices from somewhere else) and `testbench share` without --dry-run
+     (it publishes a run where others can read it);
 Inside a project with a testbench.yaml, it also acts on:
   4. raw cloud launches (`modal run/deploy/serve/shell`, `colab new/run/ssh/exec`) are refused, because
      `testbench run` is what enforces the budget and keeps the evidence;
   5. commands that would print secrets (.env files, printenv, echo $..._KEY or $..._WEBHOOK) are refused;
-  6. commands listed under `guard.ask` in testbench.yaml (default: git push, gh repo create, ...) ask first.
+  6. commands listed under `guard.ask` in testbench.yaml (default: git push, gh repo create, ..., testbench share)
+     ask first; with --dry-run (it changes nothing) they do not.
 Anything else gets no decision from this hook. If the hook itself fails, it stays out of the way. It is a safety
 net against an agent changing its own limits, not a sandbox: code an agent runs can still do anything (a script
 that runs `testbench run --approve` is not seen here) - which is why the machine's limits in limits.yaml are
@@ -30,7 +32,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-DEFAULT_ASK = ["git push", "gh repo create", "gh pr merge", "gh release create"]
+DEFAULT_ASK = ["git push", "gh repo create", "gh pr merge", "gh release create", "testbench share"]
 BUDGET_DEFAULTS = {"max_run_usd": 2.0, "ask_above_usd": 0.5, "max_day_usd": 10.0}
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit")
 USER_DIR = Path(os.environ.get("TESTBENCH_USER_DIR") or Path.home() / ".testbench").resolve()
@@ -241,6 +243,10 @@ def check_approvals(cmd: str, root) -> None:
         if sub == "prices" and any(w == "--url" or w.startswith("--url=") for w in rest):
             decide("ask", "agent-testbench: this fetches prices from another catalog than the project's own; a "
                           "catalog can only raise prices, but approve only if you know where this one comes from.")
+        if sub == "share" and "--dry-run" not in rest:
+            decide("ask", "agent-testbench: `testbench share` publishes a run's report and evidence where other people "
+                          "can read them (a folder, a branch to push, a bucket). Approve only if you want this run "
+                          "published there; `testbench share ... --dry-run` lists every file it would publish first.")
         launches = sub in ("run", "watch") or (sub in ("loop", "session") and names[:1] == ["start"])
         approving = any(w == "--approve" or w.startswith("--approve=") for w in rest)
         if launches and not approving and re.search(r"[$`]", " ".join(rest)):
@@ -302,8 +308,10 @@ def main() -> None:
     check_approvals(cmd, root)
     if root is not None:
         for phrase in ask_list(root):
-            if re.search(r"(^|[;&|]\s*|\s)" + re.escape(phrase) + r"\b", cmd):
-                decide("ask", f"agent-testbench: `{phrase}` is on this project's ask-first list (testbench.yaml guard.ask).")
+            for seg in re.split(r"[;&|\n]+", cmd):             # a --dry-run changes nothing: it needs no question
+                if re.search(r"(^\s*|\s)" + re.escape(phrase) + r"\b", seg) and "--dry-run" not in seg.split():
+                    decide("ask", f"agent-testbench: `{phrase}` is on this project's ask-first list (testbench.yaml "
+                                  "guard.ask).")
 
 
 if __name__ == "__main__":

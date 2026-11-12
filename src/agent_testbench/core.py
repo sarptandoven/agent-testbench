@@ -67,6 +67,8 @@ LAYER_MODULES = (
     "agent_testbench.notebook", "agent_testbench.web", "agent_testbench.mocks",
     # after a run: notifications and exports
     "agent_testbench.notify", "agent_testbench.export",
+    # a run's proof for others: a page to publish (and check), a README badge
+    "agent_testbench.share", "agent_testbench.badge",
     # work built on runs
     "agent_testbench.loop", "agent_testbench.watch", "agent_testbench.diff", "agent_testbench.rescue",
     # setting a project up

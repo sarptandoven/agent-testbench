@@ -747,8 +747,9 @@ def shade(r: float) -> str:
 def _months(s: dict) -> str:
     m, bm = s["monthly"], s["benchmark_monthly"]
     years = sorted(m["years"])
-    head = "<tr><th></th>" + "".join(f"<th>{x}</th>" for x in MONTHS) + "<th>Year</th>" \
-        + ("<th title='The benchmark, bought and held over the same rows'>Buy and hold</th>" if bm else "") + "</tr>"
+    head = "<tr><td></td>" + "".join(f"<th scope=col>{x}</th>" for x in MONTHS) + "<th scope=col>Year</th>" \
+        + ("<th scope=col title='The benchmark, bought and held over the same rows'>Buy and hold</th>" if bm else "") \
+        + "</tr>"
     rows = []
     for y in years:
         cells = []
@@ -763,7 +764,7 @@ def _months(s: dict) -> str:
             b = bm["years"].get(y)
             cells.append("<td></td>" if b is None else f"<td title='Buy and hold, {y}: {_num(_pct(b, 2))}'>"
                          f"{_num(_pct(b))}</td>")
-        rows.append(f"<tr><th>{y}</th>{''.join(cells)}</tr>")
+        rows.append(f"<tr><th scope=row>{y}</th>{''.join(cells)}</tr>")
     lo, hi = (f"{b * 100:g}%" for b in BINS)
     scale = [("ts-d3", f"-{hi} or less"), ("ts-d2", f"-{lo} to -{hi}"), ("ts-d1", f"0 to -{lo}"), ("ts-z", "0.0%"),
              ("ts-u1", f"0 to +{lo}"), ("ts-u2", f"+{lo} to +{hi}"), ("ts-u3", f"+{hi} or more")]
@@ -805,7 +806,8 @@ def _trades(s: dict) -> str:
         rows.append(("Still open", f"{n['open_positions']:,} symbol{'s' if n['open_positions'] > 1 else ''} at the end",
                      TRADE_ROWS["Still open"]))
     return ("<h3>Trades</h3><div class=scroll><table class=ts-trades>"
-            + "".join(f"<tr><th title='{_e(what)}'>{_e(k)}</th><td>{_num(v)}</td></tr>" for k, v, what in rows)
+            + "".join(f"<tr><th scope=row title='{_e(what)}'>{_e(k)}</th><td>{_num(v)}</td></tr>"
+                      for k, v, what in rows)
             + "</table></div>")
 
 
@@ -821,7 +823,8 @@ def page(sheets: list[tuple[str, dict]], title: str = "Tear sheet", intro: str =
     """A whole page of tear sheets: self-contained, no script, nothing fetched."""
     from .. import report as R
     body = [f"<h1>{_e(title)}</h1>"] + ([f"<div class=muted>{_e(intro)}</div>"] if intro else [])
-    body += [fragment(s, label if len(sheets) > 1 or not intro else "", style=i == 0)
+    body += [fragment(s, label, style=i == 0) if len(sheets) > 1 or not intro else
+             f"<h2 class=vh>{_e(label)}</h2>" + fragment(s, "", style=i == 0)     # the outline goes h1, h2, h3
              for i, (label, s) in enumerate(sheets)]
     return R.page(title, "\n".join(body))
 
