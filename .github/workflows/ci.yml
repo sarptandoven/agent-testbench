@@ -18,6 +18,8 @@ jobs:
         include:
           - os: windows-latest
             python: "3.12"
+          - os: ubuntu-latest      # what uvx picks: a start-up crash on 3.14 went unseen until a person hit it
+            python: "3.14"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,7 +34,7 @@ jobs:
       - name: install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]" scikit-learn==1.5.2 matplotlib==3.9.2
+          python -m pip install -e ".[dev]" ${{ matrix.python == '3.14' && 'scikit-learn matplotlib' || 'scikit-learn==1.5.2 matplotlib==3.9.2' }}
           python -m playwright install --with-deps chromium
       - name: tests
         # in parallel: a pytest-xdist worker per vCPU (-n auto counts physical cores, which can be half of them; the
