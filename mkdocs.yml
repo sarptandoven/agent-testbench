@@ -46,6 +46,8 @@ nav:
       - ssh: ssh.md
       - Kubernetes: kubernetes.md
       - Plugins: plugins.md
+      - Plug-in sinks: plugins-sinks.md
+      - Plug-in notifiers: plugins-notifiers.md
   - Loops: loops.md
   - "Watch: rerun on change": watch.md
   - Notifications: notify.md

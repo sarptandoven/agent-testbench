@@ -250,10 +250,15 @@ def _spend(root: Path, cfg: dict) -> str:
                   f"{most_where}; {ask_where}"))
     if not cfg.get("notify"):
         cards.append(("notifications", "none", "notify: in testbench.yaml sends a message when a run or loop ends"))
-    else:
+    elif list(notify.chosen(cfg["notify"])) == ["webhook"]:
         url, source = notify.target(cfg)
         cards.append(("notifications", e(f"to {notify.where(url)}") if url else "not set up here",
                       f"{source}; on {', '.join(cfg['notify']['on'])}" if url else source))
+    else:                                            # the desktop or plug-in notifiers: where each sends, or why not
+        found = notify.places(cfg)
+        ready = [f"to {shown}" for _, shown, missing in found if not missing]
+        cards.append(("notifications", e("; ".join(ready)) if ready else "not set up here",
+                      "; ".join([missing for *_, missing in found if missing] + [f"on {', '.join(cfg['notify']['on'])}"])))
     return ("<h2>Spend today</h2><div class=facts>"
             + "".join(f"<div><b>{e(k)}</b>{v}<br><span class=small>{e(w)}</span></div>" for k, v, w in cards)
             + "</div><div class=small>Committed: what finished runs and sessions cost, and the worst case of those "

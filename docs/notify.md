@@ -4,7 +4,9 @@ An agent left to work - a loop overnight, a long training run - finishes, gets s
 nobody is looking. With a `notify:` section in testbench.yaml, testbench tells you: it POSTs a short JSON message
 to a webhook when a run ends, when a loop's stopping rule fires and when the loop ends, and when a launch is
 waiting for a person's yes. A Slack incoming
-webhook works as it is; so does any URL that takes a JSON POST.
+webhook works as it is; so does any URL that takes a JSON POST. Working at the machine yourself? `desktop: true`
+shows the same messages on its screen ([The desktop](#the-desktop)), and a package can add other notifiers
+([Other notifiers](#other-notifiers)).
 
 ## Set it up
 
@@ -27,16 +29,19 @@ your shell, the environment the MCP server starts in, or a CI secret.
 
 `testbench notify test` sends one message whatever `on:` says, and says whether the service accepted it (exit 0),
 refused it (exit 1, with the HTTP status and what the service said), or why nothing was sent (exit 2: no `notify:`
-section, or the variable is not set).
+section, or the variable is not set). With more than one notifier it sends to each, and says how each went.
 
 | field | what to write |
 |---|---|
 | `webhook` | the URL to POST to, `https://...` |
 | `webhook_env` | instead: the NAME of an environment variable that holds the URL |
-| `on` | a list of `run_end`, `loop_rule`, `loop_end`, `approval_needed`, `watch_run`, `loop_try`; default the first four. `loop_end` brings `loop_rule` along (a rule firing was sent as `loop_end` before `loop_rule` was its own event), so a list written then still hears it |
+| `desktop` | `true`: a notification on this machine's screen as well ([The desktop](#the-desktop)) |
+| another notifier's name | an installed plug-in's notifier: `true`, or its settings ([Other notifiers](#other-notifiers)) |
+| `on` | a list of `run_end`, `loop_rule`, `loop_end`, `approval_needed`, `watch_run`, `loop_try`; default the first four, for every notifier. `loop_end` brings `loop_rule` along (a rule firing was sent as `loop_end` before `loop_rule` was its own event), so a list written then still hears it |
 
-Exactly one of `webhook` and `webhook_env`. A mistake in the section stops testbench.yaml from loading, with a
-message that says what to write instead (and never repeats the URL).
+At most one of `webhook` and `webhook_env`, and at least one notifier: the webhook, `desktop`, or another (`false`
+leaves one out). A mistake in the section stops testbench.yaml from loading, with a message that says what to write
+instead (and never repeats the URL).
 
 ## Events
 
@@ -82,7 +87,9 @@ Real messages, from the test suite's stand-in for a webhook (the last two with s
 
 ## Delivery never gets in the way
 
-- One attempt per event, at most 5 seconds in all (a slow name lookup included), and no retries.
+- One attempt per event, at most 5 seconds in all (a slow name lookup included), and no retries. With several
+  notifiers, all of them at once, each within those 5 seconds; one still going a second later is written off as
+  `no answer within 5 s`.
 - `run_end` goes out after the run's state says it finished, so `testbench wait` and the agent are not held up;
   `approval_needed` goes out after the launch lock is released, so no other launch waits on it.
 - Each run is told once, whoever closes it out: a `testbench cancel` that stopped waiting for a slow driver and
@@ -105,3 +112,43 @@ never its path, query or a password in it. Errors in the `notify:` section do no
 guard hook refuses commands that would print a webhook variable (`echo $SLACK_WEBHOOK_URL`, `printenv
 TESTBENCH_WEBHOOK`), as it does for keys and tokens. Changing where notifications go is not a spending change, so
 the hook lets edits of `notify:` through; edits that raise a budget still ask.
+
+## The desktop
+
+```yaml
+notify:
+  desktop: true                     # alone, or next to webhook_env:
+```
+
+A notification on the screen of the machine testbench runs on, for when you are working at it: no account, no
+URL, no settings. It uses `notify-send` on Linux (from libnotify: `apt install libnotify-bin` or `dnf install
+libnotify`), `osascript` on macOS, and a PowerShell toast on Windows (`msg` when that fails). The text is handed over
+as a value, never as part of a command.
+
+```
+$ testbench notify test
+Test message to this machine's desktop (notify-send): accepted (exit 0).
+```
+
+Where there is no way to show one - a server, CI, a container - nothing else happens: `notify.log` says
+`nothing sent - no desktop notification on this machine: notify-send is not installed (...)`, and a command that
+fails (no display to show it on) is a `not accepted (exit 1: ...)` line. Neither fails a run. Since a remote run is
+closed out on this machine, its notification shows here too.
+
+## Other notifiers
+
+A package can add a notifier - a chat service, a pager, a file another tool watches - with an entry point in the
+group `agent_testbench.notifiers`. Installed in the Python that runs testbench, it goes under `notify:` by its name,
+with its settings, next to the webhook and the desktop:
+
+```yaml
+notify:
+  webhook_env: TESTBENCH_WEBHOOK
+  events: {path: ~/testbench-events.jsonl}      # examples/plugins/testbench-notifier-example
+```
+
+It hears every event `on:` lists, at the same time as the others, and keeps the same promises: within the same 5
+seconds, never failing or holding up a run, every attempt a line in `notify.log`, a URL shown only as its scheme and
+host, and secrets only through environment variables (a setting named like a token or key must end in `_env` and
+hold a variable's name). If its package breaks, testbench.yaml still loads and `notify.log` says it did not load.
+[Plug-in notifiers](plugins-notifiers.md) shows how to write one and the contract `testbench plugin test` checks.

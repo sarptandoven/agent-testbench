@@ -26,6 +26,9 @@ testbench, `pip install "agent-testbench[mlflow]"` or `pip install "agent-testbe
 `pip install mlflow` / `wandb`; `mlflow-skinny` is enough for an MLflow server over HTTP). Without it, an export
 says which command installs it.
 
+Somewhere else? A package can add a sink of its own - a sheet, an internal dashboard, a table in your wiki - and
+then `export:` and `--to` take its name like the four above ([Plug-in sinks](#plug-in-sinks)).
+
 ## What a run becomes
 
 | | MLflow | W&B | csv / jsonl |
@@ -77,13 +80,15 @@ A run exported again is updated, not duplicated, wherever the tracker allows it:
 
 `csv` and `jsonl` take the file's path (relative to the project), or `{path: ...}`; `true` means
 `.testbench/runs.csv` / `.testbench/runs.jsonl`. `false` leaves a target out. On the command line, `--to` picks one
-target and `--tracking-uri`, `--experiment`, `--project`, `--entity`, `--mode`, `--path` and `--no-artifacts`
-override its settings. The MCP tool is `export_run` (`run`, `to`).
+target (a built-in or an installed plug-in sink) and `--tracking-uri`, `--experiment`, `--project`, `--entity`,
+`--mode`, `--path` and `--no-artifacts` override its settings. The MCP tool is `export_run` (`run`, `to`).
 
 ## After every run
 
 With an `export:` section, the end of every run exports it: csv and jsonl at once (milliseconds), MLflow and W&B
 in a background process, so a slow or unreachable tracker never holds a run up (it gives up after 15 minutes).
+A plug-in sink goes where it says it belongs: in the background with the trackers, or at the end of the run,
+each in a thread of its own and written off after 60 seconds, so even a sink that hangs costs the run no more.
 An export never fails a run. Every outcome goes to `export.log` in the run folder, and `testbench report` ends
 with them:
 
@@ -105,6 +110,29 @@ written.
 
 For exports, testbench turns off MLflow's usage telemetry (`MLFLOW_DISABLE_TELEMETRY`) and W&B's error reports
 (`WANDB_ERROR_REPORTING`), so nothing but the run is sent; set those variables yourself to choose otherwise.
+
+## Plug-in sinks
+
+The four targets above are the built-in sinks. A package adds another with an entry point in the group
+`agent_testbench.sinks`; once it is installed in the Python that runs testbench, its name works everywhere a
+built-in's does:
+
+```yaml
+export:
+  csv: .testbench/runs.csv
+  markdown: docs/runs.md            # examples/plugins/testbench-sink-example: a markdown table row per run
+```
+
+```bash
+testbench export all --to markdown
+```
+
+The sink checks its own settings, so a mistake is refused when testbench.yaml loads, naming the field
+(`export.markdown.path`); a setting that would hold a secret is refused for every sink (give an environment
+variable's name instead, in a setting ending in `_env`). A plug-in sink keeps the promises above: its outcome is a
+line in `export.log` and `testbench report`, and nothing it does fails or holds up a run - even when its package
+breaks after an upgrade, testbench.yaml still loads and only that export fails, saying the sink did not load.
+[Plug-in sinks](plugins-sinks.md) shows how to write one and the contract `testbench plugin test` checks.
 
 ## How it is tested
 

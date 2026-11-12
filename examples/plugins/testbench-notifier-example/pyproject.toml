@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "testbench-notifier-example"
+version = "0.1.0"
+description = "An example agent-testbench notifier: events as JSON lines in a file, or POSTed to a local service"
+requires-python = ">=3.10"
+dependencies = ["agent-testbench"]
+
+# `notify: {events: ...}` finds the notifier by this name
+[project.entry-points."agent_testbench.notifiers"]
+events = "testbench_notifier_example:EventsNotifier"
+
+[tool.setuptools]
+py-modules = ["testbench_notifier_example"]

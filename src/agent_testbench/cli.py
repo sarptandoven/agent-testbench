@@ -801,14 +801,16 @@ def cmd_notify(a):
               "  notify:\n    webhook_env: TESTBENCH_WEBHOOK      # an environment variable that holds the URL\n"
               "    on: [run_end, loop_rule, loop_end, approval_needed]")
         return 2
-    url, source = N.target(cfg)
-    if not url:
-        print(f"testbench: nothing was sent: {source}.")
+    found = N.places(cfg)                            # (notifier, where it sends, what is missing here)
+    if all(missing for *_, missing in found):
+        print(f"testbench: nothing was sent: {'; '.join(missing for *_, missing in found)}.")
         return 2
     ok, what = N.send(root, cfg, "test", f"a test message from `testbench notify test`. Notifications for "
                       f"{', '.join(cfg['notify']['on'])} go here.", {"status": "test"}, force=True)
-    print(f"Test message {what}." + ("" if ok else " Check the URL and that the service takes a JSON POST; every "
-                                                     f"attempt is in {N.log_path(root).relative_to(root).as_posix()}."))
+    check = "Check the URL and that the service takes a JSON POST" if [n for n, *_ in found] == ["webhook"] else \
+        "Each part above says what went wrong"
+    print(f"Test message {what}." + ("" if ok else f" {check}; every attempt is in "
+                                                     f"{N.log_path(root).relative_to(root).as_posix()}."))
     if ok and cfg["notify"]["webhook"]:
         print("The URL is written in testbench.yaml; if that file is committed or copied to other machines, so is "
               "the webhook's secret. `webhook_env: NAME` reads it from an environment variable instead.")
@@ -1423,8 +1425,9 @@ def build_parser() -> argparse.ArgumentParser:
                                       "(again: updates it, no duplicate)")
     p.add_argument("run", nargs="?", metavar="RUN",
                    help="run id or prefix, latest (the default), or all (every finished run)")
-    p.add_argument("--to", choices=["mlflow", "wandb", "csv", "jsonl"],
-                   help="where to (default: every target in testbench.yaml's export: section)")
+    p.add_argument("--to", metavar="{mlflow,wandb,csv,jsonl,...}",
+                   help="where to: a built-in or an installed plug-in sink (default: every target in testbench.yaml's "
+                        "export: section)")
     p.add_argument("--tracking-uri", help="with --to mlflow (default: export.mlflow.tracking_uri, MLFLOW_TRACKING_URI)")
     p.add_argument("--experiment", help="with --to mlflow (default: the project's name)")
     p.add_argument("--project", help="with --to wandb: the W&B project (default: the project's name)")
