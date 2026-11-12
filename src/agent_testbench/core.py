@@ -48,6 +48,7 @@ CORE_MODULES = (
     "agent_testbench.provenance",          # source, environment and evidence hashes; verify
     "agent_testbench.report",              # the report: json, md, html, junit, history
     "agent_testbench.procs",               # background processes and lock files, the same on every system
+    "agent_testbench.plugins",             # finds, loads and hands out plug-ins of every kind
 )
 
 # Every other module of the package is a layer. A package name stands for its modules too.
@@ -69,6 +70,8 @@ LAYER_MODULES = (
     "agent_testbench.loop", "agent_testbench.watch", "agent_testbench.diff", "agent_testbench.rescue",
     # setting a project up
     "agent_testbench.scaffold", "agent_testbench.recipes", "agent_testbench.lint", "agent_testbench.selftest",
+    # the trading pack: standard files, testbench's own metrics, overfitting statistics
+    "agent_testbench.trading",
 )
 
 # The only package outside the standard library a core module imports at module level (testbench.yaml, limits.yaml).
