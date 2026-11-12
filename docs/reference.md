@@ -333,6 +333,9 @@ steps/NN-name/    log.txt, result.json, executed.ipynb, cellNN_imageK.png, downl
 
 `.testbench/ledger.jsonl` records every launch (worst case) and finish (estimated cost);
 `.testbench/NOTES.md` is the lab notebook (`testbench note`), the one file there worth committing.
+`.testbench/check.json` is what `testbench check` found in a folder with no testbench.yaml, the plans `init`
+would write there; commands in that folder read their plans from it (only plans that run on this machine, with
+the default budget) until a testbench.yaml takes over.
 
 ## Commands
 
@@ -342,7 +345,7 @@ out in full: `--appr` is not `--approve`. A mistyped command gets the closest on
 rnu smoke`: did you mean `testbench run smoke`?), words in the wrong order get the right order (`testbench smoke
 run`: the command comes first), and a mistyped plan, session, recipe, client or example name gets the closest one.
 `--json` and `--format json` are the same on every command with a JSON form (`report`, `diff`, `history`,
-`estimate`, `exec`, `rescue`); every session command takes `-s NAME` (also `--session NAME`).
+`estimate`, `exec`, `rescue`, `check`); every session command takes `-s NAME` (also `--session NAME`).
 
 | command | what it does | exit codes besides 2 |
 |---|---|---|
@@ -354,6 +357,7 @@ run`: the command comes first), and a mistyped plan, session, recipe, client or 
 | `doctor` | what this machine can run; each `no` line says what to do | 0, whatever it found |
 | `mcp [--http]` | serve the commands as MCP tools | 0 when it stops |
 | **plans** | | |
+| `check [--plan NAME]... [--json]` | run every plan that is free and needs no approval, and list each other plan with its worst case and `testbench run NAME`; with no testbench.yaml, run the plans `init` would write for what it finds, on this machine, keeping what it found in `.testbench/check.json` (so `report`, `runs`, `verify`, `ui` and `diff` work there); a plan whose tool is missing is skipped with the command that installs it | 0 every plan that ran passed, 1 one failed, 3 still running |
 | `plans` | the plans, their hardware and worst case | 0 |
 | `run PLAN [--wait SECONDS] [--detach] [--approve]` | run a plan and print its report | 0 passed, 1 failed, 3 still running after `--wait` (and always with `--detach`) |
 | `wait [RUN] [--timeout SECONDS]` | follow a run (`--wait` is the same as `--timeout`) | 0 passed, 1 failed, 3 still running |

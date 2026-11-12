@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import difflib
+import json
 import math
 import re
 from pathlib import Path
@@ -49,17 +50,51 @@ def no_plan(cfg: dict, name) -> str:
 
 
 def find_root(start: str | Path = ".") -> Path:
-    """The nearest directory at or above `start` that holds testbench.yaml."""
+    """The nearest directory at or above `start` that holds testbench.yaml, or the record `testbench check` keeps of
+    what it found and ran in a folder without one (CHECKED)."""
     here = Path(start).resolve()
     for d in (here, *here.parents):
-        if (d / CONFIG_NAME).is_file():
+        if (d / CONFIG_NAME).is_file() or (d / CHECKED).is_file():
             return d
-    raise ConfigError(f"No {CONFIG_NAME} here or in any parent of {here}. Run `testbench init` in the project folder.")
+    raise ConfigError(f"No {CONFIG_NAME} here or in any parent of {here}. Run `testbench check` in the project folder "
+                      f"to run its tests, notebooks or app as they are, or `testbench init` to write {CONFIG_NAME} with "
+                      "a plan for each.")
+
+
+CHECKED = Path(".testbench") / "check.json"     # what `testbench check` found and ran where there is no testbench.yaml
+
+
+def checked(root: str | Path, record: dict | None = None) -> dict:
+    """The config of a folder with no testbench.yaml where `testbench check` ran: the plans `testbench init` would write
+    there (from .testbench/check.json, or `record` before check writes it) with every default, budget included. Only
+    `project` and `plans` are read from the record, and every plan must run on this machine: a record cannot set a
+    budget, a price or a machine that costs money."""
+    root, p = Path(root), Path(root) / CHECKED
+    again = f"run `testbench check` there again to look anew, or `testbench init` to write {CONFIG_NAME}"
+    try:
+        rec = json.loads(p.read_text()) if record is None else record
+        plans = _parse("plans:\n" + rec["plans"])["plans"]
+    except (OSError, ValueError, KeyError, TypeError, RecursionError, yaml.YAMLError) as exc:
+        raise ConfigError(f"{p} is not the record `testbench check` writes ({type(exc).__name__}: {exc}); {again}") \
+            from None
+    if not isinstance(plans, dict) or not plans:
+        raise ConfigError(f"{p} lists no plans; {again}")
+    try:
+        cfg = validate({"project": rec.get("project"), "plans": plans}, root)
+    except ConfigError as exc:
+        raise ConfigError(f"{p}: {exc}; {again}") from None
+    away = [f"{name} ({plan['backend']})" for name, plan in cfg["plans"].items() if plan["backend"] != "local"]
+    if away:
+        raise ConfigError(f"{p}: plan {away[0]} is not on this machine, and `testbench check` runs plans only here; "
+                          f"{again}")
+    return cfg
 
 
 def load(root: str | Path) -> dict:
     root = Path(root)
     path = root / CONFIG_NAME
+    if not path.is_file() and (root / CHECKED).is_file():
+        return checked(root)                     # a folder `testbench check` ran in, with no testbench.yaml
     try:
         text = path.read_text()
     except (OSError, UnicodeDecodeError) as exc:

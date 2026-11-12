@@ -9,7 +9,11 @@ description: Set up agent-testbench in a project - install it, write testbench.y
    to see what this machine can run: Modal needs `modal setup`; Colab needs
    `uv tool install google-colab-cli` and one login; web steps need `playwright install chromium`.
    Never ask the person to paste a token into the chat - they run the login commands themselves.
-2. **Start the config.** In the project folder: `testbench init`. It writes `testbench.yaml` with a plan for each
+   **First, see where the project stands**: `testbench check` (or `uvx agent-testbench check`, nothing installed)
+   runs, on this machine and for free, the plans `init` would write for what it finds - PASS or FAIL each, the report
+   of each failure, and a plan whose tool is missing skipped with the command that installs it. It writes only
+   `.testbench/`; in a project with a testbench.yaml it runs every free plan and only lists the paid ones.
+2. **Start the config.** In the project folder: `testbench init` (it keeps the plan names `check` used). It writes `testbench.yaml` with a plan for each
    notebook, test suite (pytest; `npm test` with jest, vitest, mocha, node --test or Playwright; Go; Rust - judged
    by the runner's JUnit report), training script and web app it finds - already checking what it can - and the
    working rules in `AGENTS.md` (read by Codex and others; `CLAUDE.md` points to it). Lines marked FILL IN need the

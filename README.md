@@ -33,12 +33,22 @@ was made, the code and Python it ran, the evidence hash, and the confusion matri
 ## Quick start
 
 ```bash
+cd your-project && uvx agent-testbench check   # its tests, notebooks or app, run and proved here: no setup, free
+```
+
+Or `pip install agent-testbench`, then `testbench check`. With no testbench.yaml, `check` runs on this machine the
+plans `testbench init` would write for what it finds - a pytest suite, `npm test`, `go test`, cargo tests,
+notebooks, a web app - and prints PASS or FAIL for each, the report of each failure (the failing test, cell or
+line), the run ids (`testbench verify RUN` checks a run's evidence) and the one next step. It writes nothing but
+`.testbench/`, and a plan whose tool is missing here is skipped with the command that installs it. In a project
+with a testbench.yaml it runs every free plan and only lists the ones that cost money. Then:
+
+```bash
 pip install "agent-testbench[all]"         # or: uv tool install "agent-testbench[all]"
-testbench selftest                         # ten checks of the main promises on this machine, in under a minute
-testbench demo                             # a small project, run for free here - see it work in a minute
-testbench demo llm-app                     # or web-app, test-suite: your kind of project (testbench demo --list)
-cd your-project && testbench init          # looks at the project and writes plans that already check something
+testbench init                             # keeps those plans in testbench.yaml, with a budget and AGENTS.md
 testbench run <plan>                       # the report: what passed, what failed and why, what it cost
+testbench demo                             # or first an example project, run for free (testbench demo --list)
+testbench selftest                         # ten checks of the main promises on this machine, in under a minute
 ```
 
 `testbench init` finds notebooks, a pytest suite, training scripts and web apps, and writes a plan for each -
@@ -247,7 +257,7 @@ JSON POST ([docs/loops.md](docs/loops.md), [docs/notify.md](docs/notify.md)).
 ## MCP and agents
 
 Tools: `session_start`, `session_exec`, `session_files`, `session_sync`, `session_install`, `session_shell`,
-`session_list`, `session_stop`, `plans`, `run_plan`, `wait_run`, `get_report`, `list_runs`, `cancel_run`, `spend`,
+`session_list`, `session_stop`, `check_project`, `plans`, `run_plan`, `wait_run`, `get_report`, `list_runs`, `cancel_run`, `spend`,
 `lint_notebook`, `rescue_notebook`, `recipes`, `export_run`, `diff_runs`, `add_note`, `loop_start`, `loop_try`, `loop_status`,
 `loop_stop`. They run side by side (stop a
 session while a long cell runs), return plots and screenshots as images, and pass on progress. `testbench mcp --http`

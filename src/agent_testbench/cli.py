@@ -264,6 +264,11 @@ def cmd_estimate(a):
     return 0 if ok else 2
 
 
+def cmd_check(a):
+    from .check import main
+    return main(a.plan, as_json=a.json)
+
+
 def cmd_run(a):
     root, cfg = _root_cfg()
     try:
@@ -596,7 +601,8 @@ def cmd_doctor(a):
     try:
         root = C.find_root()
         C.load(root)
-        checks.append(("testbench.yaml", True, str(root / C.CONFIG_NAME)))
+        checks.append(("testbench.yaml", True, str(root / C.CONFIG_NAME)) if (root / C.CONFIG_NAME).is_file() else
+                      ("testbench.yaml", True, f"none; the plans `testbench check` found, in {root / C.CHECKED}"))
     except C.ConfigError as exc:
         checks.append(("testbench.yaml", False, str(exc)))
     for name, ok, detail in checks:
@@ -994,6 +1000,7 @@ GROUPS = {   # `testbench --help`: the commands as README's Commands table group
         "selftest": "a minute or so: check the main promises hold on this machine",
         "mcp": "serve these commands as MCP tools"},
     "plans": {
+        "check": "run every free plan here, even with no testbench.yaml",
         "plans": "the plans, their hardware and worst-case cost",
         "run": "run a plan and print its report",
         "wait": "follow a run until it ends",
@@ -1053,6 +1060,10 @@ init
 recipes
   testbench recipes                      # each recipe, its plans and their cost
   testbench recipes pytest               # print one
+check
+  testbench check                        # every free plan, or what init finds
+  testbench check --plan tests           # only this plan (repeatable)
+  testbench check --json                 # a summary for scripts and agents
 plans
   testbench plans
 estimate
@@ -1269,6 +1280,22 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("recipes", help="testbench.yaml starting points for a goal: list them with their costs, or print one")
     p.add_argument("name", nargs="?", metavar="NAME", help="print this recipe")
     p.set_defaults(fn=cmd_recipes)
+    p = sub.add_parser("check", help="run every plan that is free here; with no testbench.yaml, what init would set up",
+                       description="A first proven result in about a minute. With a testbench.yaml (here or above): run "
+                                   "every plan that is free and needs no approval, and list each other plan with its "
+                                   "worst case and the command a person runs for it - nothing that costs money starts. "
+                                   "With none: run here, for free, the plans `testbench init` would write for what it "
+                                   "finds (a test suite: pytest, npm test, go test, cargo; notebooks; a web app; a "
+                                   "training script), as ordinary runs with full proof records, and keep what it found "
+                                   "in .testbench/check.json, so report, runs, verify, ui and diff work here afterwards. "
+                                   "It writes no testbench.yaml, AGENTS.md or ~/.testbench/limits.yaml. A plan whose "
+                                   "tool is missing (node, go, cargo-nextest, pytest, Chromium) is skipped with the "
+                                   "command that installs it. Exit 0 every plan that ran passed, 1 one failed, 2 nothing "
+                                   "to check or refused, 3 still running.")
+    p.add_argument("--plan", action="append", default=[], metavar="NAME",
+                   help="only this plan (repeatable); a plan that costs money is still only listed")
+    _json(p, "the summary")
+    p.set_defaults(fn=cmd_check)
     sub.add_parser("plans", help="list plans, their hardware and worst-case cost").set_defaults(fn=cmd_plans)
     p = sub.add_parser("estimate", help="worst-case cost of a plan and whether it may launch (exit 0 yes, 2 no)")
     p.add_argument("plan", metavar="PLAN", help=PLAN)

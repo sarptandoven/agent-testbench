@@ -118,7 +118,8 @@ def test_a_mistake_says_what_to_do(project, monkeypatch, capsys, args, says):
 def test_outside_a_project_every_command_says_where_to_start(tmp_path, monkeypatch, capsys, args):
     monkeypatch.chdir(tmp_path)
     code, out = tb(capsys, *shlex.split(args))
-    assert code == 2 and "No testbench.yaml here or in any parent of" in out and "Run `testbench init`" in out, out
+    assert code == 2 and "No testbench.yaml here or in any parent of" in out, out
+    assert "Run `testbench check` in the project folder" in out and "or `testbench init` to write" in out, out
 
 
 def test_no_command_shows_the_commands_in_groups(tmp_path):

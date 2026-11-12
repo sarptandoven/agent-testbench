@@ -37,6 +37,10 @@
   skip unless mlflow / wandb are installed (in a separate venv: `docs/export.md`).
 - Setup: `recipes/` (the YAML ladders `testbench recipes` and `init --recipe` use; recipes never set budget:,
   pricing: or guard:), `connect.py` (`testbench connect`: other clients' MCP configs, merged as text).
+- First runs: `check.py` (`testbench check`: every free plan, or with no testbench.yaml the plans `scaffold.detect`
+  finds, run here; the record `.testbench/check.json` is the folder's config then, through `config.checked`, which
+  reads only local plans from it - never a budget). `executor.step_path`: from uvx, uv tool or pipx, steps get the
+  project's `python`.
 - Plans for LLM apps: `mocks.py` and `mock_clients/` (the mock `openai` / `anthropic` packages a step's `mocks:` puts
   first on PYTHONPATH; they never touch the network). Notebooks: `notebook.py` (forms, papermill parameters,
   percent-format .py, kernels).

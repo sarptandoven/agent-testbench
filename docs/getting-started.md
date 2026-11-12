@@ -7,9 +7,30 @@
 What the [quick start](../README.md#quick-start) commands do on a real project: a copy of
 [examples/tiny-model](../examples/tiny-model) (a notebook that trains a small digit classifier) with its
 testbench.yaml removed, in a folder named `myproject`. Everything below runs on this machine and costs nothing.
-The output is from a real run on 2026-10-31, shortened where a line says `...`.
+The output is from real runs on 2026-10-31 and, for step 1, 2026-11-12; shortened where a line says `...`.
 
-### 1. See what this machine can run
+### 1. Check it as it is
+
+```
+$ cd myproject && testbench check
+No testbench.yaml here: running what `testbench init` would set up, on this machine, for free (it writes only .testbench/).
+tiny-model-local: notebook tiny_model.ipynb (4 form field(s), writes confusion.png, metrics.json) ... PASS (6.6 s)
+
+1 plan: 1 passed, 0 failed, in 7 s.
+Run 20261112-075504-tiny-model-local: `testbench verify 20261112-075504-tiny-model-local` checks its evidence against the sha256 its report recorded.
+Next: `testbench init` keeps these plans in testbench.yaml (the same names, so their history goes on) and marks where to add the checks that mean "working" (the FILL IN lines).
+```
+
+No config, no setup: `check` found the notebook, linted it and ran it top to bottom as an ordinary run with a full
+proof record, so `testbench report`, `verify`, `runs`, `ui` and `diff` already work in the folder. It wrote only
+`.testbench/` (the run, and `check.json`: what it found). A failing plan prints its report - the cell, the line, the
+check it missed; a plan that needs something this machine lacks (Node.js, Go, cargo-nextest, pytest, Chromium, a
+package the notebook imports) is skipped with the command that installs it. With `uvx agent-testbench check`
+nothing is installed at all; the notebook's kernel then runs in uvx's own environment, so `check` names the
+packages to add (`uvx --with scikit-learn --with matplotlib agent-testbench check`). Exit codes: 0 every plan that
+ran passed, 1 one failed, 2 nothing to check.
+
+### 2. See what this machine can run
 
 ```
 $ testbench doctor
@@ -25,10 +46,10 @@ ok   docker daemon: server 29.9.2
 Each `no` line says what to run to fix it. You only need the backends you will use; `local` always works. The
 [install notes](../README.md#install-notes) say what each backend needs.
 
-### 2. Let testbench look at the project
+### 3. Let testbench look at the project
 
 ```
-$ cd myproject && testbench init
+$ testbench init
 Wrote testbench.yaml:
   plan tiny-model-local: notebook tiny_model.ipynb (4 form field(s), writes confusion.png, metrics.json)
 and the working rules in AGENTS.md (CLAUDE.md points to it).
@@ -62,7 +83,7 @@ It already checks that every cell runs and that the files the notebook writes ap
 working in the project how to use testbench, and `~/.testbench/limits.yaml` caps every project on the machine
 ([machine limits](reference.md#machine-limits)).
 
-### 3. Say what "working" means
+### 4. Say what "working" means
 
 Only you know which number makes the notebook work. Replace the FILL IN line with the check you want. json paths
 are relative to the project folder, and this notebook writes its metrics to `outputs/metrics.json`:
@@ -74,7 +95,7 @@ are relative to the project folder, and this notebook writes its metrics to `out
 [Expectations](expectations.md) lists every kind of check: tolerances, the project's own test suite, numbers
 printed to the log, GPU use, plots compared with a known-good one.
 
-### 4. Prove it
+### 5. Prove it
 
 ```
 $ testbench run tiny-model-local
@@ -127,7 +148,7 @@ fix ([the tour](tour.md)):
 
 In a git repository the report also names the commit it ran; see [proof records](proof-records.md).
 
-### 5. Hand it to your agent
+### 6. Hand it to your agent
 
 Install the Claude Code plugin or add the MCP server (the commands are in the [quick start](../README.md#quick-start)), then ask in
 plain words: *"get training working and prove it with the tiny-model-local plan"*. The agent works in live

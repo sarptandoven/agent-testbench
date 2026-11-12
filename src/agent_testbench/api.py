@@ -111,6 +111,13 @@ class Testbench:
             run.wait(wait, on_line=on_line)
         return run
 
+    def check(self, plans: list[str] | None = None, on_line=None) -> dict:
+        """`testbench check` here: run every plan that is free and needs no approval (or only `plans`); the others are
+        listed with their worst case, never launched. Returns its summary: each plan's status, run id and why it did
+        not run, the run ids, `next` and `exit_code`. on_line gets each plan's line as it is settled.
+        api.check(folder) does the same in a folder with no testbench.yaml."""
+        return check(self.root, plans, on_line)
+
     def runs(self, n: int = 10) -> list["Run"]:
         """The latest n runs, oldest first."""
         return [Run(self, p) for p in RUNS.all_runs(self.root)[-n:]]
@@ -172,6 +179,21 @@ class Testbench:
         """Every session of the project, running or stopped (to pick up one started elsewhere)."""
         from . import sessions as S
         return [Session(self, d.name) for d in S.all_sessions(self.root)]
+
+
+def check(root: str | Path = ".", plans: list[str] | None = None, on_line=None) -> dict:
+    """`testbench check` in any folder: with a testbench.yaml at or above it, as Testbench.check; with none, the plans
+    `testbench init` would write for what it finds there, run on this machine for free (afterwards Testbench(root)
+    works there too). Returns the summary `testbench check --json` prints; nothing is raised for a failed plan."""
+    from . import check as CK
+
+    def show(event, entry):
+        if on_line is not None and event == "end":
+            on_line(CK.line(entry))
+    with _plain():
+        if not Path(root).expanduser().is_dir():
+            raise TestbenchError(f"{root} is not a folder; give check() the project's folder")
+        return CK.run(Path(root).expanduser(), plans, show)
 
 
 class Run:

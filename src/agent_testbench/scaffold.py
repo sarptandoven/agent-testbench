@@ -36,6 +36,12 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:30] or "plan"
 
 
+def project_name(root: Path) -> str:
+    """The `project:` name for a folder, as init writes it (letters, digits, - and _, starting with a letter or
+    digit), or "project"."""
+    return re.sub(r"[^A-Za-z0-9_-]+", "-", Path(root).name).strip("-_")[:40].strip("-_") or "project"
+
+
 def _notebook(root: Path, nb: Path) -> tuple[str, str, str]:
     from . import notebook as NB
     rel = nb.relative_to(root).as_posix()
