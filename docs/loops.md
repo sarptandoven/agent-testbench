@@ -212,7 +212,7 @@ all its tries when it was stopped. Its best reached the target (sharpe >= 1) but
 ```
 
 The plan: the backtest writes `out/equity.csv` and keeps it as evidence, and testbench's own metrics step computes
-the Sharpe ratio the loop judges by ([Trading](trading.md#in-a-plan)):
+the Sharpe ratio the loop judges by ([Trading](trading.md#checking-a-strategy)):
 
 ```yaml
 plans:
