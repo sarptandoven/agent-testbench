@@ -1,4 +1,4 @@
-"""Recipes as plug-ins: the 14 built-in recipes are the registry's built-ins and keep the recipe contract; a package
+"""Recipes as plug-ins: the 18 built-in recipes are the registry's built-ins and keep the recipe contract; a package
 adds one by an entry point (its package folder's NAME.yaml, a Path, YAML text, a mapping or a Recipe), and `testbench
 recipes`, `init --recipe` and `init --add --recipe` use it like a built-in, naming its package. A recipe that sets
 budget:, pricing: or guard: - however it hides it - never loads, and the contract says what else is wrong in plain

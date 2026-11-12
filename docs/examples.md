@@ -1,6 +1,6 @@
 # Examples
 
-Four small projects, one for each kind of work people bring to testbench. Each runs here, for free, in about a
+Five small projects, one for each kind of work people bring to testbench. Each runs here, for free, in about a
 minute: `testbench demo NAME` copies it to a new folder (a git repository), runs its free plan, and says what to
 try next.
 
@@ -15,6 +15,7 @@ testbench demo llm-app            # NAME [DIR]; with no NAME, tiny-model
 | [web-app](#web-app) | a page with a form and a JSON API | a person can fill the form and get the right answer, with no console errors; screenshots to look at | Playwright and Chromium |
 | [test-suite](#test-suite) | a Python package with a pytest suite and a planted bug | the suite fails, and the report names the test and what it got; the same suite in a Docker sandbox with no network | pytest (Docker for the sandbox plan) |
 | [tiny-model](#tiny-model) | a Colab-style notebook that trains a small network | it trains, and the accuracy clears the bar; the same notebook on Modal and Colab | scikit-learn, matplotlib |
+| [trading](#trading) | a trend-following strategy with a planted look-ahead bug, its last quarter sealed | the look-ahead is caught; fixed, the strategy goes up the ladder - a backtest with costs, walk-forward, the holdout once, paper on a mock broker | nothing |
 
 The examples are in [examples/](../examples) and in the installed package. In the repository, `cd examples/NAME`
 and `testbench run PLAN` runs one in place.
@@ -119,12 +120,28 @@ network on scikit-learn's digits. `testbench demo` (no NAME) runs its `smoke` pl
 a Modal T4 and a Colab runtime, each priced before it starts. It is the project of the
 [getting started](getting-started.md) walk-through and of the [loop demo](demo-loop.md).
 
+## trading
+
+[examples/trading](../examples/trading): a trend follower - hold while the close is above its 20-day average - on
+made-up daily prices from 2020 to September 2025, the last quarter sealed (`data:` with `holdout_from`). `strategy.py`
+writes testbench's standard files and its decisions, and has a planted look-ahead bug: it decides each day with
+tomorrow's close. `testbench demo trading` runs the `lookahead` plan, whose backtest looks superb (Sharpe 3.85, a 97%
+win rate) and whose reruns on data cut earlier catch the bug:
+
+```
+**FAIL** - look-ahead: DEMO at 2022-03-10 (signal) was `-0.026018` with data up to 2025-06-30 but was `-0.038945`
+with data before 2022-03-11 - the strategy used rows after 2022-03-10 to decide it
+```
+
+The demo names the line to fix. Fixed, the strategy goes up the ladder: `backtest` (`strategy:` - costs charged, 30+
+round trips, better than buy and hold), `lookahead`, `walk-forward` (seven half-years, each on its own), `holdout`
+(the sealed quarter, once; a second opening is refused) and `paper`, a rehearsal of the paper rung: `paper.py` places
+the same decisions as orders on a mock Alpaca paper account, with `mock_calls:` bounding them and no live account
+([Trading with agents safely](trading-safely.md)).
+
 ## More in examples/
 
 - [web-ui](../examples/web-ui): a one-page counter, clicked twice in headless Chromium.
-- [sealed-backtest](../examples/sealed-backtest): a moving-average crossover with the last quarter of its prices
-  sealed: a backtest on the earlier rows, a walk-forward over seven windows, a look-ahead check that reruns it on
-  data cut earlier, and a holdout plan that may open the sealed quarter once ([sealed data](trading-data.md)).
 - [agent-loop](../examples/agent-loop): an agent of your own in about 60 lines, on the Anthropic SDK and
   testbench's tools ([Python API](python-api.md)).
 - [plugins/testbench-check-example](../examples/plugins/testbench-check-example): a check plug-in in one file,

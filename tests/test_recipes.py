@@ -12,12 +12,14 @@ import subprocess
 import pytest
 import yaml
 
-from agent_testbench import budget, config as C, recipes as RC
+from agent_testbench import config as C, recipes as RC
 from agent_testbench.cli import INIT_TEMPLATE
-from conftest import chromium_ready, cli, make_notebook
+from conftest import EXAMPLES, chromium_ready, cli, make_notebook
 
-NAMES = ["cargo-test", "data-pipeline", "docker-sandbox", "go-test", "hf-finetune", "jest", "llm-eval", "notebook-colab",
-         "playwright-ts", "pytest", "pytorch-train", "ssh-gpu-box", "vitest", "web-app"]
+NAMES = ["alpaca-paper", "cargo-test", "data-pipeline", "docker-sandbox", "freqtrade-strategy", "go-test",
+         "hf-finetune", "jest", "llm-eval", "notebook-colab", "playwright-ts", "pytest", "pytorch-train", "ssh-gpu-box",
+         "trading-backtest", "vectorbt-strategy", "vitest", "web-app"]
+STRATEGIES = ["trading-backtest", "vectorbt-strategy", "freqtrade-strategy"]   # one per project: each opens a holdout
 
 
 def fresh(project="recipes") -> str:
@@ -27,6 +29,17 @@ def fresh(project="recipes") -> str:
 
 def notebooks_of(recipe: dict) -> set:
     return {s["notebook"] for p in recipe["plans"].values() for s in p["steps"] if "notebook" in s}
+
+
+def stand_ins(root, recipes) -> None:
+    """The project's own files for those the recipes name: each notebook, and each file a mock reads (a broker's
+    prices)."""
+    for r in recipes:
+        for nb in notebooks_of(r):
+            make_notebook(root / nb, ["x = 1"])
+        for _, _, key, opts in RC.mock_files(r["plans"]):
+            (root / opts[key]).parent.mkdir(parents=True, exist_ok=True)
+            (root / opts[key]).write_text(RC.MOCK_STAND_INS[key])
 
 
 def in_order(old: str, new: str) -> bool:
@@ -60,16 +73,15 @@ def test_the_recipes_that_ship_are_well_formed():
 @pytest.mark.parametrize("name", NAMES)
 def test_each_recipe_loads_as_a_config_under_init_s_header(tmp_path, name):
     r = RC.load(name)
-    for nb in notebooks_of(r):
-        make_notebook(tmp_path / nb, ["x = 1"])         # the notebooks a recipe names stand for the project's own
+    stand_ins(tmp_path, [r])                            # the files a recipe names stand for the project's own
     text, _ = RC.compose(fresh(), [r], fresh=True)
     cfg = C.validate(yaml.safe_load(text), tmp_path)
     assert list(cfg["plans"]) == list(r["plans"])
     assert "FILL IN" in text and r["header"][0] in text, "the recipe's comments come along"
     assert cfg["budget"] == {"max_run_usd": 2.0, "ask_above_usd": 0.5, "max_day_usd": 10.0}, "init's budget is kept"
-    costs = {f"{budget.worst_case(cfg, p)['worst_case_usd']:.2f}" for p in cfg["plans"]}
-    for p in cfg["plans"]:
-        assert budget.worst_case(cfg, p)["worst_case_usd"] <= cfg["budget"]["max_run_usd"], \
+    costs = {f"{RC.worst_case(cfg, p)['worst_case_usd']:.2f}" for p in cfg["plans"]}
+    for p in cfg["plans"]:                              # a walk-forward's at the most windows a launch allows
+        assert RC.worst_case(cfg, p)["worst_case_usd"] <= cfg["budget"]["max_run_usd"], \
             f"{name}.{p} fits the default budget, so nothing in a recipe is refused as it ships"
     claimed = set(re.findall(r"\$(\d+\.\d\d)", "\n".join(r["header"]))) - {"0.50", "2.00", "10.00"}
     assert claimed <= costs, f"{name}: the costs its header states ({claimed}) are its worst cases ({costs})"
@@ -77,7 +89,8 @@ def test_each_recipe_loads_as_a_config_under_init_s_header(tmp_path, name):
 
 def test_all_recipes_combine_into_one_file(tmp_path):
     make_notebook(tmp_path / "notebook.ipynb", ["x = 1"])
-    chosen = [RC.load(n, tmp_path) for n in NAMES]
+    chosen = [RC.load(n, tmp_path) for n in NAMES if n not in STRATEGIES[1:]]   # the strategy recipes: one of them
+    stand_ins(tmp_path, chosen)
     text, notes = RC.compose(fresh(), chosen, fresh=True)
     cfg = C.validate(yaml.safe_load(text), tmp_path)
     assert list(cfg["plans"]) == [p for r in chosen for p in r["plans"]]
@@ -87,12 +100,22 @@ def test_all_recipes_combine_into_one_file(tmp_path):
     kept = [n for n in notes if n.startswith("Kept")]
     assert any("`modal:`" in n and "pytorch-train" in n and "torch==2.14.1" in n for n in kept), notes
     assert any("`sessions:`" in n and "ssh-gpu-box" in n for n in kept), notes
+    assert cfg["data"]["prices"]["holdout_from"] and list(cfg["plans"]).count("holdout") == 1
+
+
+def test_two_strategy_recipes_in_one_project_are_refused_and_say_why(tmp_path):
+    assert cli(tmp_path, "init", "--recipe", "trading-backtest").returncode == 0
+    before = (tmp_path / "testbench.yaml").read_text()
+    r = cli(tmp_path, "init", "--add", "--recipe", "vectorbt-strategy")
+    assert r.returncode == 2 and "plan holdout already opens the holdout" in r.stdout, r.stdout
+    assert "nothing was written" in r.stdout and (tmp_path / "testbench.yaml").read_text() == before
 
 
 def test_the_project_s_own_notebook_and_script_replace_the_recipe_s(tmp_path):
     make_notebook(tmp_path / "my notebooks" / "an analysis.ipynb", ['EPOCHS = 3 #@param {type:"integer"}'])
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "train.py").write_text("print('loss=1')\n")
+    stand_ins(tmp_path, [RC.load("alpaca-paper")])        # its prices: a notebook of its own is what this checks
     for name in NAMES:                                  # a path that needs quoting still makes valid YAML
         r = RC.load(name, tmp_path)
         cfg = C.validate(yaml.safe_load(RC.compose(fresh(), [r], fresh=True)[0]), tmp_path)
@@ -116,6 +139,10 @@ def test_recipes_lists_every_recipe_with_its_costs(tmp_path):
                      r"person approves it", r.stdout), r.stdout
     assert re.search(r"notebook-colab +colab, up to 30 min, worst case \$0\.01", r.stdout)
     assert re.search(r"box-full +ssh RTX4090, up to 240 min, free", r.stdout)
+    assert re.search(r"\n {4}walk-forward +local, up to 10 min a window \(the data decides how many; at most 200\), "
+                     r"free\n", r.stdout), "a walk-forward's windows come from data a recipe does not ship"
+    assert re.search(r"\n {4}lookahead +local, up to 50 min, free\n", r.stdout), "1 + 4 runs of the steps"
+    assert re.search(r"\n {4}paper-rehearsal +local, up to 5 min, free\n", r.stdout)
     (tmp_path / "testbench.yaml").write_text("project: priced\nbudget: {max_run_usd: 1.0}\n"
                                              "pricing: {modal_gpu_per_s: {T4: 0.0005}}\nplans: {}\n")
     r = cli(tmp_path, "recipes")
@@ -129,8 +156,8 @@ def test_recipes_name_prints_it_as_it_ships(tmp_path):
     r = cli(tmp_path, "recipes", "pytorch-train")
     assert r.returncode == 0 and r.stdout == (RC.HERE / "pytorch-train.yaml").read_text()
     r = cli(tmp_path, "recipes", "pytorch")
-    assert r.returncode == 2 and ("no recipe 'pytorch' (did you mean pytorch-train?); the recipes are cargo-test, "
-                                  "data-pipeline, docker-sandbox") in r.stdout
+    assert r.returncode == 2 and ("no recipe 'pytorch' (did you mean pytorch-train?); the recipes are alpaca-paper, "
+                                  "cargo-test, data-pipeline") in r.stdout
 
 
 def test_init_with_recipes_writes_a_config_that_loads(tmp_path):
@@ -359,6 +386,16 @@ def _eval_project(root):
     (root / "settings.py").write_text("SCORE = 0.8\n")
 
 
+def _strategy_project(root, *files):
+    """examples/trading's prices and strategy (its planted look-ahead fixed), as the trading recipes expect them."""
+    (root / "data").mkdir(parents=True)
+    shutil.copy(EXAMPLES / "trading" / "data" / "prices.csv", root / "data" / "prices.csv")
+    strategy = (EXAMPLES / "trading" / "strategy.py").read_text().replace("closes[: i + 2]", "closes[: i + 1]")
+    for name in files:
+        (root / name).write_text(strategy if name in ("strategy.py", "backtest.py") else
+                                 (EXAMPLES / "trading" / name).read_text())
+
+
 RUNNABLE = {
     "pytest": (_pytest_project, ["tests"]),
     "notebook-colab": (_notebook_project, ["notebook-smoke"]),
@@ -368,6 +405,9 @@ RUNNABLE = {
                     ["finetune-smoke"]),
     "llm-eval": (_eval_project, ["eval-quick", "eval-full"]),
     "data-pipeline": (_data_project, ["pipeline-sample"]),
+    "trading-backtest": (lambda root: _strategy_project(root, "backtest.py"),
+                         ["backtest", "lookahead", "walk-forward", "holdout"]),
+    "alpaca-paper": (lambda root: _strategy_project(root, "strategy.py", "paper.py"), ["paper-rehearsal"]),
     "web-app": (_web_project, ["ui"]),
 }
 
@@ -400,6 +440,12 @@ def test_the_local_plans_pass_on_a_project_made_to_the_recipe(tmp_path, name):
             "the last training loss counts, not val_loss"
     if name == "pytest":
         assert "junit.xml: tests >= 1 - 2 (wanted >= 1.0)" in r.stdout
+    if name == "trading-backtest":                      # the plan that opens the holdout ran once: a second is refused
+        r = cli(root, "run", "holdout", "--wait", "300")
+        assert r.returncode == 2 and "plans.holdout.holdout.max_opens is 1" in r.stdout, r.stdout
+    if name == "alpaca-paper":
+        assert "mock alpaca live 0 - 0" in r.stdout, r.stdout
+        assert "stdout contains 'paper account PA' - found" in r.stdout, "the paper plan's check, rehearsed"
 
 
 @pytest.mark.posix                                      # Linux containers

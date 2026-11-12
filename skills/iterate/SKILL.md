@@ -103,6 +103,15 @@ luck". Report that line with the result, and never present a best try it calls l
 `--returns out/equity.csv` (or keep the equity.csv as the step's `artifacts:`), and, when the person wants it,
 `--min-deflated-sharpe 0.95` so the target counts only for a best try that is not luck.
 
+## Trading strategies
+
+testbench checks a strategy; it never picks one and is not investment advice. Take a strategy up the ladder in
+order - backtest with costs (`strategy:`), look-ahead, walk-forward, the holdout once, paper - as the MCP prompt
+`check-a-strategy` lays out (docs/trading-safely.md). A rung that fails is the finding: never weaken its check, tune
+only on the lower rungs, and open the holdout once, when the person says so. Report each rung's run id, the luck
+line, and the caveats the report lists. Paper only: a mock broker (`mocks: alpaca`) or a paper account's keys by
+name - never a live account, never live money.
+
 ## Notebooks
 
 When a notebook does not run (downloaded, old, someone else's), start with `testbench rescue nb.ipynb`: it says

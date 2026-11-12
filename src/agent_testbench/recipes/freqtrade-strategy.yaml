@@ -1,0 +1,84 @@
+# Recipe freqtrade-strategy: the trading ladder for freqtrade - costs, look-ahead, walk-forward, the holdout once.
+#
+# Proves: the trading-backtest ladder for a freqtrade IStrategy. ft-backtest - on every candle before the seal,
+#   testbench's own numbers from the files ft_backtest.py writes (not freqtrade's summary) clear your bar, with fees
+#   charged, 30+ round trips and a better total return than buy and hold; ft-lookahead - no entry or exit changes
+#   when the candles after it are cut away; ft-walk-forward - every test window holds up on its own; ft-holdout -
+#   once, on the sealed candles: a second opening is refused. testbench is not investment advice
+#   (docs/trading-safely.md). Backtests and dry runs only: nothing here places an order.
+# FILL IN: the candles file and the day its holdout starts, the script, the bar, the windows.
+# Expects ft_backtest.py to:
+#   1. write the candles of TESTBENCH_DATA_PRICES - only the ones the plan may see - where freqtrade reads them
+#      (user_data/data/binance/BTC_USDT-1d.feather: date, open, high, low, close, volume), so freqtrade never reads a
+#      file the seal did not cut: keep your own candles in data/candles.csv, not in freqtrade's data folder;
+#   2. run `freqtrade backtesting --strategy MyStrategy --timeframe 1d --export trades`, with `--timerange START-`
+#      when TESTBENCH_TEST_START or TRADE_FROM is set (START as YYYYMMDD: a window's or the holdout's first day);
+#   3. write testbench's standard files from the results as docs/trading.md shows for freqtrade - each trade's two
+#      fills to out/trades.csv (fees from fee_open and fee_close), the daily profit as out/equity.csv with a benchmark
+#      column (the pair's close) - and out/signals.csv: one row per entry (open_date, pair) and per exit that was not
+#      forced at the end of the data (exit_reason force_exit: a cut run forces one where the full run did not).
+#   That snippet was not run against freqtrade: check the files with `testbench numbers trading out/equity.csv
+#   out/trades.csv` before trusting them. Its equity counts closed trades only, so max_drawdown is a floor.
+# `python` in a step is the Python running agent-testbench; freqtrade must be installed there (or run the project's
+#   own, `.venv/bin/python ft_backtest.py`).
+# Costs: nothing; every plan runs on this machine.
+
+data:
+  prices:
+    path: data/candles.csv                 # FILL IN: time,symbol (the pair, BTC/USDT),open,high,low,close,volume
+    holdout_from: 2025-07-01               # FILL IN: candles from here on are sealed: only ft-holdout sees them
+
+plans:
+  ft-backtest:
+    backend: local
+    description: freqtrade's backtest of every candle before the seal, graded by testbench - costs, 30+ round
+      trips, beats buy and hold
+    steps:
+      - name: backtest
+        run: python ft_backtest.py         # FILL IN: your script (it writes out/equity.csv, trades.csv, signals.csv)
+        max_minutes: 20
+        artifacts: [out/equity.csv, out/trades.csv]
+        expect:
+          strategy:
+            equity: out/equity.csv
+            sharpe: ">= 1"                 # FILL IN: the bar, set before you look
+            max_drawdown: ">= -0.25"       # FILL IN
+            beats: buy_and_hold
+            min_trades: 30
+            costs: required                # freqtrade's fee (config `fee`, or the exchange's): zero fees fail
+
+  ft-lookahead:
+    backend: local
+    description: the backtest, then 4 reruns on candles cut earlier - an entry or exit that changes used the
+      future
+    lookahead: {data: prices, output: out/signals.csv, cuts: 4}
+    steps:
+      - name: backtest
+        run: python ft_backtest.py         # FILL IN: the same command
+        max_minutes: 20
+        expect:
+          files: [out/signals.csv]
+
+  ft-walk-forward:
+    backend: local
+    description: window by window - 24 months of history, then the 6 months it trades; every window must hold up
+    walk_forward: {data: prices, train: 24mo, test: 6mo}    # FILL IN: your windows
+    steps:
+      - name: backtest
+        run: python ft_backtest.py         # FILL IN: the same command
+        max_minutes: 20
+        expect:
+          strategy: {total_return: ">= -0.1", max_drawdown: ">= -0.2", min_trades: 2, costs: required}    # FILL IN
+
+  ft-holdout:
+    backend: local
+    description: once, on the sealed candles, by rules written before it opens - a second opening is refused
+    holdout: {max_opens: 1}
+    steps:
+      - name: backtest
+        run: python ft_backtest.py         # FILL IN: the same command
+        env: {TRADE_FROM: "2025-07-01"}    # FILL IN: holdout_from
+        max_minutes: 20
+        artifacts: [out/equity.csv, out/trades.csv]
+        expect:
+          strategy: {total_return: ">= -0.1", max_drawdown: ">= -0.2", min_trades: 2, costs: required}    # FILL IN: first

@@ -3,13 +3,16 @@
 It builds a small project in a temporary folder and, with this machine's limits and ledger swapped for empty ones
 in that folder (your ~/.testbench is never touched), checks one thing per line: a plan passes, a broken change
 fails and says why, evidence is fingerprinted, costs are refused or asked about before anything starts, a budget
-that is not a number is refused, a live kernel answers, a mock LLM SDK stands in for the real one, a loop keeps a
-better try and reverts a worse one, an HTML report is written, and the MCP server answers. Everything runs here
+that is not a number is refused, a live kernel answers, a mock LLM SDK stands in for the real one, a strategy that
+decides with tomorrow's data is caught (and passes once fixed), a loop keeps a better try and reverts a worse one, an
+HTML report is written, and the MCP server answers. Everything runs here
 for free; nothing goes to Modal, Colab or any network. Exit 0 if no check failed (some may be skipped, with why).
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -46,6 +49,27 @@ plans:
     backend: modal
     gpu: H100:8
     steps: [{name: train, run: "true", max_minutes: 60}]
+"""
+STRATEGY_PY = """\
+import csv, os, pathlib
+rows = list(csv.DictReader(open(os.environ["TESTBENCH_DATA_PRICES"])))
+closes = [float(r["close"]) for r in rows]
+pathlib.Path("out").mkdir(exist_ok=True)
+with open("out/signals.csv", "w") as f:
+    f.write("time,symbol,signal\\n")
+    for i, r in enumerate(rows):
+        if i >= 5:
+            seen = closes[: i + 2]          # meant to be the closes up to today's: this is up to tomorrow's
+            f.write(f"{r['time']},{r['symbol']},{seen[-1] / (sum(seen[-5:]) / 5) - 1:.6f}\\n")
+"""
+STRATEGY_CONFIG = """\
+project: selftest-strategy
+data:
+  prices: data/prices.csv
+plans:
+  lookahead:
+    lookahead: {data: prices, output: out/signals.csv, cuts: 2}
+    steps: [{name: strategy, run: python strategy.py, max_minutes: 1}]
 """
 
 
@@ -129,6 +153,22 @@ def check_mocks(c: Check):
     return r.returncode == 0 and "PASS" in r.stdout, _said(r)
 
 
+def check_lookahead(c: Check):
+    root = c.root.parent / "strategy"
+    (root / "data").mkdir(parents=True)
+    days = [d for d in (dt.date(2024, 1, 1) + dt.timedelta(n) for n in range(140)) if d.weekday() < 5]
+    rows = "".join(f"{d:%Y-%m-%d},TEST,{100 + 8 * math.sin(i / 4) + 0.2 * i:.2f}\n" for i, d in enumerate(days))
+    (root / "data" / "prices.csv").write_text("time,symbol,close\n" + rows)
+    (root / "strategy.py").write_text(STRATEGY_PY)
+    (root / "testbench.yaml").write_text(STRATEGY_CONFIG)
+    caught = c.tb("run", "lookahead", cwd=root)
+    (root / "strategy.py").write_text(STRATEGY_PY.replace("closes[: i + 2]", "closes[: i + 1]"))     # the fix
+    fixed = c.tb("run", "lookahead", cwd=root)
+    ok = (caught.returncode == 1 and "the strategy used rows after" in caught.stdout
+          and fixed.returncode == 0 and "Look-ahead: none found" in fixed.stdout)
+    return ok, f"with tomorrow's close: {_said(caught)[-1500:]}\nfixed: {_said(fixed)[-1500:]}"
+
+
 def check_loop(c: Check):
     if not shutil.which("git"):
         return None, "git is not installed here"
@@ -188,6 +228,7 @@ CHECKS = [
     ("a budget that is not a number (NaN) is refused", check_nan),
     ("a live kernel keeps running and answers", check_session),
     ("an LLM app runs against the mock SDK, with no key and no network", check_mocks),
+    ("a strategy that decides with tomorrow's data is caught", check_lookahead),
     ("a loop keeps a better try and reverts a worse one", check_loop),
     ("an HTML report is written", check_html),
     ("the MCP server answers", check_mcp),

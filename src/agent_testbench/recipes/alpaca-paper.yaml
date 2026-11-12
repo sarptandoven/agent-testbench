@@ -1,0 +1,61 @@
+# Recipe alpaca-paper: paper trading - the bot rehearsed on a mock Alpaca account for free, then on Alpaca's paper API.
+#
+# Proves: paper-rehearsal - day by day, the bot reads the bars, decides and places its orders on testbench's mock
+#   Alpaca paper account (`mocks: alpaca`, prices from a file): no more orders than you allow, none bigger than you
+#   allow, no call refused, no live account, and the record it writes read like a backtest's; free, offline, seconds.
+#   It proves the order code, not an edge: those days are past. paper - the same bot, once a day, against Alpaca's
+#   PAPER API (TradingClient(..., paper=True)): orders reach a paper account, never money, and each day's run is kept;
+#   the account's history at Alpaca is the forward record. Live trading is not part of agent-testbench 0.3: no
+#   recipe, plan or mock here sends a live order, and the mock refuses a live account (paper=False).
+# FILL IN: the bot's command, the rehearsal's prices file, first day and length, the order bounds, and the NAMES of
+#   your paper account's keys (export them in your shell; never their values in this file).
+# Expects paper.py to use alpaca-py with paper=True, ALPACA_API_KEY and ALPACA_SECRET_KEY from the environment, to
+#   print `paper account <number>` (Alpaca numbers paper accounts PA...), and to write its record in testbench's
+#   standard files: out/paper/equity.csv and out/paper/trades.csv (docs/trading.md#the-files).
+#   examples/trading/paper.py is one: `python paper.py` decides once, today; `--days N` walks N days of the mock's
+#   clock, which moves one bar every `advance_every` requests (more than the bot makes in a day).
+# Costs: nothing on testbench's side; both run on this machine. paper needs the network to reach Alpaca's paper API
+#   (paper-api.alpaca.markets, data.alpaca.markets) and a paper account (free at alpaca.markets).
+
+plans:
+  paper-rehearsal:
+    backend: local
+    description: the bot on testbench's mock Alpaca paper account, day by day - orders bounded, no live account,
+      its record graded; it proves the order code, not an edge
+    steps:
+      - name: paper account
+        run: python paper.py --days 60     # FILL IN: your bot, for as many days as the rehearsal walks
+        env: {ALPACA_API_KEY: rehearsal, ALPACA_SECRET_KEY: rehearsal}   # any text: the mock, like the SDK, wants keys
+        mocks:                             # nothing reaches Alpaca
+          alpaca:                          # FILL IN: your prices (time,symbol,close), the first day, the account
+            prices: data/prices.csv
+            now: 2025-04-01                # the mock's clock starts here, and moves a bar every advance_every requests
+            advance_every: 8
+            cash: 10000
+            fee_usd: 1
+            slippage_bps: 5
+        max_minutes: 5
+        artifacts: [out/paper/equity.csv, out/paper/trades.csv]
+        expect:
+          mock_calls:
+            alpaca: {orders: "<= 20", max_order_value: "<= 10000", live: 0}    # FILL IN: the bounds (refused: 0 always)
+          text:
+            stdout: ["paper account PA"]   # the paper plan's check, rehearsed: the mock numbers its paper account PA...
+          strategy:
+            equity: out/paper/equity.csv   # the paper record, graded like a backtest
+            min_trades: 0                  # a rehearsal is short: it starts a record, it proves no edge
+            costs: required
+
+  paper:
+    backend: local
+    description: once a day, the bot against Alpaca's paper API - a paper account, never a live one, never money
+    steps:
+      - name: paper account
+        run: python paper.py               # FILL IN: your bot: one decision, today
+        secrets: [ALPACA_API_KEY, ALPACA_SECRET_KEY]    # FILL IN: the names of your PAPER account's keys
+        max_minutes: 5
+        artifacts: [out/paper/equity.csv, out/paper/trades.csv]
+        expect:
+          text:
+            stdout: ["paper account PA"]   # Alpaca's answer, not the bot's claim: a live account's number fails this
+          files: [out/paper/equity.csv]

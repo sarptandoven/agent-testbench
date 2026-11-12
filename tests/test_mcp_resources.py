@@ -316,6 +316,7 @@ def test_prompts_render_with_and_without_arguments(project, monkeypatch, tmp_pat
     assert "never trade live money" in strategy and "Walk-forward" in strategy and "Holdout, once" in strategy
     assert "report the deflated Sharpe of the best over all of" in strategy
     assert "Start from plan `backtest`." in strategy
+    assert "the `recipes` tool has the ladder: trading-backtest" in prompt("check-a-strategy")
 
     for name, args, says in (
             ("prove-this-change", {"plan": "backtst"}, "No plan 'backtst' (did you mean backtest?)"),

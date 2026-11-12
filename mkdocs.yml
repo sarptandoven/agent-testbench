@@ -38,6 +38,7 @@ nav:
   - Notebooks: notebooks.md
   - Mock clients (LLMs, brokers): mocks.md
   - Trading:
+      - Trading with agents safely: trading-safely.md
       - Files and metrics: trading.md
       - "Sealed data: holdout, walk-forward, look-ahead": trading-data.md
       - Overfitting statistics: trading-stats.md

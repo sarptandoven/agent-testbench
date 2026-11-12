@@ -6,7 +6,7 @@ then the full run - each step with expectations that fail when the result is wro
 max_minutes that bound what it can cost.
 
 A recipe is a YAML file in this folder: a header comment (what it proves, what to FILL IN, what it costs), the
-sections its plans need (`sessions:`, `modal:`, `colab:`, `docker:`, `ssh:`), then `plans:` - never `budget:`,
+sections its plans need (`sessions:`, `modal:`, `colab:`, `docker:`, `ssh:`, `data:`), then `plans:` - never `budget:`,
 `pricing:` or `guard:`, which stay the person's. Recipes are added to a testbench.yaml as text, so their comments come
 along and nothing already in the file changes: a plan name that is taken is refused, and a section the file already
 has is kept as it is (the person is told what the recipe's own version holds).
@@ -34,7 +34,7 @@ import yaml
 from .. import budget, config as C, plugins
 
 HERE = Path(__file__).parent
-SECTIONS = ("sessions", "modal", "colab", "docker", "ssh")
+SECTIONS = ("sessions", "modal", "colab", "docker", "ssh", "data")
 NEVER = ("budget", "pricing", "guard")                   # the person's own: a recipe never sets them
 KEY = re.compile(r"([A-Za-z_][\w-]*):(?=\s|$)")          # a top-level key, at the start of a line
 NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
@@ -451,6 +451,30 @@ def subjects(plans: dict) -> set[tuple[str, str]]:
     return out
 
 
+MOCK_STAND_INS = {"prices": "time,symbol,close\n1970-01-02,STAND-IN,1\n", "replies": "[]\n"}   # files mocks: read
+MOCK_FILES = {"prices": "a CSV of time,symbol,close (docs/mocks.md#prices-and-the-clock)",
+              "replies": "the mock's replies (docs/mocks.md#replies)"}
+
+
+def mock_files(plans) -> list[tuple[str, str, str, dict]]:
+    """The files the plans' mocks read when testbench.yaml loads - a broker's prices, an LLM client's replies:
+    (plan, mock, option, the options) for each file option a step's `mocks:` gives."""
+    from .. import mocks as M
+    out = []
+    for name, plan in (plans if isinstance(plans, dict) else {}).items():
+        plan = C.long_form(name, plan)
+        for step in (plan.get("steps") if isinstance(plan, dict) else None) or []:
+            given = step.get("mocks") if isinstance(step, dict) else None
+            for sdk, opts in (given.items() if isinstance(given, dict) else ()):
+                try:
+                    keys = M.get(sdk).files
+                except Exception:                        # a mock testbench has none of: validate says so
+                    continue
+                out += [(str(name), sdk, key, opts) for key in keys if isinstance(opts, dict)
+                        and isinstance(opts.get(key), str)]
+    return out
+
+
 def check(text: str, root: Path) -> dict:
     """The config `text` loads as; a RecipeError saying why when it would not load, so nothing broken is written."""
     try:
@@ -466,6 +490,11 @@ def check(text: str, root: Path) -> dict:
                 raise RecipeError(f"plan {name} runs the notebook {nb}, which is not in this project, and there is no "
                                   "notebook here to use instead, so nothing was written. Put the notebook in the project "
                                   "(any folder), then run this again.")
+    for name, sdk, key, opts in mock_files(plans):
+        if not (Path(root) / opts[key]).is_file():
+            raise RecipeError(f"plan {name}'s mock {sdk} reads {opts[key]} (its `{key}:`), which is not in this "
+                              f"project, so nothing was written. Put {MOCK_FILES.get(key, 'the file')} there, then run "
+                              "this again.")
     try:
         return C.validate(raw, Path(root))
     except C.ConfigError as exc:
@@ -474,7 +503,8 @@ def check(text: str, root: Path) -> dict:
 
 def config(recipe: dict, base: dict | None = None) -> dict:
     """The recipe's plans as a loaded config, to price them: with the budget and prices of `base` (a project's loaded
-    config) when given, else the defaults. Its notebooks need not exist: a recipe file stands in for each."""
+    config) when given, else the defaults. Its notebooks and the files its mocks read need not exist: a recipe file
+    stands in for each notebook, a minimal file for each mock's."""
     raw = copy.deepcopy(recipe["data"])
     raw["project"] = "recipe"
     for key in ("budget", "pricing"):
@@ -488,15 +518,38 @@ def config(recipe: dict, base: dict | None = None) -> dict:
         for step in (plan.get("steps") if isinstance(plan, dict) else None) or []:
             if isinstance(step, dict) and "notebook" in step:
                 step["notebook"] = str(path)            # an absolute path that exists: pricing reads no notebook
-    return C.validate(raw, path.parent)
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, (_, _, key, opts) in enumerate(mock_files(raw["plans"])):
+            stand_in = Path(tmp) / f"{i}-{key}"
+            stand_in.write_text(MOCK_STAND_INS.get(key, ""), encoding="utf-8")
+            opts[key] = str(stand_in)                    # absolute: read when the config loads, never to price it
+        return C.validate(raw, path.parent)
+
+
+def worst_case(cfg: dict, plan_name: str) -> dict:
+    """budget.worst_case - or, for a walk-forward plan whose data cannot be cut yet (a recipe ships without the data),
+    the bound a launch allows: its steps in at most dataseal.MAX_WINDOWS windows (`max_windows`; the data decides how
+    many, and its launch is priced by those)."""
+    try:
+        return budget.worst_case(cfg, plan_name)
+    except C.ConfigError:
+        plan = cfg["plans"][plan_name]
+        if not plan.get("walk_forward"):
+            raise
+    from .. import dataseal
+    n = dataseal.MAX_WINDOWS
+    return {**budget.estimate(cfg, plan, C.plan_minutes(plan) * n, f"plan {plan_name} (at most {n} walk-forward "
+                              "windows)"), "plan": plan_name, "max_windows": n}
 
 
 def describe(cfg: dict, plan_name: str) -> str:
     """A plan's hardware, time limit and worst case, and what the budget says about that worst case."""
-    plan, est, lim = cfg["plans"][plan_name], budget.worst_case(cfg, plan_name), budget.limits(cfg)
+    plan, est, lim = cfg["plans"][plan_name], worst_case(cfg, plan_name), budget.limits(cfg)
     usd = est["worst_case_usd"]
-    text = (f"{plan['backend']}" + (f" {plan['gpu']}" if plan.get("gpu") else "") + f", up to {est['max_minutes']:g} "
-            "min, " + ("free" if not usd else f"worst case ${usd:.2f}" if usd >= 0.005 else "worst case under $0.01"))
+    minutes = (f"up to {C.plan_minutes(plan):g} min a window (the data decides how many; at most {est['max_windows']})"
+               if est.get("max_windows") else f"up to {est['max_minutes']:g} min")
+    text = (f"{plan['backend']}" + (f" {plan['gpu']}" if plan.get("gpu") else "") + f", {minutes}, "
+            + ("free" if not usd else f"worst case ${usd:.2f}" if usd >= 0.005 else "worst case under $0.01"))
     if usd > lim["max_run_usd"][0]:
         text += f" - over {lim['max_run_usd'][1]}: refused until a person raises it"
     elif usd > lim["ask_above_usd"][0]:
@@ -567,6 +620,13 @@ def contract(recipe: Recipe) -> list[str]:
                                   "inside the project"]
                 f.parent.mkdir(parents=True, exist_ok=True)
                 f.write_text("# %%\n" if f.suffix.lower() == ".py" else EMPTY_NOTEBOOK, encoding="utf-8")
+        for name, sdk, key, opts in mock_files(r["plans"]):      # and the files its mocks read stand for the project's
+            f = (root / opts[key]).resolve()
+            if not f.is_relative_to(root):
+                return out + [f"plan {name}'s mock {sdk} reads {opts[key]}, outside the project folder; name it by a "
+                              "path inside the project"]
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(MOCK_STAND_INS.get(key, ""), encoding="utf-8")
         try:
             text, _ = compose(INIT_TEMPLATE.format(project="recipe-check", plans=""), [r], fresh=True)
             cfg = check(text, root)
@@ -575,7 +635,7 @@ def contract(recipe: Recipe) -> list[str]:
     most = cfg["budget"]["max_run_usd"]
     for plan in cfg["plans"]:
         try:
-            usd = budget.worst_case(cfg, plan)["worst_case_usd"]
+            usd = worst_case(cfg, plan)["worst_case_usd"]
         except Exception as exc:                         # a plug-in's backend that cannot price it
             out.append(f"plan {plan}'s worst case cannot be worked out: {type(exc).__name__}: {exc}")
             continue

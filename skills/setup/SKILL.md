@@ -20,7 +20,9 @@ description: Set up agent-testbench in a project - install it, write testbench.y
    number only the person knows ("accuracy >= 0.9", "tests >= 120"): ask, do not guess.
    **When the person's goal matches a recipe, start from it**: `testbench recipes` lists them (pytest, jest,
    vitest, go-test, cargo-test, playwright-ts, notebook-colab, pytorch-train, hf-finetune, web-app, llm-eval,
-   docker-sandbox, ssh-gpu-box, data-pipeline) with each plan's worst case. `testbench init --recipe NAME` writes that ladder of plans plus what init detects;
+   docker-sandbox, ssh-gpu-box, data-pipeline, and for a trading strategy trading-backtest, vectorbt-strategy or
+   freqtrade-strategy, then alpaca-paper - backtests and paper only, docs/trading-safely.md) with each plan's worst
+   case. `testbench init --recipe NAME` writes that ladder of plans plus what init detects;
    `testbench init --add --recipe NAME` adds it to an existing testbench.yaml without changing anything already
    there. Then adapt its FILL IN lines to the project with the person.
 3. **Ask the person** for what only they can decide: the budget (`max_run_usd`, `ask_above_usd`,

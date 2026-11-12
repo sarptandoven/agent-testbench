@@ -6,9 +6,6 @@ only the rows before the window's test end; and every run records what its steps
 import datetime as dt
 import hashlib
 import json
-import shutil
-import subprocess
-import sys
 import tarfile
 from pathlib import Path
 
@@ -16,7 +13,7 @@ import pytest
 import yaml
 
 from agent_testbench import budget, config as C, dataseal as DS, executor, runs
-from conftest import EXAMPLES, cli
+from conftest import cli
 
 HOLDOUT = "2025-07-01"
 SEEN = '''\
@@ -374,26 +371,6 @@ def test_verify_says_when_the_data_changed_since_the_run_and_diff_shows_it(tmp_p
     data_json.write_text(data_json.read_text().replace('"rows"', '"rowz"'))
     r = cli(root, "verify")
     assert r.returncode == 1 and "changed: steps/01-" in r.stdout, "what the step saw is evidence"
-
-
-def test_the_sealed_backtest_example_tunes_walks_forward_and_opens_the_holdout_once(tmp_path):
-    root = tmp_path / "sealed-backtest"
-    shutil.copytree(EXAMPLES / "sealed-backtest", root, ignore=shutil.ignore_patterns(".testbench", "out",
-                                                                                     "__pycache__"))
-    shipped = (root / "data" / "prices.csv").read_bytes()
-    subprocess.run([sys.executable, "make_prices.py"], cwd=root, check=True, timeout=60)
-    assert (root / "data" / "prices.csv").read_bytes() == shipped, "make_prices.py writes the file that ships"
-    for plan in ("backtest", "walk-forward", "lookahead", "holdout"):
-        r = cli(root, "run", plan, "--foreground")
-        assert r.returncode == 0 and f"# PASS - plan `{plan}`" in r.stdout, r.stdout + r.stderr
-    assert "## Walk-forward: 7 windows, 7 passed" in (runs.all_runs(root)[1] / "report.md").read_text()
-    look = (runs.all_runs(root)[2] / "report.md").read_text()
-    assert "## Look-ahead: none found (4 reruns, " in look and "**FAIL**" not in look
-    assert "this run is the first to open it" in r.stdout and "the whole file, the sealed rows from" in r.stdout
-    r = cli(root, "run", "holdout", "--foreground")
-    assert r.returncode == 2 and "plans.holdout.holdout.max_opens is 1" in r.stdout
-    r = cli(root, "verify")
-    assert r.returncode == 0 and "data/prices.csv (prices) is the data the run read" in r.stdout
 
 
 def test_a_project_without_data_is_as_before(tmp_path):

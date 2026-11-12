@@ -1,0 +1,86 @@
+# Recipe vectorbt-strategy: the trading ladder for vectorbt - costs, look-ahead, walk-forward, the holdout once.
+#
+# Proves: the trading-backtest ladder for a vectorbt Portfolio. vbt-backtest - on every row before the seal,
+#   testbench's own numbers from the files the script writes (not pf.stats()) clear your bar, with fees and slippage
+#   charged, 30+ round trips and a better total return than buy and hold; vbt-lookahead - no entry or exit changes
+#   when the rows after it are cut away; vbt-walk-forward - every test window holds up on its own; vbt-holdout - once,
+#   on the sealed rows: a second opening is refused. testbench is not investment advice (docs/trading-safely.md).
+# FILL IN: the prices file and the day its holdout starts, the script, the bar, the windows.
+# Expects vbt_backtest.py to read the closes from TESTBENCH_DATA_PRICES (only the rows the plan may see), trade from
+#   TESTBENCH_TEST_START or TRADE_FROM when set, and end by writing testbench's standard files - as docs/trading.md
+#   shows for vectorbt (1.2; on 700 days testbench's numbers matched pf.stats() to the last digits):
+#     close = pd.read_csv(os.environ["TESTBENCH_DATA_PRICES"], index_col="time", parse_dates=True)["close"]
+#     pf = vbt.Portfolio.from_signals(close, entries, exits, fees=0.001, slippage=0.0005, init_cash=10_000, freq="1D")
+#     start = os.environ.get("TESTBENCH_TEST_START") or os.environ.get("TRADE_FROM")   # FILL IN: trade from it
+#     orders = pf.orders.records_readable
+#     write_trades([{"time": o["Timestamp"], "symbol": "BTC", "side": o["Side"], "quantity": o["Size"],
+#                    "price": o["Price"], "fee": o["Fees"]} for _, o in orders.iterrows()], "out/trades.csv")
+#     write_equity(pd.DataFrame({"equity": pf.value(), "benchmark": close}), "out/equity.csv")
+#     pd.DataFrame({"signal": fast / slow - 1, "entry": entries, "exit": exits}).to_csv("out/signals.csv",
+#                                                                                       index_label="time")
+#   (write_trades and write_equity: from agent_testbench.trading.files import write_equity, write_trades). The
+#   indicator the entries come from, as a column of signals.csv, sharpens vbt-lookahead: a number changes on every
+#   peek ahead, an entry only when it flips. A rolling indicator is fine; `.shift(-1)`, `center=True` or a threshold
+#   over the whole series is look-ahead, and vbt-lookahead fails on it.
+# `python` in a step is the Python running agent-testbench; vectorbt must be installed there (or run the project's own,
+#   `.venv/bin/python vbt_backtest.py`, with agent-testbench installed in it for the writers).
+# Costs: nothing; every plan runs on this machine.
+
+data:
+  prices:
+    path: data/prices.csv                  # FILL IN: time,close (and symbol, open, high, low, volume), one row per bar
+    holdout_from: 2025-07-01               # FILL IN: rows from here on are sealed: only vbt-holdout sees them
+
+plans:
+  vbt-backtest:
+    backend: local
+    description: the vectorbt Portfolio on every row before the seal, graded by testbench - costs, 30+ round
+      trips, beats buy and hold
+    steps:
+      - name: backtest
+        run: python vbt_backtest.py        # FILL IN: your script (it writes out/equity.csv, trades.csv, signals.csv)
+        max_minutes: 10
+        artifacts: [out/equity.csv, out/trades.csv]
+        expect:
+          strategy:
+            equity: out/equity.csv
+            sharpe: ">= 1"                 # FILL IN: the bar, set before you look
+            max_drawdown: ">= -0.25"       # FILL IN
+            beats: buy_and_hold
+            min_trades: 30
+            costs: required                # fees= or slippage= in from_signals: a backtest with neither fails
+
+  vbt-lookahead:
+    backend: local
+    description: the backtest, then 4 reruns on data cut earlier - an entry or exit that changes used the future
+    lookahead: {data: prices, output: out/signals.csv, cuts: 4}
+    steps:
+      - name: backtest
+        run: python vbt_backtest.py        # FILL IN: the same command
+        max_minutes: 10
+        expect:
+          files: [out/signals.csv]
+
+  vbt-walk-forward:
+    backend: local
+    description: window by window - 24 months of history, then the 6 months it trades; every window must hold up
+    walk_forward: {data: prices, train: 24mo, test: 6mo}    # FILL IN: your windows
+    steps:
+      - name: backtest
+        run: python vbt_backtest.py        # FILL IN: the same command
+        max_minutes: 10
+        expect:
+          strategy: {total_return: ">= -0.1", max_drawdown: ">= -0.2", min_trades: 2, costs: required}    # FILL IN
+
+  vbt-holdout:
+    backend: local
+    description: once, on the sealed rows, by rules written before it opens - a second opening is refused
+    holdout: {max_opens: 1}
+    steps:
+      - name: backtest
+        run: python vbt_backtest.py        # FILL IN: the same command
+        env: {TRADE_FROM: "2025-07-01"}    # FILL IN: holdout_from
+        max_minutes: 10
+        artifacts: [out/equity.csv, out/trades.csv]
+        expect:
+          strategy: {total_return: ">= -0.1", max_drawdown: ">= -0.2", min_trades: 2, costs: required}    # FILL IN: first

@@ -52,6 +52,13 @@ a strategy good until it survives costs, look-ahead, an untouched holdout and th
   `testbench report --tearsheet`.
 - Strict mock brokers: `mocks: [alpaca]`, `[ccxt]` or `[ib_async]` fill orders from a prices file with fees and
   slippage, refuse a live account unless `allow_live: true`, and count orders, fills and fees for `mock_calls:`.
+- `testbench demo trading`: a strategy with a planted look-ahead bug, caught in seconds and offline; with the
+  one-line fix it passes a backtest with costs, look-ahead, walk-forward, the holdout once and a paper rehearsal on
+  a mock Alpaca account (examples/trading). Recipes `trading-backtest`, `vectorbt-strategy`, `freqtrade-strategy`
+  and `alpaca-paper` (a free rehearsal on the mock broker, then Alpaca's paper API, keys by name).
+- docs/trading-safely.md, "Trading with agents safely": testbench is not a broker, a signal service or investment
+  advice; 0.3 does backtests and paper trading only - no live money. An 11th selftest check: a strategy that
+  decides with tomorrow's data is caught.
 
 **For everyone**
 - A VS Code extension (`editors/vscode`): plans, runs and the open loop, the HTML report, today's spend in the status
