@@ -52,6 +52,7 @@ nav:
   - Notifications: notify.md
   - Proof records: proof-records.md
   - Threat model: threat-model.md
+  - "Share a run: a page, a badge": share.md
   - Live dashboard: dashboard.md
   - "Exports: MLflow, W&B, csv": export.md
   - CI:

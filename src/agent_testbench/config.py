@@ -27,7 +27,7 @@ DEFAULTS = {
                 ".DS_Store"],
     "budget": {"max_run_usd": 2.0, "ask_above_usd": 0.5, "max_day_usd": 10.0},
     "pricing": {},
-    "guard": {"ask": ["git push", "gh repo create", "gh pr merge", "gh release create"]},
+    "guard": {"ask": ["git push", "gh repo create", "gh pr merge", "gh release create", "testbench share"]},
     "sessions": {"backend": "local", "gpu": None, "idle_minutes": 10, "max_minutes": 60, "secrets": []},
 }
 PLAN_DEFAULTS = {"backend": "local", "gpu": None, "workdir": None, "description": ""}

@@ -71,6 +71,16 @@ SCRIPT = """\
   var log = document.getElementById("log"), title = document.getElementById("logtitle");
   var conn = document.getElementById("conn"), step = "", offset = -1;
   function again() { setTimeout(tick, every); }
+  function swap(html) {
+    // New content, with the keyboard's place kept: the link that had focus has it again after the update.
+    var f = document.activeElement, href = f && f !== live && live.contains(f) ? f.getAttribute("href") : null;
+    live.innerHTML = html;
+    if (href === null) return;
+    var links = live.querySelectorAll("a[href]");
+    for (var i = 0; i < links.length; i++) {
+      if (links[i].getAttribute("href") === href) { links[i].focus({preventScroll: true}); return; }
+    }
+  }
   function tick() {
     var url = live.dataset.src + (run ? "?step=" + encodeURIComponent(step) + "&offset=" + offset : "");
     fetch(url, {cache: "no-store"}).then(function (r) {
@@ -78,8 +88,8 @@ SCRIPT = """\
       return run ? r.json() : r.text();
     }).then(function (d) {
       conn.textContent = "";
-      if (!run) { live.innerHTML = d; return again(); }
-      live.innerHTML = d.head;
+      if (!run) { swap(d); return again(); }
+      swap(d.head);
       if (d.step !== step) { log.textContent = ""; step = d.step; }
       title.textContent = d.label;
       if (d.text) {
@@ -131,9 +141,10 @@ def _when(t) -> str:
 
 
 def _meter(value, most) -> str:
+    """A bar beside the numbers it draws (they are always in the text too, so a screen reader skips the bar)."""
     if not (C.number(value) and C.number(most, positive=True)):
         return ""
-    return (f"<meter min=0 max={most:g} low={most * 0.7:g} high={most * 0.9:g} optimum=0 "
+    return (f"<meter aria-hidden=true min=0 max={most:g} low={most * 0.7:g} high={most * 0.9:g} optimum=0 "
             f"value={min(value, most):g}></meter>")
 
 
@@ -335,8 +346,8 @@ def _running(root: Path, cfg: dict) -> str:
                     + (f"<br><span class=small>loop try {e(str(origin.get('try')))}</span>" if origin.get("loop") else "")
                     + f"</td><td>{e(_hw(s))}</td><td>{_step_cell(n)}</td><td>{_time_cell(n)}</td>"
                     f"<td>{e(n['cost'])}</td></tr>")
-    return ("<h2>Running now</h2><div class=scroll><table><tr><th></th><th>run</th><th>plan</th><th>where</th>"
-            "<th>step</th><th>time</th><th>cost</th></tr>" + "".join(rows) + "</table></div>")
+    return ("<h2>Running now</h2><div class=scroll><table>" + R.head("", "run", "plan", "where", "step", "time", "cost")
+            + "".join(rows) + "</table></div>")
 
 
 def _sessions(root: Path, cfg: dict) -> str:
@@ -362,8 +373,8 @@ def _sessions(root: Path, cfg: dict) -> str:
             when, cost = e(str(s.get("stop_reason") or "")), _money(s.get("cost_usd"))
         rows.append(f"<tr><td class='{'running' if st in S.ACTIVE else 'muted'}'>{e(st)}</td><td><b>{e(name)}</b></td>"
                     f"<td>{e(_hw(s))}</td><td>{when}</td><td>{e(cost)}</td><td>{e(_g(s.get('exec_count', 0)))}</td></tr>")
-    return ("<h2>Sessions</h2><div class=scroll><table><tr><th></th><th>session</th><th>where</th><th>time</th>"
-            "<th>cost</th><th>execs</th></tr>" + "".join(rows) + "</table></div><div class=small>A session stops "
+    return ("<h2>Sessions</h2><div class=scroll><table>" + R.head("", "session", "where", "time", "cost", "execs")
+            + "".join(rows) + "</table></div><div class=small>A session stops "
             "itself after its idle minutes unused or at its max minutes; remote machines are also stopped on their "
             "own side.</div>")
 
@@ -415,8 +426,8 @@ def _loop(root: Path, cfg: dict) -> str:
         rows.append(f"<tr><td class='{css}'>{e(mark)}</td><td>{e(_g(t.get('n')))}</td><td>{e(shown)}</td>"
                     f"<td>{e(cost)}</td><td><a href='/runs/{_q(t.get('run'))}/'>{e(str(t.get('run')))}</a></td>"
                     f"<td>{e(L._desc(t) if isinstance(t.get('description'), str) else '')}</td></tr>")
-    out.append(f"<div class=scroll><table><tr><th></th><th>try</th><th>{e(str(s.get('key')))}</th><th>cost</th>"
-               "<th>run</th><th>what changed</th></tr>" + "".join(rows) + "</table></div>")
+    out.append("<div class=scroll><table>" + R.head("", "try", e(str(s.get("key"))), "cost", "run", "what changed")
+               + "".join(rows) + "</table></div>")
     return "".join(out)
 
 
@@ -435,8 +446,8 @@ def _recent(root: Path, cfg: dict) -> str:
                     f"<td><a href='/runs/{_q(run_dir.name)}/'>{e(run_dir.name)}</a></td><td>{e(str(s.get('plan')))}</td>"
                     f"<td>{e(_hw(s))}</td><td>{e(_when(s.get('started') or s.get('created')))}</td>"
                     f"<td>{'' if mins is None else f'{mins:g}'}</td><td>{e(cost)}</td></tr>")
-    return ("<h2>Recent runs</h2><div class=scroll><table><tr><th></th><th>run</th><th>plan</th><th>where</th>"
-            "<th>started</th><th>minutes</th><th>cost</th></tr>" + "".join(rows) + "</table></div>"
+    return ("<h2>Recent runs</h2><div class=scroll><table>"
+            + R.head("", "run", "plan", "where", "started", "minutes", "cost") + "".join(rows) + "</table></div>"
             f"<p class=small>{len(found)} run(s) in all; <a href='/ui/index.html'>every plan and run</a> has the "
             "trend of each checked number.</p>")
 
@@ -447,7 +458,7 @@ SECTIONS = (("Spend today", _spend), ("Running now", _running), ("Sessions", _se
 
 def overview(d: Dashboard) -> str:
     cfg = d.config()
-    out = [f"<h1><span class=dot></span>{e(cfg['project'])}</h1>",
+    out = [f"<h1><span class=dot aria-hidden=true></span>{e(cfg['project'])}</h1>",
            f"<div class=muted>{e(str(d.root))} &middot; updated {dt.datetime.now():%H:%M:%S}</div>"]
     if d.cfg_error:
         out.append(f"<p class=failed>testbench.yaml cannot be read now, so this uses it as it was: {e(d.cfg_error)}</p>")
@@ -481,8 +492,8 @@ def _run_head(run_dir: Path, s: dict, n: dict) -> str:
             f"<code>{e(str(s.get('plan')))}</code></h1><div class=muted>run <code>{e(name)}</code>{stop} &middot; "
             f"updated {dt.datetime.now():%H:%M:%S}</div>{lost}<div class=facts>"
             + "".join(f"<div><b>{e(k)}</b>{v}</div>" for k, v in facts) + "</div>"
-            + ("<h2>Steps</h2><div class=scroll><table><tr><th></th><th>#</th><th>step</th><th>kind</th><th>minutes</th>"
-               "<th>limit</th></tr>" + "".join(rows) + "</table></div>" if rows else ""))
+            + ("<h2>Steps</h2><div class=scroll><table>" + R.head("", "#", "step", "kind", "minutes", "limit")
+               + "".join(rows) + "</table></div>" if rows else ""))
 
 
 def _finished(s: dict) -> bool:
@@ -547,9 +558,9 @@ def run_page(run_dir: Path) -> tuple[str, str]:
 # ---- the server --------------------------------------------------------------------------------------------------
 
 def page(title: str, body: str) -> str:
-    nav = ("<nav><a href='/'>overview</a><a href='/ui/index.html'>every plan and run</a>"
+    nav = ("<nav aria-label=dashboard><a href='/'>overview</a><a href='/ui/index.html'>every plan and run</a>"
            "<span class=small>testbench ui --serve &middot; this machine only &middot; read-only</span></nav>")
-    return R.page(title, nav + body + f"<p class=note>{READ_ONLY}</p><p id=conn></p>",
+    return R.page(title, nav + body + f"<p class=note>{READ_ONLY}</p><p id=conn role=status></p>",
                   f"<style>{CSS}</style><script src='/dashboard.js' defer></script>")
 
 

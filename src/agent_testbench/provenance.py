@@ -91,16 +91,26 @@ def _total(entries: list[dict]) -> str:
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()     # a file name that is not UTF-8
 
 
-def verify(run_dir: Path, report: dict) -> list[str]:
-    """What no longer matches the evidence the report recorded: changed, missing or added files, or a list of hashes
-    edited to match changed files (it no longer adds up to the evidence_sha256 the run recorded and printed)."""
+def check_list(report: dict) -> str:
+    """'' when the report's evidence list is whole - entries of {path, sha256} that add up to its evidence_sha256 -
+    else what is wrong with it. `testbench verify --from` checks a published bundle with it, away from the run."""
     entries = report.get("evidence")
     if not isinstance(entries, list) or not all(isinstance(e, dict) and isinstance(e.get("path"), str)
                                                 and isinstance(e.get("sha256"), str) for e in entries):
-        return ["the report's evidence list is not a list of {path, sha256}: report.json was cut short or edited"]
+        return "the report's evidence list is not a list of {path, sha256}: report.json was cut short or edited"
     if _total(entries) != report.get("evidence_sha256"):
-        return ["the report's evidence list does not add up to its evidence_sha256: report.json was edited after "
-                "the run"]
+        return ("the report's evidence list does not add up to its evidence_sha256: report.json was edited after "
+                "the run")
+    return ""
+
+
+def verify(run_dir: Path, report: dict) -> list[str]:
+    """What no longer matches the evidence the report recorded: changed, missing or added files, or a list of hashes
+    edited to match changed files (it no longer adds up to the evidence_sha256 the run recorded and printed)."""
+    wrong = check_list(report)
+    if wrong:
+        return [wrong]
+    entries = report["evidence"]
     recorded = {e["path"]: e["sha256"] for e in entries}
     try:
         now = {e["path"]: e["sha256"] for e in evidence(run_dir)[0]}

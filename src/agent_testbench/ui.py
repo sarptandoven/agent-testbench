@@ -76,8 +76,8 @@ def build(root: Path, cfg: dict) -> Path:
     if unreadable:
         body.append(f"<p class=muted>Left out: {len(unreadable)} run(s) whose report.json cannot be read: "
                     f"{e(', '.join(unreadable[:20]))}.</p>")
-    body.append("<h2>Plans</h2><div class=scroll><table><tr><th>plan</th><th>latest</th><th>runs</th><th>passed</th>"
-                "<th>checked numbers over time</th></tr>")
+    body.append("<h2>Plans</h2><div class=scroll><table>"
+                + R.head("plan", "latest", "runs", "passed", "checked numbers over time"))
     for name in list(cfg["plans"]) + sorted({r.get("plan") for r in reports} - set(cfg["plans"]), key=str):
         mine = [r for r in done if r.get("plan") == name]
         h = R.history(mine)
@@ -89,8 +89,8 @@ def build(root: Path, cfg: dict) -> Path:
         body.append(f"<tr><td><b>{e(str(name))}</b></td><td>{status}</td><td>{len(mine)}</td>"
                     f"<td>{(100 * sum(r['status'] == 'passed' for r in mine) // len(mine)) if mine else 0}%</td>"
                     f"<td>{trends}</td></tr>")
-    body.append("</table></div><h2>Runs</h2><div class=scroll><table><tr><th></th><th>run</th><th>plan</th>"
-                "<th>where</th><th>minutes</th><th>cost</th><th>code</th></tr>")
+    body.append("</table></div><h2>Runs</h2><div class=scroll><table>"
+                + R.head("", "run", "plan", "where", "minutes", "cost", "code"))
     for r in reversed(reports):
         src = r.get("source") or {}
         cost = f"${r['cost_usd']:.3f}" if isinstance(r.get("cost_usd"), (int, float)) else ""

@@ -118,7 +118,9 @@ still work on Colab for a person.
 
 A report names the commit it ran and hashes its evidence. Before you point someone at a run, `testbench verify
 <run>` should pass. For a person who wants to look rather than read, `testbench report <run> --format html` writes
-one page with the plots inline; `testbench history <plan>` shows how the checked numbers moved across runs.
+one page with the plots inline; `testbench history <plan>` shows how the checked numbers moved across runs. To put
+a run where others can open and check it, show the person `testbench share <run> --to DEST --dry-run` (every file it
+would publish) and let them publish it: never add `--yes` yourself.
 
 ## Reporting back
 

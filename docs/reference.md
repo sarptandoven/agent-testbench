@@ -66,7 +66,7 @@ file loads, and `testbench schema` adds the installed plug-ins' own descriptions
 | `sessions.max_minutes` | `60` | and after this long in any case; its worst-case cost is this many minutes of its hardware (Modal: up to 1440) |
 | `sessions.secrets` | `[]` | secret NAMES passed into every session |
 | `sessions.cpu`, `sessions.memory_gb` | from `modal:` | Modal sessions only |
-| `guard.ask` | `git push`, `gh repo create`, `gh pr merge`, `gh release create` | commands the Claude Code hook asks about first |
+| `guard.ask` | `git push`, `gh repo create`, `gh pr merge`, `gh release create`, `testbench share` | commands the Claude Code hook asks about first (not with `--dry-run`) |
 | `data.<role>.path` | none | the data the plans read, by role: a CSV file (or a folder of CSV files) with a time column, relative to the project; steps find it in `TESTBENCH_DATA_<ROLE>`. `data: {prices: data/prices.csv}` is the path alone ([sealed data](trading-data.md)) |
 | `data.<role>.time` | the first of `time`, `date`, `timestamp`, `datetime` | its time column (ISO 8601 times) |
 | `data.<role>.holdout_from` | none | rows at or after this time are sealed: every plan but the one with `holdout:` sees the file cut before it, in a copy of the project |
@@ -403,6 +403,8 @@ testbench report [RUN] --format html|junit [-o FILE]
 testbench report [RUN] --tearsheet [-o FILE]   # trading: the tear sheet page alone (tearsheet.html in the run folder)
 testbench history PLAN [-n N] [--json]     # each run's outcome and every number its checks found, oldest first
 testbench ui [--open]                      # .testbench/ui/index.html: plans, trend lines, runs, loops, sessions
+testbench share [RUN] --to DEST [--dry-run]   # the run as a page others open and check (docs/share.md)
+testbench verify --from URL_OR_FOLDER      # a shared run, with no project: files, manifest and recorded hashes
 ```
 
 ## Prices
@@ -471,6 +473,7 @@ which `loop status` does.
 | `report [RUN] [--format md\|json\|html\|junit] [-o FILE]` | a run's report | 0, a failed run's report too |
 | `report [RUN] --tearsheet [-o FILE]` | only the [tear sheet](trading.md#tear-sheet) of the steps that kept an `equity.csv` among their artifacts: one page, to the run folder's `tearsheet.html` or FILE | 0; 1 no step kept one, or every one was refused (the reason is printed) |
 | `verify [RUN] [--attestation [--repo OWNER/REPO]]` | check the evidence against its recorded sha256 | 0 it matches, 1 it does not (2: it could not be checked) |
+| `verify --from URL_OR_FOLDER` | check a run `share` published, with no project: every file against its manifest, each evidence file against the sha256 the run recorded | 0 it matches, 1 it does not (2: it could not be checked) |
 | `ui [--open] [--serve [--port N]]` | every run as a page, or the live dashboard | 0 |
 | **work live, improve in a loop** | | |
 | `session start [NAME] [--backend B] [--gpu G] ...` | start a kernel, inside the budget | 0 |
@@ -498,6 +501,8 @@ which `loop status` does.
 | `cancel [RUN]` | stop a run, here and on its remote machine | 0, also when it had already ended (the message says how to read it instead) |
 | `watch PLAN [--max-runs N]` | run a free plan again on every change | 0 stopped, or the last of `--max-runs` passed; 1 it did not |
 | **proof** | | |
+| `share [RUN] --to DEST [--dry-run] [--yes] [--keep-paths]` | publish a run's proof as a static page others open and check, in DEST/RUN/: a folder, `git:BRANCH/FOLDER` (committed, never pushed) or `s3://BUCKET/PREFIX` (the aws CLI); lists every file first and needs a person's yes ([share.md](share.md)) | 0 published or listed, 1 it failed or the evidence changed |
+| `badge [PLAN] [-o SVG] [--link URL]` | a README badge of the plan's latest run: checks passed, failed, or no runs | 0 |
 | `diff [A B \| PLAN \| RUN] [--json]` | what changed between two runs | 0 |
 | `history PLAN [-n N] [--json]` | a plan's runs over time | 0 |
 | `export [RUN\|all] [--to mlflow\|wandb\|csv\|jsonl]` | a run in a tracker or a file | 0, 1 a target failed |

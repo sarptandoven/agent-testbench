@@ -35,6 +35,10 @@
   127.0.0.1, Host header checked, serves only reports and step evidence from .testbench - never state.json or
   plan.json; nothing on it may launch, approve, cancel or spend). Prices: `prices.py` and `pricing/catalog.json` (keep them equal
   to the backends' built-in tables; a test checks).
+- Sharing: `share.py` (`testbench share`: one run as a static bundle - page, report.json, evidence, manifest - to a
+  folder, a git branch by plumbing (never pushed, the working tree untouched) or S3 through the aws CLI; never state,
+  plans, .env files, secret or env: values; the page scrubbed of this machine's paths; a person's yes before it goes
+  out; `testbench verify --from`) and `badge.py` (the README badge SVG). Tests fake `aws` and use temp repos only.
 - Processes: `procs.py` (start, check and stop background work and lock files - the same on Linux, macOS and
   Windows; never `os.kill(pid, 0)` on Windows, it ends the process). `scaffold.py`: what `testbench init` writes.
 - CI: `action.yml` (the GitHub Action) and `.github/workflows/action.yml` (its self-test); `ci/` holds the
