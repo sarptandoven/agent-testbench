@@ -15,6 +15,15 @@
   every remote run or session must have a hard stop on the remote side. Every budget, price and time limit goes
   through `config.number` (NaN compares false with every limit), and an MCP tool argument that ends up on the
   command line is a value, never an option (`mcp_server._name`, `--opt=value`, or after `--`).
+- Core and layers (`core.py`, the base for plug-ins; `docs/architecture.md`): the core is `config`, `budget`,
+  `prices`, `backends/__init__` and `backends/local`, `runs`, `driver`, `executor`, `expect`, `provenance`, `report`,
+  `procs` and `core` itself - load a config, price and check a launch, run a plan on this machine, check it, write and
+  verify its proof record. Everything else is a layer: the ways in (`cli`, `mcp_server`, `api`, `tools`, `connect`,
+  `dashboard`, `ui`, `github_action`), the remote backends, `sessions`, `session_backends`, `kernelkit/`,
+  `notebook`, `web`, `mocks`, `notify`, `export`, `loop`, `watch`, `diff`, `rescue`, `scaffold`, `recipes/`, `lint`,
+  `selftest`. A core module never imports a layer or an optional package at module level (only inside the function
+  that needs it, e.g. `executor` loads `notebook` for a notebook step); `tests/test_core_boundary.py` checks it.
+  The lists are `core.CORE_MODULES` / `core.LAYER_MODULES`; a new module is a layer unless added to the core's.
 - Backends: `backends/__init__.py` (the `Backend` interface and registry, plugins by entry point); each backend
   module (`backends/local.py`, `modal_backend.py`, `colab_backend.py`, `ssh_backend.py`, `docker_backend.py`,
   `kubernetes_backend.py`) owns its GPUs, prices and plan runner.

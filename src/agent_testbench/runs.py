@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import budget, config as C, notify, procs, provenance, report as R
+from . import budget, config as C, procs, provenance, report as R     # core modules only: layers load where used
 
 DONE = ("passed", "failed", "cancelled", "error")
 
@@ -120,6 +120,7 @@ def launch(root: Path, cfg: dict, plan_name: str, approve: bool = False, foregro
             budget.record(root, {"event": "launch", "run": run_dir.name, "plan": plan_name, "backend": plan["backend"],
                                  "worst_case_usd": est["worst_case_usd"]})
     if not ok:                                         # told outside the launch lock, so no launch waits on it
+        from . import notify
         notify.approval_needed(root, cfg, message, est, f"testbench run {plan_name} --approve")
         raise LaunchRefused(message)
     _gitignore(root)
@@ -215,6 +216,7 @@ def settle(run_dir: Path) -> dict:
         state = read_state(run_dir)
         if state.get("status") not in DONE:
             write_state(run_dir, status="error", error="the driver process exited without finishing; see driver.log")
+            from . import notify
             notify.run_end(Path(run_dir).resolve().parents[2], run_dir)
             return read_state(run_dir)
     return state
@@ -233,7 +235,7 @@ def cancel(run_dir: Path) -> str:
             time.sleep(1)
     s = read_state(run_dir)
     if s.get("status") not in DONE:                  # the driver is gone: cancel remote work from here
-        from . import backends
+        from . import backends, notify
         msg = backends.get(s["backend"]).cancel_remote(s)
         write_state(run_dir, status="cancelled", error="cancelled by request" + (f"; {msg}" if msg else ""))
         notify.run_end(Path(run_dir).resolve().parents[2], run_dir)
@@ -255,6 +257,7 @@ def finalize(root: Path, run_dir: Path, rep: dict, cost_usd: float, cfg: dict | 
                 minutes=rep.get("minutes"))
     budget.record(root, {"event": "finish", "run": run_dir.name, "plan": state["plan"], "backend": state["backend"],
                          "status": rep["status"], "minutes": rep.get("minutes"), "usd": round(cost_usd, 4)})
+    from . import notify
     notify.run_end(root, run_dir, rep, cfg)
     from .export import after_run
     after_run(root, run_dir)                         # testbench.yaml's export:, never raises or waits on a tracker

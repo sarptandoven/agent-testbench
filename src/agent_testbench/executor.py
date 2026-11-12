@@ -20,7 +20,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import __version__, expect, mocks, notebook
+from . import __version__, expect     # core modules only: notebook, mocks and web load for the steps that use them
 
 SHIM = Path(__file__).parent / "colab_shim"
 ARTIFACT_FILE_LIMIT = 200 * 1024 * 1024
@@ -126,6 +126,7 @@ def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_e
     paths = [str((workdir / p).resolve()) for p in step["pythonpath"]]
     mocked = step.get("mocks") or {}
     if mocked:                                                  # the mock openai / anthropic packages win the import
+        from . import mocks
         paths = mocks.client_paths(mocked) + paths
         env.update(mocks.client_env(mocked, workdir))
         env.pop("TESTBENCH_MOCK_CALLS", None)                    # the log goes to the step's folder, where it is read
@@ -136,6 +137,7 @@ def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_e
     env["TESTBENCH_STEP_DIR"] = str(step_dir)
     env.setdefault("MPLBACKEND", "Agg")                         # child processes must not inherit an inline backend
     result: dict = {"name": step["name"], "kind": step["kind"], "status": "error", "error": None}
+    param_error: tuple = ()                                     # notebook.ParamError, once a notebook step loads it
     missing = [s for s in step["secrets"] if s not in env]
     if missing:
         result["error"] = {"ename": "MissingSecret", "evalue": f"secrets not in the environment: {', '.join(missing)} "
@@ -143,6 +145,8 @@ def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_e
     else:
         try:
             if step["kind"] == "notebook":
+                from . import notebook                               # nbclient and a kernel: notebook steps only
+                param_error = (notebook.ParamError,)
                 queue = step_dir / "upload_queue.json"
                 queue.write_text(json.dumps([[str((workdir / f).resolve()) for f in group] for group in step["uploads"]]))
                 env["TESTBENCH_UPLOAD_QUEUE"] = str(queue)
@@ -169,12 +173,12 @@ def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_e
                 if w.get("setup_error"):
                     result.update(status="error", error={"ename": "WebSetupError", "evalue": w["setup_error"]})
                 result["_web_full"] = w
-        except notebook.ParamError as exc:
+        except param_error as exc:
             result.update(status="error", error={"ename": "ParamError", "evalue": str(exc)})
         except Exception as exc:                                   # the harness itself failed: say so plainly
             result.update(status="error", error={"ename": type(exc).__name__, "evalue": str(exc)[:2000]})
     text = log_path.read_text(errors="replace")
-    result["stdout_tail"] = notebook._tail(text, 40, 5000)
+    result["stdout_tail"] = "\n".join(text.splitlines()[-40:])[-5000:]        # the last 40 lines, at most 5000 chars
     result["gpu"] = gpu() if gpu else None
     if result["status"] in ("passed", "failed") or step["kind"] == "run":
         seen = {**result, "stdout": text, "web": result.pop("_web_full", None) or result.get("web"),

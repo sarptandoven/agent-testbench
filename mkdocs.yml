@@ -51,6 +51,7 @@ nav:
   - "Exports: MLflow, W&B, csv": export.md
   - CI: github-action.md
   - Python API and tools: python-api.md
+  - "Architecture: core and plug-ins": architecture.md
   - Reference: reference.md
   - FAQ: faq.md
   - Troubleshooting: troubleshooting.md

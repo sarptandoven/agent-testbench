@@ -418,10 +418,10 @@ def _step(where: str, step: dict, root: Path) -> dict:
 
 def _mocks(where: str, value, root: Path) -> dict:
     """mocks: [openai, anthropic], or with options: {anthropic: {replies: tests/replies.yaml, fail_on_call: 3}}."""
-    from . import mocks as M
     example = "[openai, anthropic], or with options {anthropic: {replies: tests/replies.yaml, fail_on_call: 3}}"
     if value in (None, [], {}):
         return {}
+    from . import mocks as M                                 # a layer: only for steps that use mocks
     if isinstance(value, str):
         value = [value]
     if isinstance(value, list):
