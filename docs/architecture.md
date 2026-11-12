@@ -51,4 +51,4 @@ nbclient, the mock clients or any optional package.
 `tests/test_core_boundary.py` checks all of it.
 
 This is the base for plug-ins: a plug-in builds on the core and never needs the CLI or the MCP server loaded.
-[Backend plugins](plugins.md) shows the one kind of plug-in that is open today, a machine from another package.
+[Plug-ins](plugins.md) shows each kind, how a package adds one, and the kit that checks it keeps its contract.

@@ -227,6 +227,7 @@ class Modal(Backend):
     built_in_gpus = ("T4", "L4", "A10", "A10G", "L40S", "A100-40GB", "A100-80GB", "A100", "H100", "H200", "B200", "B300",
                      "RTX-PRO-6000")
     max_session_minutes = 24 * 60
+    hard_stop = "Modal: the plan's function timeout, a Sandbox's lifetime and idle timeout"
     config_defaults = {"modal": {"python": "3.11", "pip": [], "requirements": None, "apt": [], "cpu": 2.0, "memory_gb": 8}}
 
     @property

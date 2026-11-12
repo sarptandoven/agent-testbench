@@ -123,7 +123,7 @@ and `agent_testbench.tools` gives the same tools to the Anthropic or OpenAI API 
 | `kubernetes` | a Job on your cluster's GPU or CPU nodes, through kubectl | the Job's `activeDeadlineSeconds`, and a watchdog in the pod | [docs/kubernetes.md](docs/kubernetes.md) |
 | `modal` | a [Modal](https://modal.com) Sandbox or function with any GPU (T4 ... B200) | Modal's own timeouts | your Modal account |
 | `colab` | a [Colab](https://colab.research.google.com) VM through Google's Colab CLI | a watchdog on the VM, which releases it | your compute units |
-| plugins | anything a package registers (`agent_testbench.backends` entry point) | the backend's own | [reference](docs/reference.md#backends) |
+| plugins | anything a package registers (`agent_testbench.backends` entry point) | the backend's own (`testbench plugin test` checks it has one) | [docs/plugins.md](docs/plugins.md) |
 
 Each is set per plan (`backend:`) or per session (`--backend`), so the same notebook can be proved for free
 locally, then on the target GPU for a few cents. Linux, macOS and Windows (Colab's CLI has no Windows build).
@@ -278,7 +278,7 @@ The rest, for setup, money, notebooks and more (`testbench help --all` lists eve
 
 | | |
 |---|---|
-| `testbench init [--recipe]` / `recipes` / `schema` / `connect` / `selftest` / `mcp [--http]` | set up a project and your agents, editor autocomplete for testbench.yaml, check the promises hold here, serve MCP |
+| `testbench init [--recipe]` / `recipes` / `schema` / `connect` / `selftest` / `mcp [--http]` / `plugins` / `plugin test` | set up a project and your agents, editor autocomplete for testbench.yaml, check the promises hold here, serve MCP, list plug-ins and check one keeps its contract |
 | `testbench wait` / `status` / `runs` / `cancel` / `watch` | follow, list and stop runs; run a free plan again on every change |
 | `testbench diff` / `history` / `export` | what changed between runs, the checked numbers over time, MLflow / W&B / csv / jsonl |
 | `testbench files` / `notify test` | files on a session's machine; a test message to the `notify:` webhook |
@@ -293,6 +293,7 @@ refusal (exit 2) says what was refused, why, and the command or the testbench.ya
 
 - [docs/reference.md](docs/reference.md) - every field of testbench.yaml, sessions, plans, steps, loops, proof
   records, prices, the ssh backend, machine limits, writing a backend plugin
+- [docs/plugins.md](docs/plugins.md) - plug-ins of every kind: how a package adds one, and the kit that checks it
 - [docs/expectations.md](docs/expectations.md) - every expectation, with what its failure looks like
 - [docs/recipes.md](docs/recipes.md), [docs/notebooks.md](docs/notebooks.md), [docs/rescue.md](docs/rescue.md),
   [docs/mocks.md](docs/mocks.md) - starting points, what notebook steps accept, rescuing notebooks, mock LLM SDKs

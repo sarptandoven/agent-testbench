@@ -748,6 +748,7 @@ class KubernetesSession:
 class KubernetesBackend(Backend):
     name = "kubernetes"
     startup_minutes = 5.0             # scheduling, pulling the image, installing the basics, copying the project
+    hard_stop = "the Job's activeDeadlineSeconds (the priced worst case), and kernelkit's watchdog in the pod"
     config_defaults = {"kubernetes": {
         "context": None, "namespace": None, "image": "python:3.11-slim", "setup": "pip", "pip": [], "python": "python3",
         "image_pull_policy": "IfNotPresent", "usd_per_hour": {"cpu": 0.0}, "gpu_resource": "nvidia.com/gpu",

@@ -120,8 +120,10 @@ rack = "testbench_rack:backend"
 from agent_testbench.backends import Backend, split_gpu
 
 class Rack(Backend):
+    name = "rack"                                # what `backend:` names (else its entry point's name)
     gpus = ("RTX4090",)                          # what `gpu:` may name (NAME or NAME:COUNT)
     startup_minutes = 2                          # added to every worst case
+    hard_stop = "a watchdog on the box ends the work at its time limit"   # what stops it there, in words
     config_defaults = {"rack": {"usd_per_hour": 0.6}}     # its section of testbench.yaml
 
     def rate_per_minute(self, cfg, hardware):    # US dollars per minute, so budget.check can bound the cost
@@ -145,8 +147,11 @@ backend = Rack()
 Optional: `validate(cfg)` checks the backend's own section (called only when a plan or the sessions use it),
 `max_session_minutes`, and `remote = False` for a backend on this machine (plans then run in the project folder
 and no start-up is priced in). Every remote run and session must have a hard stop on the remote side, so the
-worst case holds even if this machine goes offline. A backend that fails to load is listed by `testbench doctor`
-and only breaks the projects that use it.
+worst case holds even if this machine goes offline; `hard_stop` says what it is. A backend that fails to load is
+listed by `testbench doctor` and `testbench plugins`, and only breaks the projects that use it; one that takes a
+built-in's name is skipped. `testbench plugin test testbench-rack` checks a backend keeps the backend contract
+([plugins.md](plugins.md#the-backend-contract)), and
+[examples/plugins/testbench-backend-example](../examples/plugins/testbench-backend-example) is a whole package.
 
 ## Live sessions
 
@@ -433,6 +438,8 @@ with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `ch
 | `connect CLIENT... [--user] [--dry-run]`, `connect --list` | register the MCP server in a client's config and write AGENTS.md | 0 |
 | `selftest [--keep]` | check the main promises hold on this machine, in a temporary folder (a minute or so, local and free) | 0 they all held, 1 one did not |
 | `mcp [--http]` | serve the commands as MCP tools | 0 when it stops |
+| `plugins [--json]` | each kind of plug-in: its built-ins, what is installed and from which package, what is broken and why ([plugins.md](plugins.md)) | 0 |
+| `plugin test TARGET\|--installed [--kind KIND]` | the conformance kit: check plug-ins keep their kind's contract; TARGET is `module:attr` or an installed package's name | 0 they all do, 1 one does not |
 | **runs** | | |
 | `wait [RUN] [--timeout SECONDS]` | follow a run (`--wait` is the same as `--timeout`) | 0 passed, 1 failed, 3 still running |
 | `status [RUN]` | one line about a run | 0 passed, 1 failed, cancelled, error or lost, 3 still running |
