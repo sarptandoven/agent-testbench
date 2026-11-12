@@ -236,6 +236,11 @@ Left to run, a loop stops itself: `--target 0.95` (done), `--patience 4` (four t
 in testbench.yaml you hear when runs and loops end, or when a launch waits for your yes - a Slack webhook or any
 JSON POST ([docs/loops.md](docs/loops.md), [docs/notify.md](docs/notify.md)).
 
+A loop over a trading strategy also says whether its best try is better than luck: from every try's returns (the
+`equity.csv` it keeps), reverted tries included, each report gives the best try's deflated Sharpe ratio, and
+`--min-deflated-sharpe 0.95` makes `--target` count only once the best try clears it
+([docs/loops.md](docs/loops.md#is-the-best-try-luck)).
+
 ## Guardrails
 
 - **Money**: worst case = hardware price x time limit (+ start-up), checked before every run, session and loop.

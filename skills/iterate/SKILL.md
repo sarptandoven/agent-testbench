@@ -90,6 +90,12 @@ that is the loop's answer: undo the untried edits, `testbench loop stop`, and re
 go on only with an idea different in kind from the ones that failed (`testbench loop try --new-direction "..."`),
 not another variation of them.
 
+For a trading strategy, the loop counts every try (reverted ones too) and each report says whether the best try is
+better than luck: "best of 12 tries: deflated Sharpe 0.41 ...; not significant at 0.95 - the improvement may be
+luck". Report that line with the result, and never present a best try it calls luck as an edge. Give
+`--returns out/equity.csv` (or keep the equity.csv as the step's `artifacts:`), and, when the person wants it,
+`--min-deflated-sharpe 0.95` so the target counts only for a best try that is not luck.
+
 ## Notebooks
 
 When a notebook does not run (downloaded, old, someone else's), start with `testbench rescue nb.ipynb`: it says

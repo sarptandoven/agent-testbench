@@ -324,6 +324,7 @@ testing the wrong program.
 
 ```
 testbench loop start PLAN --metric FILE:KEY --budget-usd N [--goal max|min] [--min-delta X] [--max-hours H] [--approve] [--wait S]
+                     [--target V] [--patience N] [--max-tries N] [--returns PATH] [--min-deflated-sharpe P]
 testbench loop try "what changed" [--wait S]      # exit 0 kept, 1 reverted, 3 still running, 2 refused
 testbench loop status                             # judges a finished try; exit 3 while one is running
 testbench loop stop
@@ -345,6 +346,10 @@ testbench loop stop
 - **Stop** writes `.testbench/loops/<id>/report.md` (each kept change with what it moved and its run, each reverted
   try and why) and checks out the branch the loop started from. The kept commits stay on the loop's branch.
 - Every verdict also goes to the lab notebook, `.testbench/NOTES.md`.
+- **A strategy**: with each try's returns (`--returns out/equity.csv`, or the one `equity.csv` the plan keeps as
+  evidence), every report says whether the best try is better than luck - its deflated Sharpe ratio over all tries,
+  reverted ones included, and PBO - and `--min-deflated-sharpe 0.95` makes `--target` count only once the best try
+  clears it ([Is the best try luck?](loops.md#is-the-best-try-luck)).
 
 ## Proof records
 

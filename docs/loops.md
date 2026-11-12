@@ -104,6 +104,130 @@ for when it is done or when to give up. Give it one or more at `loop start` (the
   in the report, which also says which rule had fired when the loop was stopped.
 - A loop started without them behaves as before.
 
+## Is the best try luck?
+
+An agent that tries many variants of a trading strategy will find one with a great backtest by luck alone, and
+the more variants it tries, the better the luckiest one looks. A loop already counts every try, so a loop over a
+strategy says, in every report, whether its best try is better than that luck:
+
+```
+best of 7 tries: deflated Sharpe 0.85 (probability the true Sharpe is above 0); not significant at 0.95 - the improvement may be luck
+PBO 0.59 over 7 tries: the best in-sample try is usually not the best out of sample
+```
+
+- **Returns.** `--returns PATH` (MCP: `returns`) names each try's `equity.csv` in the standard format
+  ([Trading](trading.md#equitycsv-one-row-per-bar)), or a CSV of per-period returns: one column, or a column named
+  `return` or `returns`, with or without a header line. The path is the one the plan writes, such as
+  `out/equity.csv`; it is looked for in the run's evidence (a step's `artifacts:`, the last step first), then in
+  the run's own folder, then in its work copy (runs on this machine). Without `--returns`, the loop takes the one
+  `equity.csv` the plan keeps as evidence, says so after the baseline ("returns for the luck check:
+  out/equity.csv, ..."), and uses that path for every try; with two, it asks for `--returns`. A plan that keeps
+  none gets a hint to add `artifacts: [out/equity.csv]` to the step that writes it. Returns are one per row of the
+  equity file, with no risk-free rate taken off.
+- **Every try counts.** After each try, kept or reverted, and after the baseline, its returns are kept in the
+  loop's folder (`.testbench/loops/<id>/returns/<try>.json`; a series longer than 20,000 periods keeps only its
+  Sharpe ratio, length, skewness and kurtosis, in `state.json`). The reverted tries are the point: they are the
+  variants the best one was picked from. A try whose run kept no returns cannot be counted; `loop status` and the
+  report list it and why.
+- **The deflated Sharpe line** appears once 2 or more tries have returns: after each `loop try` verdict, in
+  `loop status` (as `luck: ...`), in the report of `loop stop` (a section "Is the best try luck?"), in the
+  `loop_try`, `loop_rule` and `loop_end` notifications, and so in the MCP loop tools' output. It is the
+  [deflated Sharpe ratio](trading-stats.md#deflated-sharpe-ratio-dsr) of the loop's best try: the probability
+  that its true Sharpe ratio is above 0, once the number of tries N and the spread of their Sharpe ratios are
+  counted. The words are `trading.stats.deflate_tries`'s; N counts the baseline. When the try the loop kept for its
+  metric is not the one with the highest Sharpe, the line names that one too; when the kept try has no returns,
+  the one with the highest Sharpe stands in and the line says so. Significant means at least 0.95, or
+  `--min-deflated-sharpe` when given.
+- **PBO**, the [probability of backtest overfitting](trading-stats.md#probability-of-backtest-overfitting-pbo),
+  is the second line once 4 or more tries have returns over the same periods (as many returns, the same first and
+  last time). It is CSCV over the tries x periods table, cut into S blocks: the largest even number up to 16 that
+  leaves each block 4 periods or more (so T >= 8). `loop status` says why it is missing otherwise.
+- **`--min-deflated-sharpe P`** (with `--target`; MCP: `min_deflated_sharpe`): the target is met only when the
+  best try also has a deflated Sharpe of at least P over all tries so far. Until then the verdict says the target
+  does not count yet and the loop goes on: each further try of the same kind raises the bar the best must clear,
+  so only a clearly better strategy meets it. The report says whether it was met ("Its best reached the target
+  (sharpe >= 1) but not --min-deflated-sharpe 0.95 (...), so the target was not met").
+- **Without it**, a `--target` met by a lucky try is still reported honestly: the line comes right after "Target
+  reached" in the verdict, in the refusal of the next try, in the `loop_rule` message and in the report.
+- **What is not counted**: only this loop's tries. Runs of the plan outside the loop (`testbench run`, an earlier
+  loop, a backtest run by hand) are not; `testbench history PLAN` lists them, and `loop status` says how many ran
+  since the loop started. Variants tried there make the true N higher and the deflated Sharpe lower than the line
+  says. Counting every try as an independent trial errs the other way: near copies of each other are fewer
+  independent trials, so on that count the line is cautious.
+- Notifications carry `luck` (the line), `deflated_sharpe`, `deflated_sharpe_tries` and `pbo` as fields.
+- A loop whose plan keeps no returns, such as a model's accuracy, says nothing about luck.
+
+A real loop: an agent tunes a moving-average crossover on 300 days of a random walk, where there is nothing to
+find. Its second idea reaches the target Sharpe of 1, but the loop does not count it:
+
+```
+$ testbench loop start backtest --metric out/metrics.json:sharpe --budget-usd 0 --target 1 \
+    --min-deflated-sharpe 0.95 --max-tries 6
+BASELINE: sharpe 0.6135, run 20261112-090200-backtest passed.
+returns for the luck check: out/equity.csv, the one equity.csv the plan keeps as evidence (each try's own;
+--returns at loop start names another)
+
+$ testbench loop try "fast 5, slow 50"
+REVERTED try 1: sharpe 0.4958 is not better than the best 0.6135. The branch is back at 82c8065db.
+best of 2 tries: deflated Sharpe 0.73 (probability the true Sharpe is above 0); not significant at 0.95 - it may be luck
+
+$ testbench loop try "fast 20, slow 50"
+KEPT try 2: sharpe 1.471 (best was 0.6135, +0.8574). Run 20261112-090205-backtest passed. Best is now bdbbd3c60.
+Best sharpe 1.471 reaches the target (sharpe >= 1), but the target counts only once the best try's deflated Sharpe
+is at least 0.95 (--min-deflated-sharpe): its deflated Sharpe is 0.87 over 3 tries, so the loop goes on. A clearly
+better strategy raises it, while more tries of the same kind lower it; or stop the loop with `testbench loop stop`
+and report.
+best of 3 tries: deflated Sharpe 0.87 (probability the true Sharpe is above 0); not significant at 0.95 - the improvement may be luck
+
+$ testbench loop try "fast 10, slow 100"
+REVERTED try 3: sharpe 0.4934 is not better than the best 1.471. The branch is back at bdbbd3c60. The target
+(sharpe >= 1) still does not count: its deflated Sharpe is 0.86 over 4 tries (--min-deflated-sharpe 0.95).
+best of 4 tries: deflated Sharpe 0.86 (probability the true Sharpe is above 0); not significant at 0.95 - the improvement may be luck
+PBO 0.35 over 4 tries: the best in-sample try usually stays above the median try out of sample
+...
+$ testbench loop try "fast 15, slow 60"
+REVERTED try 6: sharpe 1.209 is not better than the best 1.471. The branch is back at bdbbd3c60. That was the last
+try the loop may make (--max-tries 6): stop the loop with `testbench loop stop` and report.
+best of 7 tries: deflated Sharpe 0.85 (probability the true Sharpe is above 0); not significant at 0.95 - the improvement may be luck
+PBO 0.59 over 7 tries: the best in-sample try is usually not the best out of sample
+
+$ testbench loop stop
+# Loop `20261112-090200-backtest` on plan `backtest`: sharpe 0.6135 -> 1.471 (max)
+
+6 tries, 1 kept, $0.000 of $0.00, 0.0 h. ...
+Stopping rules: target sharpe >= 1 with a deflated Sharpe of at least 0.95; at most 6 tries (6 made). It had made
+all its tries when it was stopped. Its best reached the target (sharpe >= 1) but not --min-deflated-sharpe 0.95
+(its deflated Sharpe is 0.85 over 7 tries), so the target was not met.
+
+## Is the best try luck?
+
+- best of 7 tries: deflated Sharpe 0.85 (probability the true Sharpe is above 0); not significant at 0.95 - the improvement may be luck
+- PBO 0.59 over 7 tries: the best in-sample try is usually not the best out of sample
+- returns: out/equity.csv in each try's run, the one equity.csv the plan keeps as evidence; per period, no risk-free
+  rate taken off
+- only this loop's tries are counted (the baseline too, kept or reverted): runs of plan backtest outside it are not
+  (`testbench history backtest`); if they tried variants, the true number of tries is higher and the deflated
+  Sharpe lower
+...
+```
+
+The plan: the backtest writes `out/equity.csv` and keeps it as evidence, and testbench's own metrics step computes
+the Sharpe ratio the loop judges by ([Trading](trading.md#in-a-plan)):
+
+```yaml
+plans:
+  backtest:
+    steps:
+      - name: backtest
+        run: python backtest.py                 # writes out/equity.csv
+        artifacts: [out/equity.csv]
+      - name: metrics
+        run: python -m agent_testbench.trading.metrics out/equity.csv --out out/metrics.json
+        expect:
+          json:
+            out/metrics.json: {sharpe: ">= -10"}
+```
+
 ## Notifications
 
 With a `notify:` webhook in testbench.yaml ([Notifications](notify.md)), the person hears about the loop without

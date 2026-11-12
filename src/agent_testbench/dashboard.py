@@ -389,6 +389,9 @@ def _loop(root: Path, cfg: dict) -> str:
     halt = L._halt(s) if active else None
     if halt:
         out.append(f"<p class=warn>{e(halt[1])}</p>")
+    luck = L.luck_lines(s)                             # for a strategy: is the best try better than luck?
+    if luck:
+        out.append("<p>" + "<br>".join(e(x) for x in luck) + "</p>")
     pending = s.get("pending")
     if active and isinstance(pending, int) and 0 <= pending < len(tries):
         run_state = _read(runs.runs_dir(root) / str(tries[pending].get("run")) / "state.json")

@@ -21,10 +21,18 @@ or after --patience tries in a row that were not kept, the next try is refused w
 what to do (for patience: stop, or try something different in kind with --new-direction). When a rule fires or a
 try is refused for want of budget or time, testbench.yaml's `notify:` webhook hears about it (loop_rule: the loop is
 still open), and again when the loop stops (loop_end); each try's verdict, when asked for (loop_try).
+
+A loop over a trading strategy also says whether its best try is better than luck. Each try's per-period returns
+(--returns PATH, an equity.csv or a one-column returns CSV in the run's evidence or work copy; without it, the one
+equity.csv the plan keeps as evidence) are kept in the loop's folder, reverted tries included, and every report adds
+the deflated Sharpe ratio of the best of all tries so far (trading.stats.deflate_tries) and, with 4 or more tries
+over the same periods, the probability of backtest overfitting. --min-deflated-sharpe makes --target count only
+when the best try also clears that deflated Sharpe.
 """
 from __future__ import annotations
 
 import copy
+import csv
 import datetime as dt
 import json
 import math
@@ -35,6 +43,7 @@ import time
 from pathlib import Path
 
 from . import budget, config as C, notify, procs, report as R, runs
+from .trading import files as F, stats
 
 ACTIVE = "running"
 OWN = ":(exclude).testbench"       # testbench's own folder (runs, notes, this loop) is never tried or reverted
@@ -211,16 +220,328 @@ def _best_at(state: dict) -> str:
 
 STOP = "stop the loop with `testbench loop stop` and report"
 
+# ---- is the best try luck? -------------------------------------------------------------------------------------------
+
+MAX_SERIES = 20_000     # returns kept per try; a longer series keeps only its Sharpe, length, skewness and kurtosis
+CONFIDENCE = 0.95       # the deflated Sharpe that calls the best try significant, when --min-deflated-sharpe is not set
+PBO_TRIES = 4           # PBO over fewer tries than this says nothing
+PBO_BLOCK = 4           # PBO cuts the periods into blocks of at least this many returns (16 blocks at most)
+EQUITY = "equity.csv"
+
+
+def _p(p: float) -> str:
+    """A probability as trading.stats words it in a verdict."""
+    if p >= 0.99995:
+        return "> 0.9999"
+    if p < 0.00005:
+        return "< 0.0001"
+    return f"{p:.2f}" if 0.01 <= p <= 0.99 else f"{p:.4f}"
+
+
+def read_returns(path: Path) -> tuple[list[float], str | None, str | None]:
+    """Per-period returns from an equity.csv in the standard format (r = equity / previous equity - 1) or from a CSV
+    of returns (its one column, or the column named return or returns; a header line is optional), with the first and
+    last time when the file has times. Raises ValueError (TradingFileError) saying what to write instead."""
+    path = Path(path)
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            reader = csv.reader(f)
+            rows = [(reader.line_num, row) for row in reader if any(c.strip() for c in row)]
+    except (OSError, UnicodeDecodeError, csv.Error) as exc:
+        raise F.TradingFileError(f"{path.name} cannot be read as CSV ({exc})") from None
+    if not rows:
+        raise F.TradingFileError(f"{path.name} is empty: give equity.csv (time, equity) or one return per line")
+    head = [c.strip().lower() for c in rows[0][1]]
+    if "equity" in head:
+        bars = F.read_equity(path, path.name)
+        if len(bars) < 3:
+            raise F.TradingFileError(f"{path.name} has {C.counted(len(bars), 'row')}: a Sharpe ratio needs at least "
+                                     "2 returns, so 3 rows of equity")
+        return ([b.equity / a.equity - 1 for a, b in zip(bars, bars[1:])], bars[0].time.isoformat(),
+                bars[-1].time.isoformat())
+    names = [n for n in ("returns", "return") if n in head]
+    col = 0 if len(head) == 1 else head.index(names[0]) if names else None
+    if col is None:
+        raise F.TradingFileError(f"{path.name} has no equity column and {len(head)} columns ({', '.join(head)}): give "
+                                 "equity.csv (time, equity) or a CSV of per-period returns, one column (or a column "
+                                 "named return)")
+
+    def number(text: str) -> float | None:
+        try:
+            x = float(text)
+        except ValueError:
+            return None
+        return x if math.isfinite(x) else None
+
+    body = rows[1:] if number(rows[0][1][col].strip()) is None else rows          # a header line, or none
+    values = []
+    for line, row in body:
+        x = number(row[col].strip()) if col < len(row) else None
+        if x is None:
+            raise F.TradingFileError(f"{path.name}, line {line}: {(row[col] if col < len(row) else '')!r} is not a "
+                                     "return; write one finite number per line, as a fraction (0.01 for 1%)")
+        values.append(x)
+    at = head.index("time") if "time" in head and len(head) > 1 else None
+    times = [row[at].strip() if at < len(row) else "" for _, row in body] if at is not None else []
+    return values, (times[0] or None if times else None), (times[-1] or None if times else None)
+
+
+def _strategy(cfg: dict, plan: str) -> bool:
+    """Whether a plan looks like a backtest: a step names an equity.csv or the trading pack."""
+    text = json.dumps([[s.get("run"), s.get("artifacts")] for s in cfg["plans"][plan]["steps"]], default=str)
+    return EQUITY in text or "agent_testbench.trading" in text
+
+
+def _returns_file(state: dict, run_dir: Path, rep: dict) -> tuple[Path | None, str | None]:
+    """The file with a try's returns, or (None, why not; None when there is nothing to say). --returns PATH is looked
+    for in the run's evidence (the artifacts of each step, the last step first), the run's folder, then the run's
+    work copy; without it, the one equity.csv the plan keeps as evidence, which is then used for every try."""
+    run_dir = Path(run_dir).resolve()
+    kept = sorted((run_dir / "steps").glob("*/artifacts"), reverse=True)
+    spec = state.get("returns")
+    if not spec:
+        found = sorted({p.relative_to(a).as_posix() for a in kept for p in a.rglob(EQUITY) if p.is_file()})
+        if len(found) > 1:
+            return None, (f"the plan keeps {len(found)} {EQUITY} files as evidence ({', '.join(found[:4])}): name "
+                          "the one to judge with --returns PATH when starting the loop")
+        if not found and not state.get("strategy"):
+            return None, None                                  # not a strategy, as far as the plan shows
+        if not found:
+            return None, (f"the plan keeps no {EQUITY} as evidence: add `artifacts: [out/{EQUITY}]` (its path) to "
+                          "the step that writes it, or start the loop with --returns PATH")
+        state.update(returns=found[0], returns_how="found")
+        spec = found[0]
+    work = Path(rep.get("workdir") or run_dir / "work").resolve()
+    places = kept + [run_dir] + ([work] if work.is_relative_to(run_dir) else [])
+    for place in places:
+        p = (place / spec).resolve()
+        if p.is_relative_to(run_dir) and p.is_file():
+            return p, None
+    return None, (f"{spec} is not in run {run_dir.name}'s evidence (steps/*/artifacts/) nor its work copy: keep it as "
+                  f"evidence with `artifacts: [{spec}]` on the step that writes it")
+
+
+def _learn(state: dict, t: dict, run_dir: Path, rep: dict) -> None:
+    """Keep a finished try's per-period returns in the loop's folder (only their Sharpe, length, skewness and kurtosis
+    when there are more than MAX_SERIES), or why it has none."""
+    pinned = state.get("returns")
+    path, why = _returns_file(state, run_dir, rep)
+    if path is None:
+        if why:
+            t["returns_missing"] = why if t["status"] == "passed" else f"the run {t['status']}, and {why}"
+        return
+    if not pinned:
+        t["returns_found"] = True
+    source = path.relative_to(Path(run_dir).resolve()).as_posix()
+    try:
+        values, first, last = read_returns(path)
+        s = stats.return_stats(values)
+    except ValueError as exc:                                  # TradingFileError, StatsError
+        t["returns_missing"] = f"{source}: {exc}"
+        return
+    series = None
+    if len(values) <= MAX_SERIES:
+        series = f"returns/{t['n']}.json"
+        (Path(state["dir"]) / "returns").mkdir(parents=True, exist_ok=True)
+        procs.write_text_atomic(Path(state["dir"]) / series, json.dumps(values))
+    t["returns"] = {"source": source, "sharpe": s.sharpe, "n_obs": s.n_obs, "skewness": s.skewness,
+                    "kurtosis": s.kurtosis, "first": first, "last": last, "series": series}
+
+
+def _luck(state: dict) -> dict:
+    """Whether the loop's best try is better than luck, over every finished try with returns (the baseline and the
+    reverted tries too): its deflated Sharpe ratio, against what the best of that many skill-less tries reaches by
+    luck, and PBO when it means something. The loop's best is the try it kept for its metric; when that one has no
+    returns, the try with the highest Sharpe stands in. Kept in the state after each try, so every report reads the
+    same numbers without reading files again."""
+    c = state.get("min_deflated_sharpe") or CONFIDENCE
+    done = [t for t in state["tries"] if t.get("status") != "running"]
+    have = [t for t in done if isinstance(t.get("returns"), dict)]
+    out = {"tries": len(have), "of": len(done), "missing": [t["n"] for t in done if t not in have],
+           "confidence": c, "line": None, "dsr": None, "significant": None, "judged": None, "best_dsr": None,
+           "pbo": None, "pbo_line": None, "pbo_why": None, "why": None}
+    if not have:
+        why = next((t["returns_missing"] for t in reversed(done) if t.get("returns_missing")), None)
+        out["why"] = f"no try has returns: {why}" if why else "no try has returns yet"
+        return out
+    sharpes = [t["returns"]["sharpe"] for t in have]
+    top = have[max(range(len(have)), key=sharpes.__getitem__)]
+    best = next((t for t in have if t["n"] == state["best"]["try"]), None)
+    judged = best or top
+    j = judged["returns"]
+    try:
+        v = stats.deflate_tries(sharpes, n_obs=top["returns"]["n_obs"], skewness=top["returns"]["skewness"],
+                                kurtosis=top["returns"]["kurtosis"], confidence=c)
+        d = v.dsr if judged is top else stats.deflated_sharpe_ratio(
+            j["sharpe"], j["n_obs"], n_trials=len(have), trials_sharpe_variance=v.trials_sharpe_variance or 0.0,
+            skewness=j["skewness"], kurtosis=j["kurtosis"])
+    except stats.StatsError as exc:
+        out["why"] = f"the deflated Sharpe cannot be worked out: {exc}"
+        return out
+    out.update(dsr=d, significant=d >= c, judged=judged["n"], best_dsr=d if best else None)
+    if len(have) < 2:
+        out["why"] = "only 1 try has returns so far; the deflated Sharpe needs 2 or more"
+        return out
+    line = v.verdict if judged is top else (                   # the same words as trading.stats.deflate_tries
+        f"best of {len(have)} tries: deflated Sharpe {_p(d)} (probability the true Sharpe is above 0); "
+        f"{'significant' if d >= c else 'not significant'} at {c:g}")
+    if d < c:
+        line += " - the improvement may be luck" if judged["n"] else " - it may be luck"
+    if best is None and state["best"]["try"] is not None:
+        line += (f" ({_who(top['n'])}, the highest Sharpe: the loop's best, {_who(state['best']['try'])}, has no "
+                 "returns)")
+    elif judged is not top:
+        line += f"; {_who(top['n'])} had the highest Sharpe (deflated {_p(v.dsr)})"
+    out["line"] = line
+    out.update(_pbo(state, have))
+    return out
+
+
+def _pbo(state: dict, have: list[dict]) -> dict:
+    """PBO by CSCV over the tries x periods table, when every try kept its returns over the same periods."""
+    n, rs = len(have), [t["returns"] for t in have]
+    if n < PBO_TRIES:
+        return {"pbo_why": f"PBO needs {PBO_TRIES} tries with returns or more ({n} so far)"}
+    if not all(r.get("series") for r in rs):
+        return {"pbo_why": f"PBO needs every try's returns, and a series longer than {MAX_SERIES} periods keeps "
+                           "only its Sharpe"}
+    if len({r["n_obs"] for r in rs}) > 1 or len({(r.get("first"), r.get("last")) for r in rs}) > 1:
+        return {"pbo_why": "PBO needs every try's returns over the same periods, and these differ in length or dates"}
+    splits = min(stats.MAX_SPLITS, rs[0]["n_obs"] // PBO_BLOCK // 2 * 2)
+    if splits < 2:
+        return {"pbo_why": f"PBO needs {2 * PBO_BLOCK} returns per try or more"}
+    try:
+        cols = [json.loads((Path(state["dir"]) / r["series"]).read_text()) for r in rs]
+        res = stats.probability_of_backtest_overfitting(list(zip(*cols)), n_splits=splits)
+    except (OSError, ValueError, TypeError) as exc:            # StatsError is a ValueError
+        return {"pbo_why": f"PBO cannot be worked out: {exc}"}
+    how = ("the best in-sample try is usually not the best out of sample" if res.pbo > 0.5 else
+           "the best in-sample try usually stays above the median try out of sample" if res.pbo < 0.5 else
+           "the best in-sample try falls below the median try out of sample as often as not")
+    return {"pbo": res.pbo, "pbo_line": f"PBO {res.pbo:.2f} over {n} tries: {how}"}
+
+
+def _luck_of(state: dict) -> dict:
+    """What _luck found after the latest try ({} before the first, or in a loop started before testbench had it)."""
+    luck = state.get("luck")
+    return luck if isinstance(luck, dict) else {}
+
+
+def luck_lines(state: dict) -> list[str]:
+    """The deflated Sharpe line and the PBO line, as each report shows them (none for fewer than 2 tries with
+    returns)."""
+    luck = _luck_of(state)
+    return [x for x in (luck.get("line"), luck.get("pbo_line")) if isinstance(x, str) and x]
+
+
+def _sentence(line: str) -> str:
+    return line[0].upper() + line[1:] + "."
+
+
+def _sentences(state: dict) -> str:
+    """luck_lines as sentences, for a notification or a paragraph; "" when there are none."""
+    return " ".join(map(_sentence, luck_lines(state)))
+
+
+def _who(n: int) -> str:
+    return "the baseline" if n == 0 else f"try {n}"
+
+
+def _luck_fields(state: dict) -> dict:
+    luck = _luck_of(state)
+    return {"luck": luck.get("line"), "deflated_sharpe": luck.get("dsr") if luck.get("line") else None,
+            "deflated_sharpe_tries": luck.get("tries") if luck.get("line") else None, "pbo": luck.get("pbo")}
+
+
+def _target_rule(state: dict) -> str:
+    return f"{state['key']} {'>=' if state['goal'] == 'max' else '<='} {state['target']:g}"
+
+
+def _clears(state: dict) -> tuple[bool, str]:
+    """Whether the loop's best try clears --min-deflated-sharpe (always, when it is not set); if not, why."""
+    least = state.get("min_deflated_sharpe")
+    if least is None:
+        return True, ""
+    luck = _luck_of(state)
+    d = luck.get("best_dsr")
+    if d is None:
+        return False, (f"the best try ({_who(state['best']['try'])}) has no returns to judge it by"
+                       if luck.get("tries") else luck.get("why") or "no try has returns yet")
+    if d >= least:
+        return True, ""
+    return False, f"its deflated Sharpe is {_p(d)} over {C.counted(luck['tries'], 'try', 'tries')}"
+
+
+def _short(state: dict, again: bool = False) -> str:
+    """What a verdict says when the best reaches --target but not --min-deflated-sharpe: the target does not count
+    (again: briefly, for the tries after the one that reached it)."""
+    best, target = state["best"]["value"], state.get("target")
+    if target is None or best is None or not (best >= target if state["goal"] == "max" else best <= target):
+        return ""
+    ok, why = _clears(state)
+    if ok:
+        return ""
+    least = state["min_deflated_sharpe"]
+    if again:
+        return f"The target ({_target_rule(state)}) still does not count: {why} (--min-deflated-sharpe {least:g})."
+    return (f"Best {state['key']} {_fmt(best)} reaches the target ({_target_rule(state)}), but the target counts only "
+            f"once the best try's deflated Sharpe is at least {least:g} (--min-deflated-sharpe): {why}, so the loop "
+            f"goes on. A clearly better strategy raises it, while more tries of the same kind lower it; or {STOP}.")
+
+
+def _other_runs(state: dict) -> int:
+    """Runs of the loop's plan since it started that were not its tries: the deflated Sharpe does not count them."""
+    root, n = Path(state["dir"]).parents[2], 0
+    for p in runs.all_runs(root):
+        try:
+            s = runs.read_state(p)
+        except (OSError, ValueError):
+            continue
+        origin = s.get("origin") if isinstance(s.get("origin"), dict) else {}
+        if s.get("plan") == state["plan"] and C.number(s.get("created")) and s["created"] >= state["started"] \
+                and origin.get("loop") != state["id"]:
+            n += 1
+    return n
+
+
+def _luck_notes(state: dict, final: bool = False) -> list[str]:
+    """Where the returns came from, the tries without any, and what is not counted: for status and the report."""
+    luck, out = _luck_of(state), []
+    if state.get("returns"):
+        how = (f", the one {EQUITY} the plan keeps as evidence" if state.get("returns_how") == "found" else "")
+        out.append(f"returns: {state['returns']} in each try's run{how}; per period, no risk-free rate taken off")
+    missing = [t for t in state["tries"] if t["n"] in (luck.get("missing") or [])]
+    if missing and luck.get("tries"):
+        out.append("not counted, no returns: "
+                   + "; ".join(f"{_who(t['n'])} ({t.get('returns_missing') or 'none kept'})" for t in missing[:6])
+                   + (f"; and {len(missing) - 6} more" if len(missing) > 6 else ""))
+    if luck.get("line") and luck.get("pbo_why"):
+        out.append(f"no PBO: {luck['pbo_why']}")
+    if luck.get("tries"):
+        others = _other_runs(state)
+        if others or final:
+            out.append("only this loop's tries are counted (the baseline too, kept or reverted): "
+                       + (f"{C.counted(others, 'other run')} of plan {state['plan']} since it started "
+                          f"{'is' if others == 1 else 'are'} not" if others else
+                          f"runs of plan {state['plan']} outside it are not")
+                       + f" (`testbench history {state['plan']}`); if they tried variants, the true number of tries "
+                         "is higher and the deflated Sharpe lower")
+    return out
+
 
 def _halt(state: dict) -> tuple[str, str, str] | None:
     """The stopping rule that refuses another try, if one does: (status, what a verdict says, what a refusal says)."""
     key, best, goal = state["key"], state["best"]["value"], state["goal"]
     target = state.get("target")
-    if target is not None and best is not None and (best >= target if goal == "max" else best <= target):
-        rule = f"{key} {'>=' if goal == 'max' else '<='} {target:g}"
+    if target is not None and best is not None and (best >= target if goal == "max" else best <= target) \
+            and _clears(state)[0]:
+        rule, least = _target_rule(state), state.get("min_deflated_sharpe")
+        if least is not None:
+            rule += f", deflated Sharpe {_p(_luck_of(state)['best_dsr'])} >= {least:g}"
+        luck = luck_lines(state)
         return ("target_reached", f"Target reached ({rule}): {STOP}.",
                 f"the loop's target is reached: best {key} {_fmt(best)} ({_best_at(state)}), and the target was "
-                f"{rule}. No new try is made; {STOP} the result.")
+                f"{rule}." + (f" {_sentence(luck[0])}" if luck else "") + f" No new try is made; {STOP} the result.")
     most = state.get("max_tries")
     made = [t for t in state["tries"][1:] if t["status"] != "running"]
     if most and len(made) >= most:
@@ -246,7 +567,9 @@ def _rules(state: dict, when: str = "now") -> str:
     """The loop's stopping rules and where it stands on each, or "" for a loop without any."""
     out = []
     if state.get("target") is not None:
-        out.append(f"target {state['key']} {'>=' if state['goal'] == 'max' else '<='} {state['target']:g}")
+        least = state.get("min_deflated_sharpe")
+        out.append(f"target {_target_rule(state)}"
+                   + (f" with a deflated Sharpe of at least {least:g}" if least is not None else ""))
     if state.get("patience"):
         out.append(f"patience {state['patience']} ({len(_streak(state))} in a row not kept {when})")
     if state.get("max_tries"):
@@ -278,7 +601,8 @@ def _tell(root: Path, cfg: dict, state: dict, status: str, why: str, report: Pat
             "in kind."}.get(status, " The agent was told to stop the loop and report.")
     text = (f"loop {state['id']} on plan {state['plan']} {ENDED[status]}: {state['key']} {_fmt(base)} -> "
             f"{_fmt(best['value'])} ({state['goal']}) in {C.counted(len(tries), 'try', 'tries')}, {kept} kept, "
-            f"${spent(state):.3f} of ${state['budget_usd']:.2f}." + (f" {why}" if why else "") + then
+            f"${spent(state):.3f} of ${state['budget_usd']:.2f}." + (f" {why}" if why else "")
+            + (f" {_sentences(state)}" if luck_lines(state) else "") + then
             + (f" Best: {_best_at(state)}." if best["try"] is not None else "")
             + (f" Report: {notify.rel(report, root)}" if report else ""))
     notify.send(root, cfg, "loop_end" if status == "stopped" else "loop_rule", text, {
@@ -287,12 +611,13 @@ def _tell(root: Path, cfg: dict, state: dict, status: str, why: str, report: Pat
         "goal": state["goal"], "baseline": base, "best": best["value"], "best_commit": best["commit"],
         "best_run": state["tries"][best["try"]]["run"] if best["try"] is not None else None, "tries": len(tries),
         "kept": kept, "cost_usd": spent(state), "budget_usd": state["budget_usd"], "branch": state["branch"],
-        "report": notify.rel(report, root) if report else None})
+        "report": notify.rel(report, root) if report else None, **_luck_fields(state)})
 
 
 def start(root: Path, cfg: dict, plan: str, metric: str, budget_usd: float, goal: str = "max",
           max_hours: float = 8.0, min_delta: float = 0.0, approve: bool = False, target: float | None = None,
-          patience: int | None = None, max_tries: int | None = None) -> dict:
+          patience: int | None = None, max_tries: int | None = None, returns: str | None = None,
+          min_deflated_sharpe: float | None = None) -> dict:
     if plan not in cfg["plans"]:
         raise LoopError(C.no_plan(cfg, plan))
     if goal not in ("max", "min"):
@@ -305,14 +630,34 @@ def start(root: Path, cfg: dict, plan: str, metric: str, budget_usd: float, goal
         if not (isinstance(v, (int, float)) and math.isfinite(v) and v >= least):      # nan would pass every limit
             raise LoopError(f"{flag} is a number of {'at least 0' if least == 0 else 'more than 0'}; got {v!r}")
     path, key = parse_metric(metric)
+    if returns is not None:
+        if not isinstance(returns, str) or not returns.strip() or "\0" in returns:
+            raise LoopError("--returns is the path of each try's equity.csv (or of a CSV of its returns) in its run, "
+                            f"e.g. out/{EQUITY}")
+        parts = Path(returns.strip()).as_posix().split("/")
+        if Path(returns.strip()).is_absolute() or ".." in parts or re.match(r"^[A-Za-z]:", returns.strip()):
+            raise LoopError(f"--returns {returns!r} is looked for inside each try's run (its evidence or its work "
+                            f"copy), so it is a relative path inside the project, e.g. out/{EQUITY}")
+        returns = "/".join(x for x in parts if x not in ("", "."))
+    if min_deflated_sharpe is not None:
+        if not C.number(min_deflated_sharpe) or not 0.5 <= min_deflated_sharpe < 1:
+            raise LoopError("--min-deflated-sharpe is the deflated Sharpe ratio (the probability that the best try's "
+                            "true Sharpe is above 0, once every try is counted) the best try must reach for --target "
+                            f"to count: from 0.5 up to (not including) 1, such as 0.95; got {min_deflated_sharpe!r}")
+        if target is None:
+            raise LoopError("--min-deflated-sharpe makes --target count only once the best try's deflated Sharpe "
+                            "clears it, so give --target VALUE as well (without either, the loop still reports the "
+                            "deflated Sharpe of its best try, at 0.95)")
 
     def again(metric=metric, budget_usd=budget_usd) -> str:
         """This loop start as a person types it (without --approve), with what a refusal says to change."""
         given = (("max-hours", max_hours, 8.0), ("min-delta", min_delta, 0.0), ("target", target, None),
-                 ("patience", patience, None), ("max-tries", max_tries, None))
+                 ("patience", patience, None), ("max-tries", max_tries, None),
+                 ("min-deflated-sharpe", min_deflated_sharpe, None))
         return " ".join([f"testbench loop start {plan} --metric {shlex.quote(metric)} --budget-usd {budget_usd:g}"]
                         + ([f"--goal {goal}"] if goal != "max" else [])
-                        + [f"--{k} {v:g}" for k, v, usual in given if v != usual])
+                        + [f"--{k} {v:g}" for k, v, usual in given if v != usual]
+                        + ([f"--returns {shlex.quote(returns)}"] if returns else []))
 
     checks = [f"{p}:{k}" for s in cfg["plans"][plan]["steps"] for p, keys in (s["expect"].get("json") or {}).items()
               if isinstance(keys, dict) for k in keys]
@@ -363,7 +708,10 @@ def start(root: Path, cfg: dict, plan: str, metric: str, budget_usd: float, goal
                    "deadline": time.time() + float(max_hours) * 3600, "branch": branch, "original_branch": original,
                    "base": base, "best": {"commit": base, "value": None, "try": None}, "tries": [], "pending": None,
                    "started": time.time(), "target": None if target is None else float(target), "patience": patience,
-                   "max_tries": max_tries, "notified": []})
+                   "max_tries": max_tries, "notified": [], "returns": returns or None,
+                   "returns_how": "given" if returns else None, "strategy": bool(returns) or _strategy(cfg, plan),
+                   "min_deflated_sharpe": None if min_deflated_sharpe is None else float(min_deflated_sharpe),
+                   "luck": None})
     return _launch(root, cfg, state, "baseline (the code as it was)", base)
 
 
@@ -468,6 +816,10 @@ def judge(root: Path, cfg: dict, state: dict) -> dict:
     value = metric_value(rep, state["path"], state["key"])
     best = state["best"]["value"]
     t.update(status=run_state["status"], value=value, cost_usd=run_state.get("cost_usd") or 0.0, finished=time.time())
+    try:
+        _learn(state, t, run_dir, rep)
+    except Exception as exc:                           # the luck check never keeps a try from being judged
+        t["returns_missing"] = f"its returns could not be kept ({type(exc).__name__}: {exc})"[:300]
     baseline = t["n"] == 0
     if run_state["status"] == "passed" and (baseline or _better(state, value)):
         t["kept"] = True
@@ -495,16 +847,26 @@ def judge(root: Path, cfg: dict, state: dict) -> dict:
             t["verdict"] = f"REVERTED try {t['n']}: {why}. The branch is back at {state['best']['commit'][:9]}." \
                 + _revert(root, state, t["n"])
     state["pending"] = None
+    try:
+        state["luck"] = _luck(state)                   # over every try so far, this one too, kept or reverted
+    except Exception as exc:                           # nor the verdict from being given
+        state["luck"] = {"why": f"the deflated Sharpe could not be worked out ({type(exc).__name__}: {exc})"[:300]}
+    t["luck"] = luck_lines(state)
     halt = _halt(state)
     if halt:
         t["verdict"] += " " + halt[1]
-    _note(root, f"loop {state['id']} " + t["verdict"].split(". The branch")[0] + f" - {t['description']}")
+    elif _short(state):
+        t["verdict"] += " " + _short(state, again=not t["kept"])
+    _note(root, f"loop {state['id']} " + t["verdict"].split(". The branch")[0] + f" - {t['description']}"
+          + (f" ({t['luck'][0]})" if t["luck"] else ""))
     _save(state)
-    notify.send(root, cfg, "loop_try", f"loop {state['id']} on plan {state['plan']}: {t['verdict']} ({_desc(t)})", {
+    notify.send(root, cfg, "loop_try", f"loop {state['id']} on plan {state['plan']}: {t['verdict']} ({_desc(t)})"
+                + (f" {_sentences(state)}" if t["luck"] else ""), {
         "loop": state["id"], "plan": state["plan"], "try": t["n"], "description": t["description"],
         "status": "baseline" if baseline else "kept" if t["kept"] else "reverted", "run_id": t["run"],
         "run_status": t["status"], "metric": state["metric"], "value": value, "best": state["best"]["value"],
-        "best_commit": state["best"]["commit"], "cost_usd": t["cost_usd"], "new_direction": bool(t.get("new_direction"))})
+        "best_commit": state["best"]["commit"], "cost_usd": t["cost_usd"],
+        "new_direction": bool(t.get("new_direction")), **_luck_fields(state)})
     if halt:
         _tell(root, cfg, state, halt[0], halt[1].split(":")[0] + ".")
     return state
@@ -533,7 +895,14 @@ def describe(state: dict) -> str:
              f"branch {state['branch']} (from {state['original_branch']} at {state['base'][:9]})"]
     if _rules(state):
         halt = _halt(state) if state["status"] == ACTIVE else None
-        lines.append(f"stopping rules: {_rules(state)}" + (f"\n  -> {halt[1]}" if halt else ""))
+        short = _short(state) if state["status"] == ACTIVE and not halt else ""
+        lines.append(f"stopping rules: {_rules(state)}"
+                     + (f"\n  -> {halt[1]}" if halt else f"\n  -> {short}" if short else ""))
+    if luck_lines(state):
+        lines.append("luck: " + "\n  ".join(luck_lines(state)))
+    elif state.get("strategy") or state.get("returns"):
+        lines.append(f"luck: not judged yet - {_luck_of(state).get('why') or 'no try has finished'}")
+    lines += [f"  {note}" for note in _luck_notes(state)]
     for t in state["tries"]:
         mark = "running" if t["status"] == "running" else ("kept" if t.get("kept") else "reverted")
         if t["n"] == 0:
@@ -562,8 +931,16 @@ def stop(root: Path, cfg: dict) -> tuple[dict, Path]:
     path = Path(state["dir"]) / "report.md"
     path.write_text(render(state))
     _save(state)
-    _tell(root, cfg, state, "stopped", f"It had {HALTED[halt[0]]}." if halt else "", path)
+    _tell(root, cfg, state, "stopped", f"It had {HALTED[halt[0]]}." if halt else _unmet(state), path)
     return state, path
+
+
+def _unmet(state: dict) -> str:
+    """What the report says when the best reached --target but not --min-deflated-sharpe; "" otherwise."""
+    if not _short(state):
+        return ""
+    return (f"Its best reached the target ({_target_rule(state)}) but not --min-deflated-sharpe "
+            f"{state['min_deflated_sharpe']:g} ({_clears(state)[1]}), so the target was not met.")
 
 
 def render(state: dict) -> str:
@@ -576,10 +953,17 @@ def render(state: dict) -> str:
            f"{C.counted(len(tries), 'try', 'tries')}, {len(kept)} kept, ${spent(state):.3f} of "
            f"${state['budget_usd']:.2f}, {hours:.1f} h. "
            f"Branch `{state['branch']}` from `{state['original_branch']}` at `{state['base'][:9]}`.", ""]
+    luck = luck_lines(state)
     if _rules(state):
         ended = state.get("ended_by")
+        target = ended == "target_reached" and luck
         out[-1:] = [f"Stopping rules: {_rules(state, 'at the end')}."
-                    + (f" It had {HALTED[ended]} when it was stopped." if ended else ""), ""]
+                    + (f" It had {HALTED[ended]} when it was stopped" + (f"; {luck[0]}." if target else ".")
+                       if ended else "") + (f" {_unmet(state)}" if _unmet(state) else ""), ""]
+    if luck or state.get("strategy") or state.get("returns"):
+        out += ["## Is the best try luck?", ""]
+        out += [f"- {x}" for x in luck] or [f"- not judged: {_luck_of(state).get('why') or 'no try finished'}"]
+        out += [f"- {note}" for note in _luck_notes(state, final=True)] + [""]
     if kept:
         out += ["## Kept", ""]
         prev = base
