@@ -125,7 +125,7 @@ def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_e
     env.update({k: str(v) for k, v in step["env"].items()})
     paths = [str((workdir / p).resolve()) for p in step["pythonpath"]]
     mocked = step.get("mocks") or {}
-    if mocked:                                                  # the mock openai / anthropic packages win the import
+    if mocked:                                                  # the mock packages (built in or plug-ins) win the import
         from . import mocks
         paths = mocks.client_paths(mocked) + paths
         env.update(mocks.client_env(mocked, workdir))

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "testbench-mock-example"
+version = "0.1.0"
+description = "A strict mock of weatherkit, a small fictional weather SDK, as an agent-testbench mock plug-in"
+requires-python = ">=3.10"
+dependencies = ["agent-testbench", "pyyaml>=6"]
+
+# What makes it a plug-in: a step's `mocks: [weatherkit]` finds the Mock object through this entry point.
+[project.entry-points."agent_testbench.mocks"]
+weatherkit = "testbench_mock_example:mock"
+
+[tool.hatch.build.targets.wheel]
+packages = ["testbench_mock_example"]

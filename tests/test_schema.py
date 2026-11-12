@@ -10,7 +10,7 @@ import jsonschema
 import pytest
 import yaml
 
-from agent_testbench import backends as B, config as C, expect as X, mocks as M, recipes as RC
+from agent_testbench import backends as B, config as C, expect as X, mocks as M, plugins as P, recipes as RC
 from agent_testbench.cli import INIT_TEMPLATE
 from conftest import EXAMPLES, REPO, cli, make_notebook
 
@@ -219,7 +219,8 @@ REFUSED = [
     STEP + "{name: a, run: x, params: {EPOCHS: 2}}\n", STEP + "{name: a, run: x, cells: '1-3'}\n",
     STEP + "{name: a, run: x, uploads: [[a.csv]]}\n", STEP + "{name: a, web: {url: 'http://x'}, colab_shim: false}\n",
     STEP + "{name: a, web: {url: 'http://x', viewport: wide}}\n", STEP + "{name: a, web: {serve: x}}\n",
-    STEP + "{name: a, web: {url: 'http://x', ready_timeout: 0}}\n", STEP + "{name: a, run: x, mocks: [gemini]}\n",
+    STEP + "{name: a, web: {url: 'http://x', ready_timeout: 0}}\n", STEP + "{name: a, run: x, mocks: ['']}\n",
+    STEP + "{name: a, run: x, mocks: {gemini: 5}}\n",
     STEP + "{name: a, run: x, mocks: {openai: {retries: 2}}}\n",
     STEP + "{name: a, run: x, mocks: {openai: {fail_with: auth}}}\n",
     STEP + "{name: a, run: x, mocks: {openai: {fail_on_call: 0}}}\n",
@@ -237,7 +238,7 @@ REFUSED = [
     STEP + "{name: a, run: x, expect: {gpu: {util: 1}}}\n", STEP + "{name: a, run: x, expect: {image: {a.png: {}}}}\n",
     STEP + "{name: a, run: x, expect: {image: {a.png: {like: g.png, max_diff: 2}}}}\n",
     STEP + "{name: a, run: x, expect: {duration: {hours: 1}}}\n",
-    STEP + "{name: a, run: x, expect: {mock_calls: {gemini: {calls: 1}}}}\n",
+    STEP + "{name: a, run: x, expect: {mock_calls: {gemini: {cost: 1}}}}\n",
     STEP + "{name: a, run: x, expect: {mock_calls: {openai: {cost: 1}}}}\n",
 ]
 
@@ -295,18 +296,11 @@ def test_every_expectation_and_option_has_a_schema_entry():
                                          f"{sorted(set(X.KINDS) - set(expect))} to, or remove "
                                          f"{sorted(set(expect) - set(X.KINDS))} from, $defs.expect in {C.SCHEMA.name}")
     keyed = lambda kind: set(expect[kind]["additionalProperties"]["properties"])
-    assert keyed("media") == set(X.MEDIA_KEYS) and keyed("mock_calls") == set(X.MOCK_KEYS)
+    assert keyed("media") == set(X.MEDIA_KEYS)
     assert set(expect["web"]["properties"]) == set(X.WEB_KEYS)
     assert set(expect["gpu"]["properties"]) == set(X.GPU_KEYS)
     assert set(expect["duration"]["properties"]) == set(X.DURATION_KEYS)
     assert set(SCHEMA["$defs"]["junit"]["anyOf"][1]["properties"]) == {"path", *X.JUNIT_KEYS}
-    assert set(expect["mock_calls"]["propertyNames"]["enum"]) == set(X.MOCK_SDKS) == _enum(SCHEMA["$defs"]["mocks"])
-    assert set(SCHEMA["$defs"]["broker_calls"]["properties"]) == set(X.BROKER_KEYS)
-    assert set(expect["mock_calls"]["properties"]) == set(X.BROKER_SDKS) == set(M.BROKERS)
-    assert set(SCHEMA["$defs"]["broker_options"]["properties"]) == set(M.broker_core().OPTION_KEYS)
-    core = M.client_core()
-    assert set(SCHEMA["$defs"]["mock_options"]["properties"]) == set(core.OPTION_KEYS)
-    assert set(SCHEMA["$defs"]["mock_options"]["properties"]["fail_with"]["enum"]) == set(core.FAILURES)
     notify = SCHEMA["properties"]["notify"]["properties"]
     assert set(notify) == {"webhook", "webhook_env", "on"} and _enum(notify["on"]) == set(C.NOTIFY_EVENTS)
     export = SCHEMA["properties"]["export"]["properties"]
@@ -314,6 +308,40 @@ def test_every_expectation_and_option_has_a_schema_entry():
     for target, keys in C.EXPORT_KEYS.items():
         options = next(s for s in export[target]["anyOf"] if s.get("type") == "object")["properties"]
         assert set(options) == set(keys), f"export.{target}"
+
+
+def _ref(node: dict) -> dict:
+    return SCHEMA["$defs"][node["$ref"].removeprefix("#/$defs/")] if "$ref" in node else node
+
+
+def test_every_built_in_mock_s_options_and_rules_have_a_schema_entry():
+    """From the mock registry (not names() - other tests register plug-ins there): each built-in's options and
+    `mock_calls:` rules have the entries its Mock names, and editors complete the built-ins' names."""
+    builtin = list(P.kind("mocks").builtin)
+    options = next(s for s in SCHEMA["$defs"]["mocks"]["anyOf"] if s.get("type") == "object")["properties"]
+    calls = _props("$defs/expect")["mock_calls"]
+    assert builtin == list(M.SDKS) and _enum(SCHEMA["$defs"]["mocks"]) == set(builtin) == set(options)
+    assert set(calls["properties"]) == set(builtin)
+    for name in builtin:
+        mock = M.get(name)
+        assert options[name]["$ref"] == mock.options_schema["$ref"], f"mocks.{name}"
+        assert calls["properties"][name]["$ref"] == mock.calls_schema["$ref"], f"mock_calls.{name}"
+        assert set(_ref(mock.calls_schema)["properties"]) == set(mock.call_keys) == set(M.call_keys(name)), name
+    assert _ref(calls["additionalProperties"]) == _ref(M.ANTHROPIC.calls_schema), "a plug-in's: counted as the clients'"
+    assert set(M.CLIENT_KEYS) == set(X.MOCK_KEYS) and set(M.BROKER_KEYS) == set(X.BROKER_KEYS)   # expect.py's copies
+    assert set(M.BROKERS) == set(X.BROKER_SDKS) and set(M.SDKS) == set(X.MOCK_SDKS)
+    assert set(SCHEMA["$defs"]["broker_options"]["properties"]) == set(M.broker_core().OPTION_KEYS)
+    core = M.client_core()
+    assert set(SCHEMA["$defs"]["mock_options"]["properties"]) == set(core.OPTION_KEYS)
+    assert set(SCHEMA["$defs"]["mock_options"]["properties"]["fail_with"]["enum"]) == set(core.FAILURES)
+
+
+def test_a_plugin_mock_s_name_and_options_are_not_refused():
+    assert problems(STEP + "{name: a, run: x, mocks: [weatherkit]}\n") == []
+    assert problems(STEP + "{name: a, run: x, mocks: weatherkit, expect: {mock_calls: {weatherkit: {calls: 2}}}}\n") == []
+    assert problems(STEP + "{name: a, run: x, mocks: {weatherkit: {forecasts: f.yaml}, openai: {}}}\n") == []
+    assert problems(STEP + "{name: a, run: x, mocks: {weatherkit: {forecasts: f.yaml}, openai: {forecasts: f}}}\n")
+    assert problems(STEP + "{name: a, run: x, mocks: {alpaca: {replies: r.yaml}}}\n"), "a built-in's own options"
 
 
 def test_testbench_schema_prints_it_anywhere(tmp_path):
