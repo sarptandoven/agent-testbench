@@ -138,7 +138,10 @@ class Docker:
                 f.write(f"$ {shown}  ({time.time() - began:.1f} s, exit {p.returncode})\n"
                         + (err[-1500:] + ("" if err.endswith("\n") else "\n") if err.strip() else ""))
         if check and p.returncode != 0:
-            raise self.error(f"`{shown[:160]}` exited {p.returncode}: {err.strip()[-800:] or 'no reason given'}")
+            down = re.search(r"Cannot connect to the Docker daemon|Is the docker daemon running", err)
+            raise self.error(f"`{shown[:160]}` exited {p.returncode}: {err.strip()[-800:] or 'no reason given'}" + (
+                " - Docker is installed but not running here: start it (Docker Desktop, or `sudo systemctl start "
+                "docker`), check with `testbench doctor`, then run this again" if down else ""))
         out = p.stdout if (binary or p.stdout is None) else p.stdout.decode(errors="replace")
         return subprocess.CompletedProcess(argv, p.returncode, out, err)
 

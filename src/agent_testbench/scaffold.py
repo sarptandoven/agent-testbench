@@ -19,6 +19,9 @@ import yaml
 SKIP = {".git", ".testbench", ".venv", "venv", "env", "node_modules", ".ipynb_checkpoints", "__pycache__",
         "site-packages", ".tox", "build", "dist", ".mypy_cache", ".pytest_cache", ".claude"}
 WRITTEN = re.compile(r"""["']([\w./-]+\.(?:json|png|jpg|jpeg|csv|pt|pth|pkl|npy|mp4|gif|html))["']""")
+# a number a notebook prints with its name: print(f"accuracy: {acc:.3f}"), print(f"val_loss={loss}")
+PRINTED = re.compile(r"""print\(\s*f["']([A-Za-z][\w ]{0,30}?)( ?[:=]) ?\{""")
+SCORE = re.compile(r"acc|loss|score|f1|auc|rmse|mae|r2|precision|recall|error|perplexity", re.I)
 TRAINERS = ("train.py", "training.py", "finetune.py", "fine_tune.py", "main_train.py")
 
 
@@ -71,8 +74,18 @@ def _notebook(root: Path, nb: Path) -> tuple[str, str, str]:
     if made:
         lines.append("          files: [" + ", ".join(_q(f"**/{Path(m).name}") for m in made[:6]) + "]   # what it writes")
     metrics = [m for m in made if m.endswith(".json")]
-    where = _q(f"**/{Path(metrics[0]).name}") if metrics else "outputs/metrics.json"
-    lines.append(f"          # json: {{{where}: {{accuracy: \">= 0.9\"}}}}   # FILL IN: the number that means it works")
+    printed = [(label, sep) for src in cells for label, sep in PRINTED.findall(src) if SCORE.search(label)]
+    if printed and not metrics:                          # it prints its number and writes none: check the printed one
+        label, sep = printed[-1]
+        rule = "<= 0.5" if re.search(r"loss|error|rmse|mae|perplexity", label, re.I) else ">= 0.9"
+        lines.append(f"          # metrics: {{stdout: {{\"{label}{sep} *([0-9.eE+-]+)\": \"{rule}\"}}}}   # FILL IN: the "
+                     "number it prints that means it works")
+    else:
+        where = _q(f"**/{Path(metrics[0]).name}") if metrics else "outputs/metrics.json"
+        lines.append(f"          # json: {{{where}: {{accuracy: \">= 0.9\"}}}}   # FILL IN: the number that means it works")
+        if not metrics:
+            lines.append("          # metrics: {stdout: {\"accuracy: *([0-9.eE+-]+)\": \">= 0.9\"}}   # or a number it "
+                         "prints (the regex's group is the number)")
     bits = ([f"{forms} form field(s)"] if forms else []) + ([f"{papermill} papermill parameter(s)"] if papermill else []) \
         + ([f"writes {', '.join(Path(m).name for m in made[:3])}"] if made else [])
     return name, "\n".join(lines) + "\n", f"notebook {rel}" + (f" ({', '.join(bits)})" if bits else "")

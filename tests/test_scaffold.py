@@ -70,6 +70,34 @@ def test_the_fill_in_line_works_when_uncommented(tmp_path):
     assert r.returncode == 0 and "**/metrics.json: accuracy >= 0.9" in r.stdout, r.stdout
 
 
+def test_a_notebook_that_prints_its_number_gets_a_fill_in_line_that_checks_it(tmp_path):
+    """A notebook that prints `Test accuracy = 0.95` and writes no metrics file: its FILL IN line reads the printed
+    number, and it works when uncommented. One that prints nothing named is offered both ways."""
+    root = tmp_path / "nb"
+    make_notebook(root / "iris.ipynb", ["acc = 0.95", 'print(f"Test accuracy = {acc}")'])
+    make_notebook(root / "plain.ipynb", ["x = 1", "print(x)"])
+    assert cli(root, "init").returncode == 0
+    yml = root / "testbench.yaml"
+    text = yml.read_text()
+    line = '# metrics: {stdout: {"Test accuracy = *([0-9.eE+-]+)": ">= 0.9"}}   # FILL IN: the number it prints'
+    assert line in text and '# json: {outputs/metrics.json' in text.split("plain-local:")[1], text
+    assert '# metrics: {stdout: {"accuracy: *([0-9.eE+-]+)": ">= 0.9"}}   # or a number it prints' in text
+    yml.write_text(text.replace('# metrics: {stdout: {"Test accuracy', 'metrics: {stdout: {"Test accuracy'))
+    r = cli(root, "run", "iris-local", "--wait", "300")
+    assert r.returncode == 0 and "stdout /Test accuracy = *([0-9.eE+-]+)/ >= 0.9 - 0.95" in r.stdout, r.stdout
+
+
+def test_init_again_with_force_writes_the_agent_rules_once(tmp_path):
+    """`testbench init --recipe vitest --force` after a plain init (to get the recipe's sandbox plan) left CLAUDE.md
+    with its line twice."""
+    (tmp_path / "CLAUDE.md").write_text("# my notes\n")
+    assert cli(tmp_path, "init").returncode == 0
+    assert cli(tmp_path, "init", "--recipe", "pytest", "--force").returncode == 0
+    claude, agents = (tmp_path / "CLAUDE.md").read_text(), (tmp_path / "AGENTS.md").read_text()
+    assert claude == "# my notes\n\nSee AGENTS.md for how to work in this project (agent-testbench).\n", claude
+    assert agents.count("<!-- agent-testbench -->") == 1, agents
+
+
 def test_a_json_pattern_must_name_one_file(tmp_path):
     from agent_testbench import expect
     (tmp_path / "a").mkdir()

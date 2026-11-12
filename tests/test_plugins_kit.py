@@ -163,6 +163,34 @@ def test_a_remote_backend_prices_its_machine_and_stops_itself():
 
 # ---- the kit: `testbench plugin test` ----------------------------------------------------------------------------
 
+def test_plugin_test_finds_a_module_in_the_current_folder_before_it_is_packaged(tmp_path, monkeypatch, capsys):
+    """docs/plugins.md: `testbench plugin test mod:obj --kind ...` tests one object "before it is packaged" - in the
+    folder being written, as `python -m` would find it, though the testbench command does not put the folder on the
+    path itself."""
+    (tmp_path / "tb_here_runtime.py").write_text(textwrap.dedent("""\
+        from agent_testbench.config import ConfigError
+        from agent_testbench.expect import Check
+        class MaxRuntimeSeconds(Check):
+            name = "max_runtime_seconds"
+            example = 60
+            def validate(self, where, value):
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    raise ConfigError(f"`{where}` is the most seconds the step may take, such as 60")
+            def check(self, value, *, workdir, result, add):
+                add(f"runtime at most {value} s", True, "1 (wanted <= 60)")
+        """))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if p not in ("", ".", str(tmp_path))])
+    try:
+        code, out = tb(capsys, "plugin", "test", "tb_here_runtime:MaxRuntimeSeconds", "--kind", "checks")
+        assert code == 0 and out.startswith("ok   checks max_runtime_seconds (tb_here_runtime:MaxRuntimeSeconds)"), out
+        code, out = tb(capsys, "plugin", "test", "tb_not_here_at_all:X", "--kind", "checks")
+        assert code == 2 and "cannot load tb_not_here_at_all:X: ModuleNotFoundError" in out, out
+        assert os.getcwd() in sys.path, "the current folder is added, as python -m adds it"
+    finally:
+        sys.modules.pop("tb_here_runtime", None)
+
+
 def test_plugin_test_on_one_object(tmp_path, monkeypatch, capsys):
     (tmp_path / "rackmod.py").write_text(textwrap.dedent("""\
         from agent_testbench.backends import Backend

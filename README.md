@@ -40,8 +40,9 @@ Or `pip install agent-testbench`, then `testbench check`. With no testbench.yaml
 plans `testbench init` would write for what it finds - a pytest suite, `npm test`, `go test`, cargo tests,
 notebooks, a web app - and prints PASS or FAIL for each, the report of each failure (the failing test, cell or
 line), the run ids (`testbench verify RUN` checks a run's evidence) and the one next step. It writes nothing but
-`.testbench/`, and a plan whose tool is missing here is skipped with the command that installs it. In a project
-with a testbench.yaml it runs every free plan and only lists the ones that cost money. Then:
+`.testbench/` (and the JUnit file a JavaScript, Go or Rust test runner writes), and a plan whose tool is missing
+here is skipped with the command that installs it. In a project with a testbench.yaml it runs every free plan and
+only lists the ones that cost money. Then:
 
 ```bash
 pip install "agent-testbench[all]"         # or: uv tool install "agent-testbench[all]"

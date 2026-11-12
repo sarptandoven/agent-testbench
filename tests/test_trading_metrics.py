@@ -281,6 +281,9 @@ def test_missing_columns_name_the_file_line_and_what_is_needed(tmp_path):
     assert "needs time, symbol, side, quantity, price, fee" in msg and "found: time, symbol" in msg
     msg = refused("equity", csv_file(tmp_path / "equity.csv", ",equity", "2024-01-01,100"))
     assert "no `time` column" in msg and "index_label='time'" in msg               # pandas' unnamed index
+    msg = refused("equity", csv_file(tmp_path / "e3.csv", "Day,equity", "0,10000"))    # a beginner's own file
+    assert "no `time` column. If `day` holds the times, name that column time, with ISO 8601 times" in msg, msg
+    assert "found: day, equity" in msg
     msg = refused("equity", csv_file(tmp_path / "e2.csv", "Time , EQUITY,equity", "2024-01-01,1,2"))
     assert "column `equity` appears more than once" in msg
 

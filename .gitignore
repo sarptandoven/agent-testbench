@@ -14,3 +14,6 @@ examples/*/outputs/
 
 # mkdocs build output (mkdocs.yml)
 site/
+
+# scratch folders of agents and personas (venvs, throwaway projects)
+.scratch/

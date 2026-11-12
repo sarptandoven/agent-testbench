@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import copy
 import importlib
+import os
 import sys
 import types
 from dataclasses import dataclass, field
@@ -311,9 +312,26 @@ def _test_entry_point(kind_name: str, ep) -> dict:
     return out
 
 
+def _load_here(ref: str):
+    """module:attr as `python -m` would find it: installed, on PYTHONPATH, or in the current folder - where a plug-in
+    being written sits before it is packaged (the `testbench` command, unlike python, does not look there)."""
+    try:
+        return _load_ref(ref)
+    except ModuleNotFoundError as exc:
+        here = os.getcwd()
+        if exc.name != ref.partition(":")[0].strip().split(".")[0] or here in sys.path or "" in sys.path:
+            raise
+        sys.path.insert(0, here)
+        try:
+            return _load_ref(ref)
+        except Exception:
+            sys.path.remove(here)
+            raise
+
+
 def _test_object(ref: str, kind_name: str) -> list[dict]:
     try:
-        obj = _load_ref(ref)
+        obj = _load_here(ref)
     except Exception as exc:
         raise PluginError(f"cannot load {ref}: {type(exc).__name__}: {exc}. Give it as module:attr, with the module "
                           "importable here (installed, or its folder on PYTHONPATH)") from None

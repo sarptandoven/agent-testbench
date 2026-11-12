@@ -281,6 +281,19 @@ def test_the_docker_section_is_checked(tmp_path):
     assert "$0.00/h for containers from python:3.11-slim (testbench.yaml docker.usd_per_hour)" in r.stdout, r.stdout
 
 
+def test_a_docker_that_is_not_running_is_said_in_plain_words(tmp_path):
+    """Docker installed, its daemon stopped: the run's error says to start it, not only docker's own question."""
+    import sys
+    says = "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?"
+    stopped = D.Docker([sys.executable, "-c", f"import sys; sys.stderr.write({says!r}); sys.exit(1)"])
+    with pytest.raises(D.DockerError, match=r"Docker is installed but not running here: start it \(Docker Desktop, or "
+                                            r"`sudo systemctl start docker`\), check with `testbench doctor`"):
+        stopped("create", "img")
+    with pytest.raises(D.DockerError) as other:
+        D.Docker([sys.executable, "-c", "import sys; sys.stderr.write('No such image: img'); sys.exit(1)"])("create")
+    assert "not running" not in str(other.value)
+
+
 def test_the_image_and_the_container_follow_the_config(tmp_path, monkeypatch):
     base = {"project": "p", "root": str(tmp_path), "docker": dict(D.backend.config_defaults["docker"])}
     other = {**base, "docker": {**base["docker"], "pip": ["numpy==2.1.0"]}}

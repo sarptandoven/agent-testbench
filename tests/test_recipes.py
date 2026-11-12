@@ -230,6 +230,7 @@ def test_add_appends_and_changes_nothing_already_there(tmp_path):
     for again in (["llm-eval"], ["pytest"]):            # a plan name that is taken: refused, nothing written
         r = cli(tmp_path, "init", "--add", "--recipe", *again)
         assert r.returncode == 2 and "already has one, so nothing was written" in r.stdout, r.stdout
+        assert f"`testbench init --recipe {again[0]} --force` writes it again, with the recipe's plans" in r.stdout
         assert yml.read_text() == after
 
     r = cli(tmp_path, "init", "--add", "--recipe", "hf-finetune")      # a section the file has: kept, and said so

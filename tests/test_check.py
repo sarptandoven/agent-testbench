@@ -47,6 +47,7 @@ def test_check_proves_a_pytest_repo_with_no_config_in_under_a_minute(tmp_path, m
     run_id = RUN_ID.search(r.stdout).group(0)
     assert f"`testbench verify {run_id}`" in r.stdout and "1 plan: 1 passed, 0 failed" in r.stdout
     assert r.stdout.rstrip().splitlines()[-1].startswith("Next: `testbench init"), r.stdout
+    assert "FILL IN" not in r.stdout, "the pytest plan has no FILL IN line, so the next step names none"
     for name in ("testbench.yaml", "AGENTS.md", "CLAUDE.md"):
         assert not (root / name).exists(), f"check wrote {name}"
     assert not (machine_limits / "limits.yaml").exists(), "check wrote ~/.testbench/limits.yaml"
@@ -63,7 +64,10 @@ def test_check_proves_a_pytest_repo_with_no_config_in_under_a_minute(tmp_path, m
     assert cli(root, "ui").returncode == 0 and (root / ".testbench" / "ui" / "index.html").is_file()
     assert "first finished run of plan tests" in cli(root, "diff").stderr + cli(root, "diff").stdout
     # init keeps the plan's name, so the history goes on from the run check made
-    assert cli(root, "init").returncode == 0 and (root / "testbench.yaml").is_file()
+    i = cli(root, "init")
+    assert i.returncode == 0 and (root / "testbench.yaml").is_file()
+    assert "Next: `testbench run tests`. Its checks are already set" in i.stdout and "FILL IN" not in i.stdout, \
+        "no FILL IN line was written, so init does not send anyone looking for one"
     h = cli(root, "history", "tests", "--json")
     assert h.returncode == 0 and [row["run_id"] for row in json.loads(h.stdout)["runs"]] == [run_id], h.stdout
 
@@ -138,6 +142,52 @@ def test_a_plan_whose_tool_is_missing_is_skipped_with_the_command_that_installs_
     assert cargo["status"] == "skipped" and cargo["run"] is None and cargo["install"], cargo
     assert any(w in cargo["install"].lower() for w in ("cargo", "rustup", "nextest")), cargo
     assert not any("cargo-tests" in p.name for p in (root / ".testbench" / "runs").iterdir())
+
+
+def test_a_run_step_whose_python_lacks_a_module_says_which_and_how_to_install_it(tmp_path):
+    """`pip install agent-testbench` in a fresh virtualenv, then `testbench run tests`: that Python has no pytest. The
+    report says so with the command that installs it, as check does before it runs."""
+    write_config(tmp_path, {"project": "p", "plans": {"t": {"backend": "local", "steps": [
+        {"name": "suite", "run": "python -m tb_surely_missing_mod_5c1", "max_minutes": 1,
+         "continue_on_failure": True},
+        {"name": "script", "run": "python -c \"import tb_surely_missing_mod_5c2\"", "max_minutes": 1}]}}})
+    r = cli(tmp_path, "run", "t", "--wait", "120")
+    assert r.returncode == 1, r.stdout + r.stderr
+    said = re.search(r"- `tb_surely_missing_mod_5c1` is not installed for the Python this step ran \((\S+)\): `(\S+) -m pip "
+                     r"install tb-surely-missing-mod-5c1` \(tb-surely-missing-mod-5c1 is a guess at", r.stdout)
+    assert said and said.group(1) == said.group(2), r.stdout
+    assert "- `tb_surely_missing_mod_5c2` is not installed for the Python this step ran: install it there (`python -m " \
+           "pip install tb-surely-missing-mod-5c2` in the environment the step uses" in r.stdout, r.stdout
+    html = cli(tmp_path, "report", "--format", "html")
+    assert html.returncode == 0, html.stdout + html.stderr
+    page = Path(html.stdout.split("wrote ", 1)[1].split(" (", 1)[0]).read_text()
+    assert "`tb_surely_missing_mod_5c1` is not installed for the Python this step ran" in page
+
+
+def test_a_notebook_missing_a_package_under_uvx_is_told_the_uvx_command(monkeypatch):
+    """From uvx a notebook's kernel is uvx's Python: `pip install` in a virtualenv would not reach it."""
+    from agent_testbench import report as R
+    step = {"kind": "notebook", "error": {"ename": "ModuleNotFoundError", "evalue": "No module named 'sklearn'"}}
+    monkeypatch.setattr(executor, "tool_environment", lambda: "uvx")
+    assert R.missing_module(step, {"backend": "local", "plan": "iris-local"}) == (
+        "`sklearn` is not installed for the kernel's Python, which is testbench's own (uvx): `uvx --with scikit-learn "
+        "agent-testbench run iris-local` runs the plan with it")
+    assert "uvx" not in R.missing_module(step, {"backend": "docker", "plan": "x"}), "elsewhere, the machine's Python"
+    monkeypatch.setattr(executor, "tool_environment", lambda: None)
+    assert R.missing_module(step, {"backend": "local", "plan": "x"}).startswith(
+        "`sklearn` is not installed for the kernel's Python: install it there (`python -m pip install scikit-learn`")
+
+
+def test_check_says_it_writes_the_test_runners_junit_report(tmp_path):
+    """"It writes only .testbench/" was not so for vitest, jest, go and cargo: their runner writes junit.xml here."""
+    (tmp_path / "js").mkdir()
+    (tmp_path / "js" / "package.json").write_text('{"scripts": {"test": "vitest run"}, '
+                                                  '"devDependencies": {"vitest": "^2"}}')
+    r = cli(tmp_path / "js", "check", timeout=120)
+    assert "free (it writes only .testbench/, and the test runner's JUnit report junit.xml)." in r.stdout, r.stdout
+    root = pytest_repo(tmp_path / "py")
+    r = cli(root, "check", timeout=120)
+    assert "free (it writes only .testbench/)." in r.stdout, r.stdout
 
 
 def test_a_notebook_whose_packages_are_missing_is_skipped_with_the_command_that_installs_them(tmp_path):
@@ -237,7 +287,7 @@ def test_check_from_python_and_as_an_mcp_tool(tmp_path):
         asyncio.run(mcp_server.check_project(plans=["--approve"], project_dir=str(root)))
 
 
-def test_steps_use_the_projects_python_when_testbench_runs_from_a_tool_environment(tmp_path, monkeypatch):
+def test_steps_use_the_projects_python_when_testbench_runs_from_a_tool_environment(tmp_path, monkeypatch, capsys):
     own = str(Path(sys.executable).parent)
     other = str(tmp_path / "usr-bin")
     environ = {"PATH": os.pathsep.join([own, other])}
@@ -262,5 +312,13 @@ def test_steps_use_the_projects_python_when_testbench_runs_from_a_tool_environme
     monkeypatch.setattr(sys, "prefix", str(cache))
     assert executor.tool_environment() == "uvx", "an environment in uv's cache"
     assert CK.tb() == "uvx agent-testbench", "uvx puts no `testbench` on PATH: what check prints says so"
+    proj = pytest_repo(tmp_path / "under-uvx")
+    monkeypatch.chdir(proj)
+    monkeypatch.setenv("TESTBENCH_USER_DIR", str(tmp_path / "machine"))
+    from agent_testbench import cli as CLI
+    with pytest.raises(SystemExit) as done:
+        CLI.main(["init"])
+    out = capsys.readouterr().out
+    assert done.value.code in (0, None) and "Next: `uvx agent-testbench run tests`." in out, "and so does init's"
     assert CK._pip(sys.executable, ["scikit-learn", "matplotlib"]) == \
         "uvx --with scikit-learn --with matplotlib agent-testbench check"

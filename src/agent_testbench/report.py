@@ -45,6 +45,43 @@ def _g(v) -> str:
     return f"{v:g}" if isinstance(v, (int, float)) else str(v)
 
 
+# `python -m pytest` with no pytest prints "/path/to/python: No module named pytest"; an import prints a traceback
+NO_MODULE = re.compile(r"(?m)^(\S*?python[\w.]*?(?:\.exe)?): No module named ([\w.]+)\s*$"
+                       r"|ModuleNotFoundError: No module named '([\w.]+)'")
+
+
+def missing_module(step: dict, report: dict | None = None) -> str | None:
+    """For a failed step whose Python lacked a module: which one, and the command that installs it (or None). A
+    notebook on this machine runs in testbench's own Python, so from uvx, uv tool or pipx the command adds it there."""
+    e = step.get("error") or {}
+    text = str(step.get("stdout_tail") or "")
+    if e.get("ename") == "ModuleNotFoundError":
+        text = f"ModuleNotFoundError: {e.get('evalue')}\n{text}"
+    m = NO_MODULE.search(text)
+    if not m:
+        return None
+    exe, mod = (m.group(1), m.group(2)) if m.group(2) else (None, m.group(3))
+    from .rescue import pip_name                         # only now: it reads notebooks, so it imports nbformat
+    pip, sure = pip_name(mod)
+    if not pip:                                          # google.colab: only on Colab, nothing to install
+        return None
+    guess = "" if sure else f" ({pip} is a guess at `{mod.split('.')[0]}`'s pip name)"
+    if exe:
+        return (f"`{mod}` is not installed for the Python this step ran ({exe}): `{exe} -m pip install {pip}`{guess}, "
+                "then run the plan again")
+    from .executor import tool_environment
+    tool = tool_environment() if step.get("kind") == "notebook" and (report or {}).get("backend") == "local" else None
+    if tool:
+        how = (f"`uvx --with {pip} agent-testbench run {(report or {}).get('plan')}` runs the plan with it" if tool == "uvx"
+               else f"`uv tool install --force --with {pip} agent-testbench` adds it" if tool == "uv tool"
+               else f"`pipx inject agent-testbench {pip}` adds it")
+        return (f"`{mod.split('.')[0]}` is not installed for the kernel's Python, which is testbench's own ({tool}): "
+                f"{how}{guess}")
+    where = "the kernel's Python" if step.get("kind") == "notebook" else "the Python this step ran"
+    return (f"`{mod.split('.')[0]}` is not installed for {where}: install it there (`python -m pip install {pip}` in "
+            f"the environment the step uses, e.g. the project's virtualenv){guess}, then run the plan again")
+
+
 def _encodable(text: str) -> str:
     """Text that can be written as UTF-8 (a file name that is not UTF-8 reaches the report as a lone surrogate)."""
     return text.encode("utf-8", "replace").decode("utf-8")
@@ -152,6 +189,8 @@ def render(report: dict, run_dir: Path | None = None) -> str:
         bad = [c for c in s.get("expectations", []) or [] if not c["ok"]]
         for c in bad:
             lines += [f"- expected {_line(c['check'])}: {_line(c['detail'])}"]
+        if missing_module(s, r):
+            lines += [f"- {_line(missing_module(s, r))}"]
         web = s.get("web") or {}
         for key in ("console_errors", "page_errors", "failed_requests", "action_errors"):
             for item in web.get(key, [])[:5]:
@@ -428,6 +467,8 @@ def html_body(report: dict, run_dir: Path, published: set | None = None) -> str:
         bad = [c for c in s.get("expectations") or [] if not c["ok"]]
         if bad:
             out.append("<ul>" + "".join(f"<li>expected {e(c['check'])}: <b>{e(c['detail'])}</b></li>" for c in bad) + "</ul>")
+        if missing_module(s, r):
+            out.append(f"<p>{e(missing_module(s, r))}</p>")
         if s.get("stdout_tail") and not err.get("traceback_tail"):
             out.append(f"<details><summary>last output</summary><pre>{e(s['stdout_tail'][-3000:])}</pre></details>")
     d = r.get("delta") or {}

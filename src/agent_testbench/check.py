@@ -214,7 +214,7 @@ def _docker_running() -> bool:
 
 
 def _summary(root: Path, mode: str | None, entries: list, began: float, message: str | None = None,
-             why: str | None = None) -> dict:
+             why: str | None = None, fill_in: bool = True) -> dict:
     """What `testbench check --json` prints. why: what kept it from checking anything (home, nothing, no plans,
     no such plan), for the next step."""
     count = lambda *s: [e for e in entries if e["status"] in s]                     # noqa: E731
@@ -227,7 +227,7 @@ def _summary(root: Path, mode: str | None, entries: list, began: float, message:
             "found_by_check": mode == "found", "plans": entries, "passed": len(passed), "failed": len(failed),
             "skipped": len(skipped), "refused": len(refused), "not_run": len(not_run), "still_running": len(running),
             "runs": [e["run"] for e in entries if e["run"]], "seconds": round(time.time() - began, 1),
-            "message": message, "next": _next(mode, entries, why), "exit_code": code}
+            "message": message, "next": _next(mode, entries, why, fill_in), "exit_code": code}
 
 
 def tb() -> str:
@@ -236,8 +236,8 @@ def tb() -> str:
     return "uvx agent-testbench" if tool_environment() == "uvx" else "testbench"
 
 
-def _next(mode: str | None, entries: list, why: str | None) -> str:
-    """The single most useful thing to do next in this folder."""
+def _next(mode: str | None, entries: list, why: str | None, fill_in: bool = True) -> str:
+    """The single most useful thing to do next in this folder. fill_in: the plans found here have FILL IN lines."""
     me = tb()
     if why == "home":
         return f"cd into a project's folder, then `{me} check`."
@@ -276,8 +276,9 @@ def _next(mode: str | None, entries: list, why: str | None) -> str:
         if recipe and _docker_running():
             return (f"`{me} init --recipe {recipe}` keeps these plans in testbench.yaml and adds one that runs "
                     "the tests again in a fresh Docker container with no network.")
-        return (f"`{me} init` keeps these plans in testbench.yaml (the same names, so their history goes on) and "
-                "marks where to add the checks that mean \"working\" (the FILL IN lines).")
+        return (f"`{me} init` keeps these plans in testbench.yaml (the same names, so their history goes on)"
+                + (" and marks where to add the checks that mean \"working\" (the FILL IN lines)." if fill_in else
+                   ", with an AGENTS.md that tells your coding agent how to prove its changes."))
     return f"`{me} ui --open` shows every run as a page, with its evidence."
 
 
@@ -355,8 +356,11 @@ def run(start: str | Path = ".", names: list[str] | None = None, show=None) -> d
                   "plans": "".join(text for _, text, _ in found)}
         cfg = C.checked(root, record)
         about = {name: what.split("; it needs ")[0] for name, _, what in found}
+        junit = sorted({j["path"] for plan in cfg["plans"].values() for st in plan["steps"]
+                        for j in [(st.get("expect") or {}).get("junit")] if isinstance(j, dict) and j.get("path")})
         show("intro", f"No {C.CONFIG_NAME} here: running what `testbench init` would set up, on this machine, for "
-                      "free (it writes only .testbench/).")
+                      "free (it writes only .testbench/" + (f", and the test runner's JUnit report {', '.join(junit)}"
+                                                            if junit else "") + ").")
     if not cfg["plans"]:
         return _summary(root, mode, [], began, f"{root / C.CONFIG_NAME} has no plans.", "no plans")
     picked = list(dict.fromkeys(names or cfg["plans"]))
@@ -398,7 +402,7 @@ def run(start: str | Path = ".", names: list[str] | None = None, show=None) -> d
         for rest in entries:
             if rest["status"] is None:
                 rest.update(status="skipped", why="testbench check was stopped (Ctrl-C) before it ran")
-    return _summary(root, mode, entries, began)
+    return _summary(root, mode, entries, began, fill_in=record is None or "FILL IN" in record["plans"])
 
 
 def line(e: dict) -> str:

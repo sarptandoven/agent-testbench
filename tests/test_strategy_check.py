@@ -229,6 +229,25 @@ def test_the_complete_example_in_docs_trading_passes_for_a_good_strategy(tmp_pat
     assert r.returncode == 0 and f"# PASS - plan `{plan}`" in r.stdout, r.stdout + r.stderr
 
 
+def test_the_plain_python_snippet_in_docs_trading_writes_files_the_reader_takes(tmp_path):
+    """A first backtest is often a loop with no pandas; the docs' snippet for it runs as written."""
+    text = (REPO / "docs" / "trading.md").read_text(encoding="utf-8")
+    code = re.search(r"### Plain Python \(no pandas\).*?```python\n(.*?)```", text, re.S).group(1)
+    (tmp_path / "data").mkdir()
+    day, price, lines = time.mktime((2024, 1, 1, 12, 0, 0, 0, 0, -1)), 100.0, ["time,symbol,close"]
+    for i in range(300):
+        price *= 1.004 if (i // 15) % 2 == 0 else 0.997                   # trends to cross the averages
+        lines.append(f"{time.strftime('%Y-%m-%d', time.localtime(day + i * 86400))},XYZ,{price:.2f}")
+    (tmp_path / "data" / "prices.csv").write_text("\n".join(lines) + "\n")
+    (tmp_path / "backtest.py").write_text(code)
+    env = {k: v for k, v in os.environ.items() if k != "TESTBENCH_DATA_PRICES"}
+    p = subprocess.run([sys.executable, "backtest.py"], cwd=tmp_path, capture_output=True, text=True, timeout=120,
+                       env=env)
+    assert p.returncode == 0, p.stderr
+    m = TM.compute(tmp_path / "out" / "equity.csv", tmp_path / "out" / "trades.csv")
+    assert m["trades"] >= 5 and m["costs_modeled"] and m["bars"] == 300, m
+
+
 # ---- refused when testbench.yaml loads ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("strategy, message", [

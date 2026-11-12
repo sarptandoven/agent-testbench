@@ -31,7 +31,7 @@ budget:
   max_day_usd: 10.00     # all runs today together
 
 sessions:                # where `testbench session start` puts its kernel by default
-  backend: local         # local | modal | colab
+  backend: local         # local, docker, ssh, kubernetes, modal or colab
   idle_minutes: 10       # a session stops itself after this long unused
   max_minutes: 60        # and after this long in any case (bounds its cost)
 
@@ -91,8 +91,9 @@ def _write_agent_rules(root: Path) -> None:
     for name in ("AGENTS.md", "CLAUDE.md"):
         f = root / name
         text = f.read_text() if f.exists() else ""
-        if "<!-- agent-testbench" not in text:          # init's section, or the one `testbench connect` writes
-            body = AGENTS_SECTION if name == "AGENTS.md" else "See AGENTS.md for how to work in this project (agent-testbench).\n"
+        body = AGENTS_SECTION if name == "AGENTS.md" else "See AGENTS.md for how to work in this project (agent-testbench).\n"
+        # init's section, or the one `testbench connect` writes; CLAUDE.md's line, from an earlier init (--force)
+        if "<!-- agent-testbench" not in text and body.strip() not in text:
             f.write_text((text.rstrip() + "\n\n" if text.strip() else "") + body)
 
 
@@ -139,12 +140,16 @@ def cmd_init(a):
         print(f"  plan {first}: python -m pytest -q, a starting point")
     print("and the working rules in AGENTS.md (CLAUDE.md points to it).")
     _print_machine_limits(machine)
-    if found:
+    from .check import tb
+    if found and "FILL IN" in plans:
         print(f"Next: fill in the lines marked FILL IN in {target.name} - the numbers that mean \"working\" - then "
-              f"`testbench run {first}`.")
+              f"`{tb()} run {first}`.")
+    elif found:
+        print(f"Next: `{tb()} run {first}`. Its checks are already set; a number that also means \"working\" "
+              f"(an accuracy, a count) goes under its step's expect: in {target.name} (docs/expectations.md).")
     else:
-        print(f"Next: make plan {first} in {target.name} run what shows this project works (`testbench recipes` has "
-              f"ready plans for common goals), then `testbench run {first}`.")
+        print(f"Next: make plan {first} in {target.name} run what shows this project works (`{tb()} recipes` has "
+              f"ready plans for common goals), then `{tb()} run {first}`.")
     return 0
 
 
@@ -189,8 +194,9 @@ def _init_from_recipes(root: Path, target: Path, project: str, found: list, want
         print(note)
     print("and the working rules in AGENTS.md (CLAUDE.md points to it).")
     _print_machine_limits(machine)
+    from .check import tb
     print(f"Next: fill in the lines marked FILL IN in {target.name} - the commands, paths and numbers that mean "
-          f"\"working\" - then `testbench run {next(iter(chosen[0]['plans']))}`, the cheapest plan first.")
+          f"\"working\" - then `{tb()} run {next(iter(chosen[0]['plans']))}`, the cheapest plan first.")
     return 0
 
 
@@ -214,8 +220,9 @@ def _add_recipes(root: Path, target: Path, wanted: list[str]) -> int:
     _print_recipe_plans(cfg, chosen)
     for note in notes:
         print(note)
+    from .check import tb
     print(f"Next: fill in the lines marked FILL IN under the new plans - the commands, paths and numbers that mean "
-          f"\"working\" - then `testbench run {next(iter(chosen[0]['plans']))}`.")
+          f"\"working\" - then `{tb()} run {next(iter(chosen[0]['plans']))}`.")
     return 0
 
 

@@ -265,9 +265,13 @@ def _parse(kind: str, name: str, header_at: str, header: list[str], rows: list) 
     missing = [c for c in REQUIRED[kind] if c not in cols]
     if missing:
         hint = " (write 0 on rows without a fee)" if "fee" in missing else ""
+        timeish = [c for c in cols if c in ("date", "datetime", "timestamp", "day", "dt", "ts", "date_time", "bar")]
         if "time" in missing and "" in cols:
             hint += (". The column with no name may hold the times (pandas writes an unnamed index that way): "
                      "name it, e.g. df.to_csv(path, index_label='time')")
+        elif "time" in missing and timeish:
+            hint += (f". If {_q(timeish[0])} holds the times, name that column time, with ISO 8601 times in it "
+                     "(2024-01-02 or 2024-01-02T15:30:00; a bar number or a Unix timestamp is not a time)")
         raise TradingFileError(
             f"{name}, {header_at}: no {', '.join(_q(c) for c in missing)} column{'s' if len(missing) > 1 else ''}"
             f"{hint}. {FILE[kind]} needs {', '.join(REQUIRED[kind])} (optional: {', '.join(OPTIONAL[kind]) or 'none'});"

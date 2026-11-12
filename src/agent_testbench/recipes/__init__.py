@@ -393,7 +393,9 @@ def compose(text: str, recipes: list[dict], fresh: bool = False) -> tuple[str, l
         for plan in r["plans"]:
             if plan in taken:
                 fix = (f"Rename that plan in {C.CONFIG_NAME}, or copy what you need from `testbench recipes {r['name']}` "
-                       "by hand." if taken[plan] == C.CONFIG_NAME else
+                       f"by hand. If {C.CONFIG_NAME} is still as `testbench init` wrote it, `testbench init --recipe "
+                       f"{r['name']} --force` writes it again, with the recipe's plans in place of the ones they cover."
+                       if taken[plan] == C.CONFIG_NAME else
                        f"Use one of the two, and copy what you need from the other (`testbench recipes {r['name']}`).")
                 raise RecipeError(f"recipe {r['name']} has a plan named {plan}, and {taken[plan]} already has one, so "
                                   f"nothing was written. {fix}")

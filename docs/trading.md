@@ -381,8 +381,9 @@ each one by name (`--json` for JSON).
 
 Each snippet records every fill and every bar's equity and writes them with the writers. The **plain pandas**,
 **vectorbt** (1.2) and **backtrader** (1.9.78) snippets were run: on the same backtest testbench's numbers matched
-the framework's own (below). The NautilusTrader, LEAN and freqtrade snippets were **not run**: they follow those
-frameworks' documented APIs, so check their output with the reader before trusting it.
+the framework's own (below); the **plain Python** one runs in the tests. The NautilusTrader, LEAN and freqtrade
+snippets were **not run**: they follow those frameworks' documented APIs, so check their output with the reader
+before trusting it.
 
 ### Plain pandas
 
@@ -401,6 +402,36 @@ write_trades([{"time": t, "symbol": "SPY", "side": "buy" if q > 0 else "sell", "
 cash = 10_000 - (traded * close + fee).cumsum()
 write_equity(pd.DataFrame({"equity": cash + units * close, "position_value": units * close, "benchmark": close}),
              "out/equity.csv")
+```
+
+### Plain Python (no pandas)
+
+A loop over the bars, as a first backtest is often written. It reads the prices from `TESTBENCH_DATA_PRICES` (the
+copy a plan with `data:` gives it: only the rows that plan may see), else the file itself; its times must be ISO
+dates (`2024-01-02`), not bar numbers.
+
+```python
+import csv
+import os
+
+from agent_testbench.trading.files import write_equity, write_trades
+
+with open(os.environ.get("TESTBENCH_DATA_PRICES", "data/prices.csv")) as f:    # time, symbol, close
+    rows = list(csv.DictReader(f))
+cash, units, fills, bars = 10_000.0, 0, [], []
+for i, row in enumerate(rows):
+    t, close = row["time"], float(row["close"])
+    closes = [float(r["close"]) for r in rows[max(0, i - 20):i]]               # the closes before this bar
+    want = 100 if len(closes) == 20 and sum(closes[-5:]) / 5 > sum(closes) / 20 else 0
+    if want != units:                                                         # trade at this bar's close
+        q, fee = want - units, abs(want - units) * close * 0.001              # 0.1% a fill
+        fills.append({"time": t, "symbol": row["symbol"], "side": "buy" if q > 0 else "sell",
+                      "quantity": abs(q), "price": close, "fee": fee})
+        cash, units = cash - q * close - fee, want
+    bars.append({"time": t, "equity": cash + units * close, "position_value": units * close, "benchmark": close})
+os.makedirs("out", exist_ok=True)
+write_trades(fills, "out/trades.csv")
+write_equity(bars, "out/equity.csv")
 ```
 
 ### vectorbt

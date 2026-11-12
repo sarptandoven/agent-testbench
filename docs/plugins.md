@@ -54,7 +54,7 @@ per problem, in plain words:
 
 ```bash
 testbench plugin test testbench-backend-example        # every plug-in an installed package declares
-testbench plugin test testbench_nice:backend --kind backends    # one object, before it is packaged
+testbench plugin test testbench_nice:backend --kind backends    # one object, from its folder, before it is packaged
 testbench plugin test --installed                      # every installed plug-in, of every kind
 ```
 
