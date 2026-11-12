@@ -239,7 +239,7 @@ python -m pytest -q
 - **Python only.** The TypeScript, Go and other SDKs are not mocked.
 
 For any other paid API, write a strict mock with `agent_testbench.mocks.StrictAPI` and put its folder on the step's
-`pythonpath:` - or package it as a [mock plug-in](plugins-mocks.md), which a step then lists under `mocks:` and
+`pythonpath:` - or package it as a [mock plug-in](plugins.md#mocks), which a step then lists under `mocks:` and
 `mock_calls:` like the built-ins (`mocks: [weatherkit]`), with its calls logged and counted the same way.
 
 ## Brokers

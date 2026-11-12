@@ -654,11 +654,11 @@ class MockCallsCheck(Check):
     def validate(self, where, value):
         example = '{calls: "<= 5", output_tokens: "<= 2000"}'
         for sdk, rules in validate_table(where, value or {}, f"{{anthropic: {example}}}").items():
-            if sdk not in MOCK_SDKS:
-                raise ConfigError(f"`{where}` names {sdk!r}; the mock clients are {', '.join(MOCK_SDKS)}")
+            from . import mocks as M                            # a layer: only when a step names a mock
+            keys = M.call_keys(sdk, where)                      # built-in or plug-in; an unknown name says which exist
             broker = sdk in BROKER_SDKS                         # the mock brokers count orders, not tokens
             validate_table(f"{where}.{sdk}", rules, '{orders: "<= 20", orders_without_limit: 0}' if broker else example,
-                           BROKER_KEYS if broker else MOCK_KEYS)
+                           keys)
 
     def check(self, value, *, workdir, result, add):
         spec, mocked = value or {}, result.get("mocks") or {}
@@ -863,8 +863,8 @@ def _mock_calls(sdk: str, rules: dict, workdir: Path, result: dict, add) -> None
     else:
         counts = {}
         for r in recs:
-            label = f"{r.get('endpoint')} {r.get('model')}" + ("" if r.get("known_model", True) else
-                                                              " (not a model the mock knows)")
+            label = " ".join(str(x) for x in (r.get("endpoint"), r.get("model")) if x)     # a plug-in has no model
+            label += "" if r.get("known_model", True) else " (not a model the mock knows)"
             counts[label] = counts.get(label, 0) + 1
         context = "; ".join(f"{label} x{n}" for label, n in counts.items())
     for key, rule in rules.items():

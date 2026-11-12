@@ -1,4 +1,4 @@
-"""Mock SDKs as plug-ins (mocks.py, docs/plugins-mocks.md): the five built-in mocks are Mock objects in the "mocks"
+"""Mock SDKs as plug-ins (mocks.py, docs/plugins.md#mocks): the five built-in mocks are Mock objects in the "mocks"
 registry and keep its contract; a package adds one through an entry point, a step lists it under `mocks:` like a
 built-in, and its calls land in the same mock_calls log. The contract names what is wrong with a mock in plain words.
 Every mock here runs with the network cut: one that reached for it would fail."""
@@ -323,7 +323,8 @@ def test_a_plan_runs_against_an_installed_mock_plug_in(tmp_path, installed):
     write_config(root, {"project": "weather", "plans": {
         "weather": {"steps": [
             {"name": "forecast", "run": "python app.py Paris London", "mocks": {"weatherkit": own},
-             "expect": {"json": {"out.json": {"Paris": "drizzle", "London": "fog"}}}},
+             "expect": {"json": {"out.json": {"Paris": "drizzle", "London": "fog"}},
+                        "mock_calls": {"weatherkit": {"calls": 2}}}},
             {"name": "shipped forecasts", "run": "python app.py Paris", "mocks": ["weatherkit"],
              "expect": {"json": {"out.json": {"Paris": "sunny"}}}}]},
         "strays": {"steps": [
@@ -336,13 +337,13 @@ def test_a_plan_runs_against_an_installed_mock_plug_in(tmp_path, installed):
     assert [s["status"] for s in rep["steps"]] == ["passed", "passed"]
     checks = {(s["name"], c["check"]): c for s in rep["steps"] for c in s["expectations"]}
     assert checks[("forecast", "mock weatherkit refused 0")]["ok"], "every step that lists a mock refuses no call"
+    assert checks[("forecast", "mock weatherkit calls 2")]["ok"], "testbench.yaml takes rules on a plug-in mock"
     step_dir = run / "steps" / "01-forecast"
     logged = [json.loads(line) for line in (step_dir / "mock_calls.jsonl").read_text().splitlines()]
     assert [(r["sdk"], r["endpoint"], r["arguments"], r["error"]) for r in logged] == [
         ("weatherkit", "forecast", {"city": "Paris", "days": 2}, None),
         ("weatherkit", "forecast", {"city": "London", "days": 2}, None)], "the log is the step's evidence"
-    # `mock_calls:` rules on the plug-in, as the step's expectations count them (testbench.yaml takes them once
-    # config._expect asks mocks.call_keys for a mock's rule keys)
+    # the same rules, checked directly: a failing one says what was counted
     seen = {"step_dir": str(step_dir), "mocks": {"weatherkit": own}}
     rules = X.check({"mock_calls": {"weatherkit": {"calls": 2, "refused": 0}}}, workdir=root, result=seen)
     assert [c["ok"] for c in rules] == [True, True]

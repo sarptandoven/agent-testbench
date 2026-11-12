@@ -32,4 +32,4 @@ touches the network.
 | `testbench_mock_example/sdk/weatherkit/__init__.py` | the stand-in for `import weatherkit`, built on `StrictAPI` |
 | `testbench_mock_example/forecasts.json` | the forecasts it answers when a step gives none |
 
-[Mock plug-ins](../../../docs/plugins-mocks.md) explains each part and the contract `testbench plugin test` checks.
+[Mock plug-ins](../../../docs/plugins.md#mocks) explains each part and the contract `testbench plugin test` checks.
