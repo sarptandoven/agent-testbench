@@ -446,7 +446,7 @@ with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `ch
 | `schema` | print the JSON Schema of testbench.yaml (for editor autocomplete; `init` points the file at it) | 0 |
 | `connect CLIENT... [--user] [--dry-run]`, `connect --list` | register the MCP server in a client's config and write AGENTS.md | 0 |
 | `selftest [--keep]` | check the main promises hold on this machine, in a temporary folder (a minute or so, local and free) | 0 they all held, 1 one did not |
-| `mcp [--http]` | serve the commands as MCP tools | 0 when it stops |
+| `mcp [--http]` | serve the commands as MCP tools, with resources (plans, runs, reports, evidence, the loop, notes) and prompts ([clients.md](clients.md#resources-and-prompts)) | 0 when it stops |
 | `plugins [--json]` | each kind of plug-in: its built-ins, what is installed and from which package, what is broken and why ([plugins.md](plugins.md)) | 0 |
 | `plugin test TARGET\|--installed [--kind KIND]` | the conformance kit: check plug-ins keep their kind's contract; TARGET is `module:attr` or an installed package's name | 0 they all do, 1 one does not |
 | **runs** | | |

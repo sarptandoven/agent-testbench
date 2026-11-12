@@ -7,6 +7,9 @@ Each tool is the CLI command of the same name, run in its own process in the giv
 by side: a session can be stopped, or a run checked, while a long exec or a run is still going. Plots and other
 images come back as images the client can show. A launch above the approval threshold asks the person directly
 (MCP elicitation) when the client supports it; otherwise it says what needs approval, as the CLI does.
+
+Resources (testbench://plans, testbench://runs, a run's report and evidence, the loop, the notes) and prompts
+(prove-this-change, find-why-this-fails, tune-with-a-loop, check-a-strategy) are in mcp_resources.py.
 """
 from __future__ import annotations
 
@@ -27,7 +30,7 @@ except ImportError:                          # mcp 1.x
     from mcp.server.fastmcp import Context, FastMCP as _Server, Image
     from mcp.server.fastmcp.exceptions import ToolError
 
-from . import __version__, config as C, notify
+from . import __version__, config as C, mcp_resources, notify
 from .cli import render_exec
 
 INSTRUCTIONS = (
@@ -37,7 +40,9 @@ INSTRUCTIONS = (
     "and report what passed, what failed and why. Everything stays inside the budget in testbench.yaml and this "
     "machine's limits. Explore in a session, prove with a plan. Tools can run while others are still going (stop a "
     "session or check a run at any time). When a cost needs approval, the person may be asked directly; only set "
-    "approved_by_person=true when the person explicitly agreed to that cost in this conversation."
+    "approved_by_person=true when the person explicitly agreed to that cost in this conversation. Resources read the "
+    "project the server started in without running anything: testbench://plans, testbench://runs, "
+    "testbench://runs/RUN_ID/report, its report.json and evidence/PATH, testbench://loops/current, testbench://notes."
 )
 MAX_IMAGES = 6
 MAX_IMAGE_BYTES = 2_000_000
@@ -184,6 +189,8 @@ async def _follow(ctx, project_dir: str, run: str, seconds: int, head: str = "")
     """Follow a run with `testbench wait`, passing its progress lines on to the client as they come."""
     code, out = await _cli(project_dir, ["wait", _name(run, "run"), "--timeout", str(max(0, seconds))],
                            on_line=_progress(ctx))
+    if code in (0, 1):                           # it has ended: the runs list and its report are new
+        await mcp_resources.updated(ctx, project_dir, run)
     return _text(code, (head + "\n" if head else "") + out)
 
 
@@ -461,6 +468,9 @@ async def loop_status(project_dir: str = ".") -> str:
                          "for the person to review and merge.")
 async def loop_stop(project_dir: str = ".") -> str:
     return _text(*await _cli(project_dir, ["loop", "stop"]))
+
+
+mcp_resources.register(server)              # testbench://plans, runs, reports, evidence, the loop, notes; the prompts
 
 
 def main(http: bool = False, host: str = "127.0.0.1", port: int = 8765):
