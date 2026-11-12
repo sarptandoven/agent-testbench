@@ -35,7 +35,7 @@ nav:
   - Other coding agents: clients.md
   - Expectations: expectations.md
   - Notebooks: notebooks.md
-  - Mock LLM clients: mocks.md
+  - Mock clients (LLMs, brokers): mocks.md
   - Trading:
       - Files and metrics: trading.md
       - Overfitting statistics: trading-stats.md

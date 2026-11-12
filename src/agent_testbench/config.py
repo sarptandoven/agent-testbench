@@ -592,10 +592,20 @@ def _mocks(where: str, value, root: Path) -> dict:
     core, out = M.client_core(), {}
     for name, opts in value.items():
         if name not in M.SDKS:
-            raise ConfigError(f"`{where}` names {name!r}; testbench has mock clients for {', '.join(M.SDKS)}. For "
-                              "another API, write a strict mock with agent_testbench.mocks.StrictAPI and list its "
+            hint = " (the mock ib_async also answers `import ib_insync`: list ib_async)" if name == "ib_insync" else ""
+            raise ConfigError(f"`{where}` names {name!r}; testbench has mock clients for {', '.join(M.SDKS)}{hint}. "
+                              "For another API, write a strict mock with agent_testbench.mocks.StrictAPI and list its "
                               "folder under pythonpath:")
         opts = opts or {}
+        if name in M.BROKERS:                   # alpaca, ccxt, ib_async: prices, cash, fees, the live-account rule
+            now = opts.get("now") if isinstance(opts, dict) else None
+            if now is not None and not isinstance(now, (str, int, float)):
+                opts = {**opts, "now": str(now)}                 # YAML reads `now: 2024-01-05` as a date
+            bad = M.broker_core().setup_error(opts, str(root))
+            if bad:
+                raise ConfigError(f"`{where}.{name}`: {bad}")
+            out[name] = opts
+            continue
         bad = core.options_error(opts)
         if bad:
             raise ConfigError(f"`{where}.{name}`: {bad}")
@@ -705,7 +715,9 @@ def _expect(where: str, e: dict) -> None:
     for sdk, rules in _table(f"{where}.mock_calls", e.get("mock_calls") or {}, f"{{anthropic: {example}}}").items():
         if sdk not in X.MOCK_SDKS:
             raise ConfigError(f"`{where}.mock_calls` names {sdk!r}; the mock clients are {', '.join(X.MOCK_SDKS)}")
-        _table(f"{where}.mock_calls.{sdk}", rules, example, X.MOCK_KEYS)
+        broker = sdk in X.BROKER_SDKS                           # the mock brokers count orders, not tokens
+        _table(f"{where}.mock_calls.{sdk}", rules, '{orders: "<= 20", orders_without_limit: 0}' if broker else example,
+               X.BROKER_KEYS if broker else X.MOCK_KEYS)
 
 
 def parse_cells(spec, where="cells") -> list[int]:

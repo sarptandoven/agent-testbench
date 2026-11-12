@@ -60,7 +60,10 @@ description: Set up agent-testbench in a project - install it, write testbench.y
    the calls (docs/mocks.md). For any other paid API, make a `mocks/` folder with a module named like the real client
    (e.g. `mocks/acme.py`) built on `agent_testbench.mocks.StrictAPI`: it checks arguments against the service's
    published schema, returns a reply of the real shape (a generated test video, a fixed JSON), logs calls, and
-   refuses anything else. Add `pythonpath: [mocks]` to the test steps. Real calls stay out of tests.
+   refuses anything else. Add `pythonpath: [mocks]` to the test steps. Real calls stay out of tests. Trading code
+   on `alpaca`, `ccxt` or `ib_async` / `ib_insync` gets `mocks: {alpaca: {prices: data/prices.csv}}` (or `ccxt`,
+   `ib_async`): orders fill on a paper account from that CSV, a live account is refused, and
+   `mock_calls: {alpaca: {orders: "<= 20", live: 0}}` bounds what it may do (docs/mocks.md#brokers).
 9. **Notebooks.** Keep them Colab-friendly (form fields `NAME = value  #@param`, no hard-coded `/content`
    paths, small previews instead of embedded video). For editing, `testbench nb split nb.ipynb cells/` and
    `testbench nb build cells/ nb.ipynb`. A step's `uploads: [[file]]` answers each `files.upload()` in order;

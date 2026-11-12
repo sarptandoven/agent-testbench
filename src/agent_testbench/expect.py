@@ -25,8 +25,9 @@ finding ("accuracy 0.71, wanted >= 0.9") rather than a bare FAIL. A check that m
       image:
         outputs/plot.png: {like: golden/plot.png, max_diff: 0.02}
       duration: {minutes: "<= 5"}
-      mock_calls:                            # calls the step made to the mock LLM clients (mocks: on the step)
+      mock_calls:                            # calls the step made to the mock clients (mocks: on the step)
         anthropic: {calls: "<= 5", output_tokens: "<= 2000"}       # refused: 0 unless said otherwise
+        alpaca: {orders: "<= 20", orders_without_limit: 0}         # the brokers: orders, fills, fees, live, ...
 
 Any rule can also be a tolerance ("~= 0.93 +- 0.01", "~= 100 +- 5%") or an inclusive range ("between 0.8 and 0.95").
 """
@@ -50,8 +51,12 @@ NEAR = re.compile(r"^\s*~=\s*(\S+?)\s*(?:\+-|\+/-|±)\s*(\S+?)\s*(%?)\s*$")
 BETWEEN = re.compile(r"^\s*between\s+(\S+)\s+and\s+(\S+)\s*$", re.I)
 KINDS = ("exit_code", "no_errors", "files", "json", "text", "media", "web", "junit", "metrics", "gpu", "image",
          "duration", "mock_calls")
-MOCK_SDKS = ("anthropic", "openai")
+LLM_SDKS = ("anthropic", "openai")
+BROKER_SDKS = ("alpaca", "ccxt", "ib_async")
+MOCK_SDKS = LLM_SDKS + BROKER_SDKS
 MOCK_KEYS = ("calls", "refused", "injected", "input_tokens", "output_tokens", "tool_calls")
+BROKER_KEYS = ("calls", "refused", "orders", "fills", "cancels", "orders_without_limit", "max_order_value", "fees",
+               "live")
 MOCK_LOG = "mock_calls.jsonl"
 MEDIA_KEYS = ("frames", "width", "height", "fps", "seconds", "audio")
 WEB_KEYS = ("status", "title", "text", "no_console_errors")
@@ -326,7 +331,13 @@ def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
     return out
 
 
-# ---- calls to the mock LLM clients (docs/mocks.md) -----------------------------------------------------------
+# ---- calls to the mock clients (docs/mocks.md) ---------------------------------------------------------------
+
+def _refusals(recs: list, kinds: list, key: str) -> str:
+    hits = [r for r, k in zip(recs, kinds) if k == key]
+    return "; ".join(f"call {r.get('call')}: {r['error'].get('type')}: {r['error'].get('message')}"[:300]
+                     for r in hits[:2]) + (f"; and {len(hits) - 2} more" if len(hits) > 2 else "")
+
 
 def _mock_calls(sdk: str, rules: dict, workdir: Path, result: dict, add) -> None:
     step_dir = result.get("step_dir")
@@ -340,6 +351,9 @@ def _mock_calls(sdk: str, rules: dict, workdir: Path, result: dict, add) -> None
         if isinstance(rec, dict) and rec.get("sdk") == sdk:
             recs.append(rec)
     kinds = [(r.get("error") or {}).get("kind") for r in recs]
+    if sdk in BROKER_SDKS:
+        _broker_calls(sdk, rules, recs, kinds, result, add)
+        return
     found = {"calls": len(recs), "refused": kinds.count("refused"), "injected": kinds.count("injected"),
              "tool_calls": sum(len((r.get("reply") or {}).get("tool_calls") or []) for r in recs)}
     for key in ("input_tokens", "output_tokens"):
@@ -358,13 +372,67 @@ def _mock_calls(sdk: str, rules: dict, workdir: Path, result: dict, add) -> None
         ok, detail = compare(found[key], rule)
         extra = context
         if key in ("refused", "injected") and found[key]:
-            hits = [r for r, k in zip(recs, kinds) if k == key]
-            extra = "; ".join(f"call {r.get('call')}: {r['error'].get('type')}: {r['error'].get('message')}"[:300]
-                              for r in hits[:2]) + (f"; and {len(hits) - 2} more" if len(hits) > 2 else "")
+            extra = _refusals(recs, kinds, key)
             if key == "injected":
+                hits = [r for r, k in zip(recs, kinds) if k == key]
                 extra += f" ({sum(bool(r['error'].get('retried')) for r in hits)} retried by the SDK itself)"
         elif key in ("input_tokens", "output_tokens"):
             extra = f"the mock's count (words x 1.3); {context}"
+        add(f"mock {sdk} {key} {rule}", ok, f"{detail}; {extra}")
+
+
+def _amount(v) -> float:
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    return x if math.isfinite(x) else 0.0
+
+
+def _order_text(rec: dict, o: dict) -> str:
+    price = f" at {o['limit']}" if o.get("limit") is not None else f" stop {o['stop']}" if o.get("stop") is not None \
+        else ""
+    return (f"call {rec.get('call')}: {o.get('type')} {o.get('side')} {_amount(o.get('qty')):g} {o.get('symbol')}"
+            f"{price}, value {_amount(o.get('value')):,.2f}")
+
+
+def _broker_calls(sdk: str, rules: dict, recs: list, kinds: list, result: dict, add) -> None:
+    """The mock brokers' log: every order placed, every fill and cancel, and whether a live account was asked for."""
+    orders = [(r, o) for r in recs for o in r.get("orders") or [] if isinstance(o, dict)]
+    fills = [f for r in recs for f in r.get("fills") or [] if isinstance(f, dict)]
+    found = {"calls": len(recs), "refused": kinds.count("refused"), "orders": len(orders), "fills": len(fills),
+             "cancels": sum(len(r.get("cancels") or []) for r in recs),
+             "orders_without_limit": sum(o.get("limit") is None for _, o in orders),
+             "max_order_value": round(max((_amount(o.get("value")) for _, o in orders), default=0.0), 6),
+             "fees": round(sum(_amount(f.get("fee")) for f in fills), 6),
+             "live": sum(bool(r.get("live")) for r in recs)}
+    if recs:
+        counts = {}
+        for r in recs:
+            label = f"{r.get('endpoint')}" + (" (live)" if r.get("live") else "")
+            counts[label] = counts.get(label, 0) + 1
+        context = "; ".join(f"{label} x{n}" for label, n in counts.items())
+    else:
+        context = "no calls were logged" + (f" (is `mocks: [{sdk}]` on this step?)" if sdk not in
+                                            (result.get("mocks") or {}) else "")
+    for key, rule in rules.items():
+        ok, detail = compare(found[key], rule)
+        extra = context
+        if key == "refused" and found[key]:
+            extra = _refusals(recs, kinds, key)
+        elif key == "orders_without_limit" and found[key]:
+            hits = [_order_text(r, o) for r, o in orders if o.get("limit") is None]
+            extra = "; ".join(hits[:3]) + (f"; and {len(hits) - 3} more" if len(hits) > 3 else "")
+        elif key == "max_order_value" and orders:
+            extra = "the largest: " + _order_text(*max(orders, key=lambda ro: _amount(ro[1].get("value"))))
+        elif key == "live" and found[key]:
+            hits = [r for r in recs if r.get("live")]
+            extra = "; ".join(f"call {r.get('call')}: {r.get('endpoint')}" + (
+                f" (refused: {r['error'].get('type')})" if (r.get("error") or {}).get("kind") == "refused" else
+                " (answered: allow_live is on)") for r in hits[:2]) + (f"; and {len(hits) - 2} more"
+                                                                      if len(hits) > 2 else "")
+        elif key == "fees":
+            extra = f"{len(fills)} fill(s); {context}"
         add(f"mock {sdk} {key} {rule}", ok, f"{detail}; {extra}")
 
 

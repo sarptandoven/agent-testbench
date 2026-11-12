@@ -301,6 +301,9 @@ def test_every_expectation_and_option_has_a_schema_entry():
     assert set(expect["duration"]["properties"]) == set(X.DURATION_KEYS)
     assert set(SCHEMA["$defs"]["junit"]["anyOf"][1]["properties"]) == {"path", *X.JUNIT_KEYS}
     assert set(expect["mock_calls"]["propertyNames"]["enum"]) == set(X.MOCK_SDKS) == _enum(SCHEMA["$defs"]["mocks"])
+    assert set(SCHEMA["$defs"]["broker_calls"]["properties"]) == set(X.BROKER_KEYS)
+    assert set(expect["mock_calls"]["properties"]) == set(X.BROKER_SDKS) == set(M.BROKERS)
+    assert set(SCHEMA["$defs"]["broker_options"]["properties"]) == set(M.broker_core().OPTION_KEYS)
     core = M.client_core()
     assert set(SCHEMA["$defs"]["mock_options"]["properties"]) == set(core.OPTION_KEYS)
     assert set(SCHEMA["$defs"]["mock_options"]["properties"]["fail_with"]["enum"]) == set(core.FAILURES)

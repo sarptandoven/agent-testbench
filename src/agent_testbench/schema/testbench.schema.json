@@ -974,9 +974,9 @@
           }
         },
         "mock_calls": {
-          "description": "What the mock clients saw: {anthropic: {calls: \"<= 5\", output_tokens: \"<= 2000\"}}",
+          "description": "What the mock clients saw: {anthropic: {calls: \"<= 5\"}} or, for a mock broker, {alpaca: {orders: \"<= 20\", orders_without_limit: 0, live: 0}}",
           "type": ["object", "null"],
-          "propertyNames": {"enum": ["anthropic", "openai"]},
+          "propertyNames": {"enum": ["anthropic", "openai", "alpaca", "ccxt", "ib_async"]},
           "additionalProperties": {
             "description": "Rules on this mock client's calls",
             "type": ["object", "null"],
@@ -988,6 +988,20 @@
               "input_tokens": {"description": "input_tokens: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
               "output_tokens": {"description": "output_tokens: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
               "tool_calls": {"description": "tool_calls: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"}
+            }
+          },
+          "properties": {
+            "alpaca": {
+              "description": "Rules on what trading code did with the mock alpaca",
+              "$ref": "#/$defs/broker_calls"
+            },
+            "ccxt": {
+              "description": "Rules on what trading code did with the mock ccxt",
+              "$ref": "#/$defs/broker_calls"
+            },
+            "ib_async": {
+              "description": "Rules on what trading code did with the mock ib_async",
+              "$ref": "#/$defs/broker_calls"
             }
           }
         }
@@ -1017,15 +1031,29 @@
       ]
     },
     "mocks": {
-      "description": "Mock clients by name, or with options: [openai, anthropic] or {anthropic: {replies: tests/replies.yaml, fail_on_call: 3}}",
+      "description": "Mock clients by name, or with options: [openai, anthropic], {anthropic: {replies: tests/replies.yaml}}, or a mock broker: {alpaca: {prices: data/prices.csv, cash: 100000, fee_usd: 1}}",
       "anyOf": [
         {"type": "null"},
-        {"enum": ["anthropic", "openai"]},
-        {"type": "array", "items": {"enum": ["anthropic", "openai"]}},
+        {"enum": ["anthropic", "openai", "alpaca", "ccxt", "ib_async"]},
+        {"type": "array", "items": {"enum": ["anthropic", "openai", "alpaca", "ccxt", "ib_async"]}},
         {
           "type": "object",
-          "propertyNames": {"enum": ["anthropic", "openai"]},
-          "additionalProperties": {"$ref": "#/$defs/mock_options"}
+          "propertyNames": {"enum": ["anthropic", "openai", "alpaca", "ccxt", "ib_async"]},
+          "additionalProperties": {"$ref": "#/$defs/mock_options"},
+          "properties": {
+            "alpaca": {
+              "description": "The mock broker for alpaca-py (TradingClient, the historical data clients): its settings",
+              "$ref": "#/$defs/broker_options"
+            },
+            "ccxt": {
+              "description": "The mock broker for ccxt's exchanges: its settings",
+              "$ref": "#/$defs/broker_options"
+            },
+            "ib_async": {
+              "description": "The mock broker for ib_async, also answering `import ib_insync`: its settings",
+              "$ref": "#/$defs/broker_options"
+            }
+          }
         }
       ]
     },
@@ -1045,18 +1073,66 @@
         },
         "fail_with": {
           "description": "How those calls fail (needs fail_on_call)",
-          "enum": [
-            "rate_limit",
-            "overloaded",
-            "server",
-            "timeout",
-            "connection",
-            "auth",
-            "permission",
-            "not_found",
-            "bad_request"
-          ]
+          "enum": ["rate_limit", "overloaded", "server", "timeout", "connection", "auth", "permission", "not_found", "bad_request"]
         }
+      }
+    },
+    "broker_options": {
+      "description": "A mock broker's settings: prices, the clock, cash, fees and the live-account rule (docs/mocks.md#brokers)",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "prices": {
+          "description": "A CSV of time,symbol,close (relative to the project) the broker fills and answers bars from",
+          "type": "string"
+        },
+        "price": {
+          "description": "Fixed prices instead of a file: {AAPL: 190.5, BTC/USD: 65000}",
+          "type": "object",
+          "additionalProperties": {"type": "number", "exclusiveMinimum": 0}
+        },
+        "now": {
+          "description": "The current bar's time (ISO 8601); by default the last bar in prices. Data after it is never answered",
+          "type": ["string", "number"]
+        },
+        "advance_every": {
+          "description": "Move the clock one bar forward after this many requests",
+          "type": "integer",
+          "minimum": 1
+        },
+        "cash": {"description": "Starting cash in the account currency", "type": "number", "minimum": 0},
+        "currency": {"description": "The account currency, e.g. USD", "type": "string"},
+        "positions": {
+          "description": "Starting positions: {AAPL: 10}",
+          "type": "object",
+          "additionalProperties": {"type": "number"}
+        },
+        "fee_usd": {"description": "A fixed fee per order, in the account currency", "type": "number", "minimum": 0},
+        "fee_bps": {"description": "A fee per order in basis points of its value", "type": "number", "minimum": 0},
+        "slippage_bps": {"description": "Slippage on market orders, in basis points", "type": "number", "minimum": 0},
+        "allow_live": {
+          "description": "Let code ask for a live account (paper=False, no sandbox, IB's live ports); off, it is refused, and on record either way",
+          "type": "boolean"
+        }
+      }
+    },
+    "broker_calls": {
+      "description": "Rules on what trading code did with this mock broker",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "calls": {"description": "calls: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+        "refused": {"description": "refused: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+        "orders": {"description": "orders: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+        "fills": {"description": "fills: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+        "cancels": {"description": "cancels: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+        "orders_without_limit": {
+          "description": "orders_without_limit: a rule, e.g. \"<= 5\"",
+          "$ref": "#/$defs/rule"
+        },
+        "max_order_value": {"description": "max_order_value: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+        "fees": {"description": "fees: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+        "live": {"description": "live: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"}
       }
     }
   }

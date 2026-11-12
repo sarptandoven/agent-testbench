@@ -1,10 +1,13 @@
-# Mock LLM clients
+# Mock clients: LLMs and brokers
 
 Code that calls a language model is usually tested in one of two ways: with real API calls, which cost money and
 give a different answer each time, or not at all. Agents are no better - they spend the money or skip the test.
 agent-testbench ships strict stand-ins for the two most used SDKs, `openai` and `anthropic`, so the code around a
 model call (the prompt it builds, the tool loop, the retry, the parsing of the answer) can be tested for free, the
 same way every time, and with the mistakes a real API would refuse caught before anyone pays for them.
+
+Trading code gets the same treatment: [mock broker SDKs](#brokers) (`alpaca`, `ccxt`, `ib_async`) fill its orders
+against a prices file on a paper account, and refuse a live one.
 
 ```yaml
 steps:
@@ -37,7 +40,7 @@ mocks:
 | `fail_on_call` | a call number (`3`) or a list (`[3, 4, 5]`) that fails instead of answering, counted from 1 in each process |
 | `fail_with` | how those calls fail: `rate_limit` (default), `overloaded`, `server`, `timeout`, `connection`, `auth`, `permission`, `not_found`, `bad_request` |
 
-`testbench.yaml` is checked when it loads: an SDK other than these two, an unknown option, a replies file that
+`testbench.yaml` is checked when it loads: an SDK testbench has no mock for, an unknown option, a replies file that
 does not exist or has a bad pattern all stop there with what to write instead.
 
 ## What the mocks answer
@@ -237,3 +240,184 @@ python -m pytest -q
 
 For any other paid API, write a strict mock with `agent_testbench.mocks.StrictAPI` and put its folder on the step's
 `pythonpath:`.
+
+## Brokers
+
+Trading code can be tested end to end the same way, against strict stand-ins for the Python SDKs agents use most:
+`alpaca` (alpaca-py), `ccxt`, and `ib_async` (which also answers `import ib_insync`). Orders fill against a prices
+file the step names, on a paper account the mock keeps; nothing reaches a broker, and the code under test does not
+change.
+
+```yaml
+steps:
+  - name: bot on a paper account
+    run: python bot.py --once
+    mocks:
+      alpaca: {prices: data/prices.csv, cash: 100000, fee_usd: 0, slippage_bps: 5}
+    expect:
+      mock_calls:
+        alpaca: {orders: "<= 20", orders_without_limit: 0, max_order_value: "<= 10000", live: 0}
+```
+
+### What the broker mocks answer
+
+| | `alpaca` | `ccxt` | `ib_async` |
+|---|---|---|---|
+| clients | `TradingClient(api_key, secret_key, paper=True)`, `StockHistoricalDataClient`, `CryptoHistoricalDataClient` (also `raw_data=True`) | `ccxt.binance()`, `binanceus`, `bybit`, `okx`, `kucoin`, `coinbase`, `coinbaseexchange`, `kraken`, `krakenfutures`, `bitstamp`, `gemini`; snake_case and camelCase names | `IB()` with `connect`, `disconnect`, `isConnected`, `managedAccounts`; `import ib_insync` is the same mock |
+| account | `get_account`, `get_all_positions`, `get_open_position`, `get_clock` | `fetch_balance` | `accountValues`, `accountSummary`, `reqAccountSummary`, `positions`, `reqPositions`, `portfolio` |
+| orders | `submit_order` with `MarketOrderRequest`, `LimitOrderRequest`, `StopOrderRequest`, `StopLimitOrderRequest` (`qty` or `notional`); `get_orders`, `get_order_by_id`, `get_order_by_client_id`, `cancel_orders`, `cancel_order_by_id`, `close_all_positions`, `close_position` | `create_order` (`market`, `limit`; params `timeInForce`, `postOnly`, `clientOrderId`) and `create_market_buy_order` and the like, `cancel_order`, `cancel_all_orders`, `fetch_order`, `fetch_orders`, `fetch_open_orders`, `fetch_closed_orders`, `fetch_my_trades` | `placeOrder` with `MarketOrder`, `LimitOrder`, `StopOrder`, `StopLimitOrder`, giving a `Trade` kept up to date (status, fills, commission reports, its events and IB's); `cancelOrder`, `reqGlobalCancel`, `trades`, `openTrades`, `orders`, `openOrders`, `fills`, `executions`, `reqOpenOrders`, `reqExecutions` |
+| market data | `get_stock_bars`, `get_crypto_bars` with `StockBarsRequest` / `CryptoBarsRequest` and `TimeFrame`, giving a `BarSet` (`bars["AAPL"]`, `bars.df`) | `load_markets`, `fetch_markets`, `market`, `fetch_ticker`, `fetch_tickers`, `fetch_ohlcv`, `fetch_time` | `qualifyContracts`, `reqHistoricalData` (a `BarDataList`; `util.df`), `reqMktData`, `reqTickers` |
+| errors | `APIError` with the API's status and code (403 insufficient buying power or qty, 404, 422); pydantic's `ValidationError` from a request model | ccxt's own: `InsufficientFunds`, `InvalidOrder`, `OrderNotFound`, `ArgumentsRequired`, `BadSymbol`, `BadRequest`, `NotSupported`, `AuthenticationError`, ... | as IB reports them: an order IB would refuse comes back `Inactive`, with an `errorEvent` (201 rejected, 321 a bad request); raised as `RequestError` only with `IB.RaiseRequestErrors = True` |
+
+Names, arguments and reply shapes follow alpaca-py 0.45.0, ccxt 4.5.92 and ib_async 2.1.0 (read from the installed
+packages on 2026-11-12). When the real packages are installed where the tests run, a test checks that every public
+name and method parameter of the mocks exists in them.
+
+They are strict where the real SDKs are: alpaca's request models refuse a limit order without `limit_price` or a
+market order with one (pydantic's errors, the same messages), `TradingClient()` without keys is a `ValueError`,
+crypto orders take `gtc` or `ioc` and fractional stock orders must be `day`; ccxt's account calls need `apiKey` and
+`secret` (and `password` on okx, kucoin and coinbaseexchange), binance's `cancel_order` and `fetch_my_trades` need a
+symbol, timeframes are the exchange's own; IB's orders need `BUY` or `SELL` and the price their type takes. And
+stricter in one place: an alpaca request model refuses a field it does not have (`limit_prce=`), which alpaca-py
+would drop without a word.
+
+### Prices and the clock
+
+`prices:` is a CSV file with the columns `time,symbol,close`, and `open`, `high`, `low`, `volume` when you have
+them:
+
+```
+time,symbol,close
+2024-01-02,AAPL,185.64
+2024-01-02,BTC/USD,45000
+2024-01-02,ETH/USDT,2350
+2024-01-03,AAPL,184.25
+```
+
+Times are dates, ISO times (`2024-01-02 15:30`, `2024-01-02T15:30:00Z`) or seconds or milliseconds since 1970;
+without a zone they are UTC. Symbols are named as the SDK names them: `AAPL`, alpaca's `BTC/USD`, ccxt's unified
+`ETH/USDT`; for IB a contract's `localSymbol` or `symbol` (or `symbol` and `currency`, as `EURUSD`). `price:
+{AAPL: 190.5}` gives a fixed price instead, and wins over the file for its symbols. A symbol in neither stops the
+call with a `SetupError` that lists the symbols there are: the test's data, not the code, is missing something.
+
+The mock's clock is a bar of the file: `now:` (by default its last bar). Data calls answer bars up to now and never
+after, so a strategy cannot peek ahead. `advance_every: N` moves the clock one bar every N requests, so a loop that
+polls the broker walks through the file: with `advance_every: 1` the first request sees `now`, the next one the bar
+after, and so on to the last bar. Making a client, `connect()` and `set_sandbox_mode()` are not requests, nor are
+ib_async's reads of what IB already sent (`positions()`, `accountValues()`, `openTrades()`, ...).
+`get_clock`, `fetch_time`, `exchange.milliseconds()` and `reqCurrentTime` read this clock, so a `since=` worked out
+from them lines up with the file; `ib.sleep()` and `exchange.sleep()` return at once. Bars are answered as the file
+has them: an hourly request on daily bars gets daily bars, and a note in its log line says so.
+
+### Fills, fees and the account
+
+- A market order fills at once, at the current close moved against the trader by `slippage_bps`.
+- A limit order fills when the close crosses its limit, at the close with slippage but never past the limit. Until
+  then it is open, and the cash it may cost (or the shares it sells) are held for it.
+- A stop order becomes a market order once the close reaches its stop; a stop-limit becomes a limit order.
+- An IOC or FOK order that cannot fill at once is cancelled.
+- Each fill pays `fee_usd` plus `fee_bps` of its value, in the currency the order is paid in (for ccxt, the pair's
+  quote currency).
+- No short selling and no margin: a buy needs free cash (cash less what open orders hold), a sell free shares; else
+  the broker's refusal (alpaca's 403 "insufficient buying power", ccxt's `InsufficientFunds`, IB's 201 rejection).
+
+Positions keep their cost, so cash, positions, `avg_entry_price`, `unrealized_pl` (alpaca), `avgCost`,
+`realizedPNL` (IB) and equity add up at every bar.
+
+| option | what it does |
+|---|---|
+| `prices` | the CSV file of prices, relative to the project folder |
+| `price` | fixed prices: `{AAPL: 190.5, BTC/USDT: 65000}` |
+| `now` | the current bar: a time in the file (by default its last bar) |
+| `advance_every` | move the clock one bar every N requests (by default it stays at `now`) |
+| `cash` | the starting cash (100000) |
+| `currency` | the cash currency (USD; for ccxt USDT on binance, bybit, okx and kucoin) |
+| `positions` | held at the start, at the price of `now`: `{AAPL: 10}`; for ccxt by currency, `{BTC: 0.5}` |
+| `fee_usd` | a fixed fee per filled order, in the cash currency (0) |
+| `fee_bps` | a fee in basis points of each fill's value (0) |
+| `slippage_bps` | how far market fills move against the trader, in basis points (0) |
+| `allow_live` | let a live account through, for code only exercised offline (false) |
+
+### Live versus paper
+
+The mock never pretends a live order happened. A live account is refused:
+
+- alpaca: `TradingClient(..., paper=False)`;
+- ccxt: an account call (balance, orders, trades) on an exchange without `set_sandbox_mode(True)`. kraken, coinbase,
+  kucoin and bitstamp have no sandbox in ccxt, so there `set_sandbox_mode(True)` raises `NotSupported` as the real
+  ccxt does: every account call of such code would reach a real account. Market data (markets, tickers, candles)
+  touches no account and is answered either way;
+- ib_async: `connect()` on port 7496 (TWS) or 4001 (IB Gateway). 7497 and 4002 are the paper ports; any other port
+  is refused, since the mock cannot tell which account it would reach.
+
+```
+LiveAccountRefused: mock alpaca: this test asked for a live account (TradingClient(paper=False)); trading code
+under test must use paper/sandbox, see docs/mocks.md#brokers. Code that is only exercised offline can be let
+through with allow_live: true in the step's mocks: options (nothing reaches a broker either way).
+```
+
+The refusal is a line of the log with `"live": true`, so the step fails even when the code catches it. For code that
+is only exercised offline, `allow_live: true` lets it through; every call on that client is still logged as live, and
+`mock_calls: {alpaca: {live: 0}}` forbids it again.
+
+### What is not modelled
+
+Anything else - streaming (`TradingStream`, `keepUpToDate=True`, `ccxt.pro`), ccxt's `async_support`, options,
+bracket and OCO orders, trailing stops, changing an order (`replace_order_by_id`, `placeOrder` on a placed order),
+margin and short selling, asset lists, IB's scanners and news - raises `NotModelled` (an `AttributeError`) naming the
+method and what the mock answers, and is logged as refused:
+
+```
+mock alpaca: TradingClient.get_portfolio_history is not modelled; the mock answers get_account, get_all_positions, ...
+```
+
+A module the mock lacks says so too: `No module named 'alpaca.trading.stream': the mock alpaca package
+(agent-testbench) does not have it. ...`
+
+### The log and the expectation
+
+Each call is a line of `mock_calls.jsonl`, as for the LLM mocks, with what the broker did:
+
+```json
+{"sdk": "alpaca", "endpoint": "submit_order", "call": 3, "live": false, "time": "2024-01-03T00:00:00Z",
+ "arguments": {"order_data": {"class": "MarketOrderRequest", "symbol": "AAPL", "qty": 10.0, "side": "buy", ...}},
+ "error": null, "orders": [{"id": "...", "symbol": "AAPL", "side": "buy", "type": "market", "qty": 10.0,
+ "limit": null, "stop": null, "value": 1020.0}], "fills": [{"order": "...", "qty": 10.0, "price": 102.051,
+ "fee": 1.0, "value": 1020.51, ...}], "account": "alpaca", "cash": 98978.49, "equity": 99998.49}
+```
+
+`mock_calls:` takes these keys for a broker, each with any [rule](expectations.md#rules):
+
+| key | what it counts |
+|---|---|
+| `calls` | every call, refused or not |
+| `refused` | calls refused: an API error, a live account, something not modelled (`0` unless said otherwise) |
+| `orders` | orders the broker took (an order it rejected is a refused call) |
+| `fills` | fills, whenever they happened |
+| `cancels` | orders cancelled (also IOC and FOK orders that could not fill) |
+| `orders_without_limit` | orders taken with no limit price (market and stop orders) |
+| `max_order_value` | the largest order: its quantity times its limit (or stop, or the price when it was placed) |
+| `fees` | the fees paid, in the cash currency |
+| `live` | calls on a live account (refused, or let through by `allow_live`) |
+
+```yaml
+expect:
+  mock_calls:
+    alpaca: {orders: 0}                          # this signal must not trade today
+    ccxt: {orders: "<= 20", fees: "< 50"}
+    ib_async: {orders_without_limit: 0, max_order_value: "<= 10000", live: 0}
+```
+
+```
+- expected mock ib_async orders_without_limit 0: 1 (wanted == 0); call 4: market buy 10 AAPL, value 1,050.00
+- expected mock alpaca refused 0: 1 (wanted == 0); call 1: LiveAccountRefused: mock alpaca: this test asked for a
+  live account (TradingClient(paper=False)); ...
+```
+
+Outside testbench, put the broker's folder first on `PYTHONPATH` (`client_paths(["alpaca"])`, as above) and its
+options in `TESTBENCH_MOCK_ALPACA`, `TESTBENCH_MOCK_CCXT` or `TESTBENCH_MOCK_IB_ASYNC`, with `prices` as an absolute
+path.
+
+Limits: fills are deterministic and whole (no partial fills, no queue, no order book, no market hours: the mock's
+market is open at every bar); one account per broker in each process, starting afresh in each; and a strategy's
+results here say that its code does what it means, not that it makes money.

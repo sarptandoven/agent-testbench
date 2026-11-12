@@ -254,7 +254,7 @@ step they are refused, not ignored.
 | `env` | `{}` | extra environment variables |
 | `secrets` | `[]` | secret NAMES. Local: must be exported. Modal: Modal secrets of these names are attached |
 | `pythonpath` | `[]` | folders put first on `PYTHONPATH` (e.g. `mocks`) |
-| `mocks` | `{}` | mock LLM SDKs for the step: `[openai, anthropic]`, or with options ([mocks.md](mocks.md)) |
+| `mocks` | `{}` | mock SDKs for the step: LLMs `[openai, anthropic]`, brokers `[alpaca]`, `[ccxt]`, `[ib_async]` (also `import ib_insync`), or with options ([mocks.md](mocks.md), [brokers](mocks.md#brokers)) |
 | `artifacts` | `[]` | globs copied into the run folder as evidence |
 | `expect` | `{}` | see below |
 | `continue_on_failure` | `false` | keep going to the next step even if this one fails |
