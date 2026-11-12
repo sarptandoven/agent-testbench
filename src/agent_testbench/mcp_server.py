@@ -192,6 +192,21 @@ async def plans(project_dir: str = ".") -> str:
     return _text(*await _cli(project_dir, ["plans"]))
 
 
+@server.tool(description="Check a project in one call, with or without a testbench.yaml - a good first call in a "
+                         "project new to you. With a testbench.yaml: every plan that is free and needs no approval runs "
+                         "now, and each other plan is listed with its worst case and the command a person runs for it; "
+                         "nothing that costs money starts. With none: what `testbench init` would set up there - a test "
+                         "suite (pytest, npm test, go test, cargo), notebooks, a web app - runs on this machine for "
+                         "free, as ordinary runs with proof records (get_report, diff_runs and the rest work there "
+                         "afterwards). Returns a line per plan, the report of each failure, the run ids and the next "
+                         "step; a plan whose tool is missing here is skipped with the command that installs it. plans: "
+                         "only these plan names. as_json=true returns the summary as data.")
+async def check_project(plans: list[str] | None = None, project_dir: str = ".", as_json: bool = False,
+                        ctx: Context = None) -> str:
+    argv = ["check", *(f"--plan={_name(p, 'plan')}" for p in plans or []), *(["--json"] if as_json else [])]
+    return _text(*await _cli(project_dir, argv, on_line=_progress(ctx)))
+
+
 @server.tool(description="Recipes: proven starting points for testbench.yaml by goal (pytest, notebook-colab, "
                          "pytorch-train, hf-finetune, web-app, llm-eval, docker-sandbox, ssh-gpu-box, data-pipeline), "
                          "each a ladder of plans - free here first, a short check on the target hardware, then the full "

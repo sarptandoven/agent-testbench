@@ -355,6 +355,8 @@ def after_run(root: Path, run_dir: Path) -> None:
     """At the end of every run: export it where testbench.yaml's `export:` says. Never raises, never waits on a
     tracker: csv and jsonl now, MLflow and W&B in a background process (at most BACKGROUND_LIMIT seconds)."""
     try:
+        if not (Path(root) / C.CONFIG_NAME).is_file():
+            return                                       # a folder `testbench check` ran in: no export: section
         raw = yaml.safe_load((Path(root) / C.CONFIG_NAME).read_text()) or {}
         if not isinstance(raw, dict) or not raw.get("export"):
             return                                       # no exports: nothing to load, nothing to log

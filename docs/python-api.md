@@ -31,6 +31,13 @@ run.images                               # evidence plots and screenshots, as pa
 tb.verify(run.id)["ok"]                  # the evidence still matches the hashes in the report
 ```
 
+`tb.check()` is `testbench check`: every plan that is free and needs no approval runs (the others are listed with
+their worst case, never launched), and it returns the summary `testbench check --json` prints - each plan's
+`status`, `run` and why it did not run, the `runs`, `next` and `exit_code` (`plans=[...]` picks some,
+`on_line=print` shows each plan's line). In a folder with no testbench.yaml, `from agent_testbench.api import
+check; check("path")` runs the plans `testbench init` would write there, on this machine; `Testbench("path")` works
+in that folder afterwards.
+
 `tb.run(plan, wait=0)` returns at once; then `run.wait(timeout)` follows it (`on_line=print` shows progress) and
 `run.cancel()` stops it, here and on the remote machine. `tb.runs(n)` lists the latest runs and `tb.get_run(id)`
 finds one (an id, a unique prefix, or the latest); a `Run` reads its state from disk each time, so it also follows

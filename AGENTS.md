@@ -50,6 +50,10 @@
   a command) become the long form there (`config.long_form`), so nothing downstream sees them.
   `schema/testbench.schema.json` is its JSON Schema for editors (`testbench schema`): a new key needs an entry
   there too (tests/test_schema.py fails otherwise).
+- First runs: `check.py` (`testbench check`: every free plan, or with no testbench.yaml the plans `scaffold.detect`
+  finds, run here; the record `.testbench/check.json` is the folder's config then, through `config.checked`, which
+  reads only local plans from it - never a budget). `executor.step_path`: from uvx, uv tool or pipx, steps get the
+  project's `python`.
 - Plans for LLM apps: `mocks.py` and `mock_clients/` (the mock `openai` / `anthropic` packages a step's `mocks:` puts
   first on PYTHONPATH; they never touch the network). Notebooks: `notebook.py` (forms, papermill parameters,
   percent-format .py, kernels).

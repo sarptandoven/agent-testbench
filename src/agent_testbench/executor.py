@@ -197,6 +197,37 @@ def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_e
     return result
 
 
+def tool_environment() -> str | None:
+    """The kind of environment made only for testbench that it runs from - uvx, uv tool or pipx - which holds none of
+    the project's packages (not pytest either); None when it is installed like any other package."""
+    prefix = Path(sys.prefix)
+    if sys.prefix == sys.base_prefix:
+        return None
+    if (prefix / "uv-receipt.toml").is_file():
+        return "uv tool"
+    if (prefix / "pipx_metadata.json").is_file():
+        return "pipx"
+    return "uvx" if re.fullmatch(r"archive-v\d+", prefix.parent.name) else None     # uvx: an environment in uv's cache
+
+
+def step_path(project: Path, environ: dict | None = None) -> str:
+    """The PATH a step gets. The folder of the Python that runs testbench comes first, so `python` and `testbench` in a
+    step mean the environment testbench is installed in - unless that is a tool environment of its own (uvx, uv tool,
+    pipx): then `python` is the project's (an activated virtualenv, else its .venv or venv, else the one on PATH) and
+    testbench's folder goes last, where `testbench` is still found."""
+    environ = os.environ if environ is None else environ
+    own, path = str(Path(sys.executable).parent), environ.get("PATH", "")
+    if not tool_environment():
+        return os.pathsep.join([own, path])
+    norm = lambda p: os.path.normcase(os.path.abspath(p))                           # noqa: E731
+    rest = [p for p in path.split(os.pathsep) if p and norm(p) != norm(own)]       # uvx put it first
+    bin_dir = "Scripts" if os.name == "nt" else "bin"
+    active = environ.get("VIRTUAL_ENV")
+    venv = [] if active and norm(active) != norm(sys.prefix) else \
+        [str(Path(project) / d / bin_dir) for d in (".venv", "venv") if (Path(project) / d / "pyvenv.cfg").is_file()]
+    return os.pathsep.join(venv[:1] + rest + [own])
+
+
 def execute_plan(plan: dict, *, project_dir: str | Path, run_dir: str | Path, workdir: str | Path | None = None,
                  meta: dict | None = None, on_progress=None) -> dict:
     """Run every step in order; stop at the first failure unless the step says continue_on_failure."""
@@ -207,9 +238,8 @@ def execute_plan(plan: dict, *, project_dir: str | Path, run_dir: str | Path, wo
     report = {"testbench_version": __version__, **(meta or {}), "status": "running", "started": time.time(),
               "steps": [], "workdir": str(workdir), "environment": environment()}
     sampler = GpuSampler()
-    base_env = {**os.environ, "TESTBENCH_RUN_DIR": str(run_dir), "TESTBENCH_PROJECT_DIR": str(project)}
-    # steps see the Python that runs testbench first, so `python` and `testbench` in a step mean this environment
-    base_env["PATH"] = os.pathsep.join([str(Path(sys.executable).parent), base_env.get("PATH", "")])
+    base_env = {**os.environ, "TESTBENCH_RUN_DIR": str(run_dir), "TESTBENCH_PROJECT_DIR": str(project),
+                "PATH": step_path(project)}
     stop_reason = None
 
     def save():

@@ -387,6 +387,9 @@ steps/NN-name/    log.txt, result.json, executed.ipynb, cellNN_imageK.png, downl
 
 `.testbench/ledger.jsonl` records every launch (worst case) and finish (estimated cost);
 `.testbench/NOTES.md` is the lab notebook (`testbench note`), the one file there worth committing.
+`.testbench/check.json` is what `testbench check` found in a folder with no testbench.yaml, the plans `init`
+would write there; commands in that folder read their plans from it (only plans that run on this machine, with
+the default budget) until a testbench.yaml takes over.
 
 ## Commands
 
@@ -398,14 +401,14 @@ rnu smoke`: did you mean `testbench run smoke`?), words in the wrong order get t
 run`: the command comes first), a mistyped plan, session, recipe, client or example name gets the closest one, and
 so does a file that is not there (`testbench lint trian.ipynb`: did you mean `testbench lint train.ipynb`?). A value
 an option cannot take gets an example of that option. `--json` and `--format json` are the same on every command
-with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`); every session command takes `-s NAME`
+with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `check`); every session command takes `-s NAME`
 (also `--session NAME`).
 
 | command | what it does | exit codes besides 2 |
 |---|---|---|
 | **start** | | |
 | `demo [NAME] [DIR]`, `demo --list` | copy an example project to a new folder and run its free plan | 0 the plan did what the example expects (the `test-suite` plan fails on purpose), 1 it did not, 3 still running |
-| `check` | a zero-config run of this project ([getting started](getting-started.md)) | `testbench help check` |
+| `check [--plan NAME]... [--json]` | run every plan that is free and needs no approval, and list each other plan with its worst case and `testbench run NAME`; with no testbench.yaml, run the plans `init` would write for what it finds, on this machine, keeping what it found in `.testbench/check.json` (so `report`, `runs`, `verify`, `ui` and `diff` work there); a plan whose tool is missing is skipped with the command that installs it | 0 every plan that ran passed, 1 one failed, 2 nothing to check, 3 still running |
 | `doctor` | what this machine can run; each `no` line says what to do | 0, whatever it found |
 | **prove it with a plan** | | |
 | `plans` | the plans, their hardware and worst case | 0 |
