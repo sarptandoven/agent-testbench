@@ -9,19 +9,17 @@ idle timeout). Stopping records what it cost.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
-import signal
 import subprocess
 import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import budget, config as C, notebook as NB
-from .session_backends import SessionError, backend_for
+from . import backends as B, budget, config as C, notebook as NB, procs
+from .session_backends import SessionError
 
 ACTIVE = ("starting", "ready")
 
@@ -31,16 +29,15 @@ def sessions_dir(root: Path) -> Path:
 
 
 def read(sdir: Path) -> dict:
-    return json.loads((Path(sdir) / "state.json").read_text())
+    return json.loads(procs.read_text_retry(Path(sdir) / "state.json"))
 
 
 def write(sdir: Path, **changes) -> dict:
     p = Path(sdir) / "state.json"
-    state = json.loads(p.read_text()) if p.exists() else {}
-    state.update(changes)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=1))
-    tmp.replace(p)
+    with procs.exclusive(Path(sdir) / ".state.lock"):          # the CLI, the supervisor and the MCP server write it
+        state = json.loads(procs.read_text_retry(p)) if p.exists() else {}
+        state.update(changes)
+        procs.write_text_atomic(p, json.dumps(state, indent=1))
     return state
 
 
@@ -54,7 +51,8 @@ def resolve(root: Path, name: str | None) -> Path:
     if name:
         sdir = sessions_dir(root) / name
         if not (sdir / "state.json").exists():
-            raise SessionError(f"No session named {name!r}. `testbench session list` shows them.")
+            raise SessionError(f"No session named {name!r}{C.near(name, [s.name for s in all_sessions(root)])}. "
+                               "`testbench session list` shows them.")
         return sdir
     active = [s for s in all_sessions(root) if read(s).get("status") in ACTIVE]
     if len(active) == 1:
@@ -66,7 +64,7 @@ def resolve(root: Path, name: str | None) -> Path:
 
 def _backend(root: Path, cfg: dict, sdir: Path):
     state = read(sdir)
-    return backend_for(state["backend"])(root, cfg, sdir, state)
+    return B.get(state["backend"]).session_class()(root, cfg, sdir, state)
 
 
 def hardware(cfg: dict, backend: str | None, gpu: str | None) -> dict:
@@ -83,10 +81,16 @@ def start(root: Path, cfg: dict, name: str = "main", backend: str | None = None,
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,30}", name):
         raise SessionError("session names use letters, digits, - or _ (up to 31 characters)")
     hw = hardware(cfg, backend, gpu)
-    idle = float(idle_minutes or cfg["sessions"]["idle_minutes"])
-    longest = float(max_minutes or cfg["sessions"]["max_minutes"])
-    if hw["backend"] == "modal" and longest > 24 * 60:
-        raise SessionError("a Modal session can last at most 24 hours (max_minutes <= 1440)")
+    idle = idle_minutes or cfg["sessions"]["idle_minutes"]
+    longest = max_minutes or cfg["sessions"]["max_minutes"]
+    for what, v in (("idle_minutes", idle), ("max_minutes", longest)):
+        if not C.number(v, positive=True):
+            raise SessionError(f"{what} must be a positive number of minutes, not {v!r}")
+    idle, longest = float(idle), float(longest)
+    most = B.get(hw["backend"]).max_session_minutes
+    if most and longest > most:
+        raise SessionError(f"a {hw['backend']} session can last at most {C.counted(most / 60, 'hour')} "
+                           f"(max_minutes <= {most:g})")
     sdir = sessions_dir(root) / name
     if (sdir / "state.json").exists():
         old = read(sdir)
@@ -95,21 +99,28 @@ def start(root: Path, cfg: dict, name: str = "main", backend: str | None = None,
         archive = sessions_dir(root) / ".old" / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}"
         archive.parent.mkdir(parents=True, exist_ok=True)
         sdir.rename(archive)
-    ok, message, est = budget.check(cfg, budget.estimate(cfg, hw, longest, f"session {name}"), approve,
-                                    "Lower max_minutes")
-    if not ok:
+    with budget.launching():
+        ok, message, est = budget.check(cfg, budget.estimate(cfg, hw, longest, f"session {name}"), approve,
+                                        "Lower max_minutes")
+        if ok:
+            (sdir / "outputs").mkdir(parents=True)
+            now = time.time()
+            state = write(sdir, name=name, backend=hw["backend"], gpu=hw["gpu"], cpu=hw["cpu"],
+                          memory_gb=hw["memory_gb"], status="starting", created=now, idle_minutes=idle,
+                          max_minutes=longest, usd_per_minute=est["usd_per_minute"],
+                          worst_case_usd=est["worst_case_usd"],
+                          secrets=list(secrets or cfg["sessions"].get("secrets") or []), exec_count=0, handles={},
+                          budget_message=message)
+            budget.record(root, {"event": "launch", "run": f"session:{name}:{int(now)}", "plan": f"session {name}",
+                                 "backend": hw["backend"], "worst_case_usd": est["worst_case_usd"]})
+    if not ok:                                         # told outside the launch lock, so no launch waits on it
+        from . import notify
+        how = " ".join(["testbench session start", name] + (["--backend", hw["backend"]] if backend else [])
+                       + (["--gpu", hw["gpu"]] if hw["gpu"] else []) + ["--max-minutes", f"{longest:g}", "--approve"])
+        notify.approval_needed(root, cfg, message, est, how)
         raise SessionError(message)
-    (sdir / "outputs").mkdir(parents=True)
-    now = time.time()
-    state = write(sdir, name=name, backend=hw["backend"], gpu=hw["gpu"], cpu=hw["cpu"], memory_gb=hw["memory_gb"],
-                  status="starting", created=now, idle_minutes=idle, max_minutes=longest,
-                  usd_per_minute=est["usd_per_minute"], worst_case_usd=est["worst_case_usd"],
-                  secrets=list(secrets or cfg["sessions"].get("secrets") or []), exec_count=0, handles={},
-                  budget_message=message)
-    budget.record(root, {"event": "launch", "run": f"session:{name}:{int(now)}", "plan": f"session {name}",
-                         "backend": hw["backend"], "worst_case_usd": est["worst_case_usd"]})
     write(sdir, ledger_id=f"session:{name}:{int(now)}")
-    be = backend_for(hw["backend"])(root, cfg, sdir, state)
+    be = B.get(hw["backend"]).session_class()(root, cfg, sdir, state)
     try:
         handles = be.start()
     except BaseException as exc:
@@ -156,8 +167,7 @@ def stop(root: Path, cfg: dict, sdir: Path, reason: str = "stopped by request") 
 @contextmanager
 def _in_use(sdir: Path, timeout: float):
     """One command at a time per session; the supervisor sees the session as busy until it ends."""
-    with open(sdir / ".lock", "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with procs.exclusive(sdir / ".lock"):
         write(sdir, busy_until=time.time() + timeout + 300, last_used=time.time())
         try:
             yield
@@ -194,15 +204,15 @@ def exec_code(root: Path, cfg: dict, sdir: Path, code: str, timeout: float = 600
 
 
 def exec_cells(root: Path, cfg: dict, sdir: Path, nb_path: Path, spec, params: dict, timeout: float) -> list[dict]:
-    """Run a notebook's code cells (numbered from 1) in the session, with form fields set; stop at the first error."""
-    import nbformat
-    nb = nbformat.read(str(nb_path), as_version=4)
-    code = [c.source for c in nb.cells if c.cell_type == "code"]
-    code = NB.set_params(code, params or {})
+    """Run a notebook's code cells (numbered from 1) in the session, with params set; stop at the first error."""
+    nb = NB.read(nb_path)
+    if spec and params and NB.language(nb) == "python":
+        NB.check_cells_set_params(nb, params, C.parse_cells(spec))
+    code = NB.cell_sources(nb, params or {})
     numbers = C.parse_cells(spec) if spec else list(range(1, len(code) + 1))
     bad = [x for x in numbers if x > len(code)]
     if bad:
-        raise SessionError(f"cells {bad} asked for, but {nb_path.name} has {len(code)} code cells")
+        raise SessionError(f"cells {bad} asked for, but {nb_path.name} has {C.counted(len(code), 'code cell')}")
     out = []
     for n in numbers:
         res = exec_code(root, cfg, sdir, code[n - 1], timeout, label=f"{nb_path.name} cell {n}")
@@ -294,5 +304,5 @@ def supervise(sdir: Path) -> None:
 
 
 if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "supervise":
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    procs.on_stop(lambda *_: sys.exit(0))
     supervise(Path(sys.argv[2]))

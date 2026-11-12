@@ -1,0 +1,25 @@
+# Recipe pytest: the project's own test suite - every test passes, and as many run as there should be.
+#
+# Proves: the suite ran in this run (pytest's JUnit report must be written now; one left over from an earlier run
+#   fails), no test failed or errored - the report names the first failing tests and their messages - and at least as
+#   many tests ran as you have, so a suite that silently collects nothing (a renamed folder, an import error at
+#   collection) fails instead of passing.
+# FILL IN: `tests: ">= N"` with the number of tests you have now (`python -m pytest --collect-only -q | tail -1`), and
+#   the pytest arguments your project needs (a folder, `-m "not slow"`).
+# `python` in a step is the Python running agent-testbench; if the project's packages live in another environment,
+#   run that one instead (`.venv/bin/python -m pytest ...`).
+# Costs: nothing; it runs on this machine. For tests of code nobody has reviewed yet, see the docker-sandbox recipe.
+
+plans:
+  tests:
+    backend: local
+    description: every test passes, counted from pytest's own JUnit report
+    steps:
+      - name: pytest
+        run: python -m pytest -q --junitxml=junit.xml       # FILL IN: your arguments, e.g. tests/ -m "not slow"
+        max_minutes: 15
+        artifacts: [junit.xml]
+        expect:
+          exit_code: 0                       # pytest exits 1 when a test fails; the junit check says which
+          junit: {path: junit.xml, failures: 0, errors: 0, tests: ">= 1"}    # FILL IN: ">= N", the tests you have now
+          duration: {minutes: "<= 10"}       # a suite that suddenly takes much longer is a finding too

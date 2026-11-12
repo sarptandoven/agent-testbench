@@ -1,5 +1,12 @@
 name: tests
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]           # other branches are tested through their pull request (one run per commit, not two)
+  pull_request:
+  workflow_dispatch:
+concurrency:                   # a newer commit cancels the runs it replaces
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -8,6 +15,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python: ["3.10", "3.12"]
+        include:
+          - os: windows-latest
+            python: "3.12"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,4 +35,13 @@ jobs:
           python -m pip install -e ".[dev]" scikit-learn==1.5.2 matplotlib==3.9.2
           python -m playwright install --with-deps chromium
       - name: tests
-        run: python -m pytest -q -p no:warnings
+        # in parallel: a pytest-xdist worker per vCPU (-n auto counts physical cores, which can be half of them; the
+        # tests mostly wait on processes they start); tests marked serial (Docker) still run one at a time. Windows
+        # runs them one by one: there, tests side by side share one console, and the console break one test sends
+        # to stop its processes is not yet shown to stay out of the others'.
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then python -m pytest -q -p no:warnings
+          else python -m pytest -q -p no:warnings -n logical; fi
+        env:
+          PYTHONUTF8: "1"           # Windows: in-process tests too (the CLI switches itself)

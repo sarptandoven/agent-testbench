@@ -1,0 +1,599 @@
+# agent-testbench as a GitHub Action: run a plan from testbench.yaml in CI and show reviewers what it proved.
+# Docs: docs/github-action.md. Inputs reach the scripts only through env: (never ${{ }} inside run:), so a value
+# cannot turn into shell code. The scripts avoid bash 4 features, for macOS runners' bash 3.2.
+name: agent-testbench
+description: Run a testbench.yaml plan; get its report as the job summary, JUnit results, the evidence as an artifact and a pass/fail check.
+author: Sarp Tandoven
+branding:
+  icon: check-square
+  color: green
+
+inputs:
+  plan:
+    description: The plan in testbench.yaml to run (`testbench plans` lists them).
+    required: true
+  project-dir:
+    description: The folder that holds testbench.yaml, relative to the workspace or absolute. Spaces are fine.
+    required: false
+    default: "."
+  python-version:
+    description: The Python version actions/setup-python installs.
+    required: false
+    default: "3.12"
+  setup-python:
+    description: false skips actions/setup-python and uses the python already on PATH (an activated virtualenv, for example).
+    required: false
+    default: "true"
+  install:
+    description: >-
+      What to pip install for the testbench command. Empty (the default): agent-testbench from this action's own
+      folder, so the action and the CLI always match (with the web extra when playwright is true, and the modal
+      extra when the plan runs on Modal). A pip spec such as `agent-testbench[all]==0.2.0` installs that instead.
+      `none` installs nothing and uses the testbench already on PATH.
+    required: false
+    default: ""
+  extra-pip:
+    description: >-
+      Packages the project needs, as pip arguments separated by spaces or new lines, installed in the project folder
+      together with testbench: `scikit-learn==1.5.2 matplotlib==3.9.2`, or `-r requirements.txt`.
+    required: false
+    default: ""
+  approve:
+    description: >-
+      false (the default): a plan whose worst-case cost is above the project's approval threshold
+      (budget.ask_above_usd) is refused, and the step says why. true passes --approve: whoever commits it to the
+      workflow approves that cost in advance, for every run of the workflow. It never lifts max_run_usd or the day
+      limits.
+    required: false
+    default: "false"
+  wait-minutes:
+    description: >-
+      How long to follow the run. Empty (the default): the plan's own time limit (the sum of its steps'
+      max_minutes) plus 15 minutes for start-up. A run still going after this is cancelled.
+    required: false
+    default: ""
+  fail-on-failure:
+    description: >-
+      true (the default): the step fails when the plan does not pass. false: it only warns, and the status output
+      says what happened. A run that was refused or could not start fails the step either way.
+    required: false
+    default: "true"
+  artifact-name:
+    description: The name of the evidence artifact (default testbench-<plan>). It must be unique in the workflow run, so set it per matrix entry.
+    required: false
+    default: ""
+  playwright:
+    description: true installs headless Chromium (and its system libraries on Linux) for the plan's web steps.
+    required: false
+    default: "false"
+  comment:
+    description: >-
+      true: on a pull request, post the verdict, what failed, the numbers checked and how they moved since the base
+      branch's latest run, the cost and links as one comment per plan, edited on later pushes. Needs
+      `pull-requests: write` (and `actions: read` for the comparison). A fork's read-only token is skipped with a
+      notice; a comment never fails the job.
+    required: false
+    default: "false"
+  attest:
+    description: >-
+      true: sign report.json and every evidence file with GitHub's artifact attestations
+      (actions/attest-build-provenance), so `gh attestation verify` shows they came from this workflow at this
+      commit. Needs `id-token: write` and `attestations: write`; skipped with a notice on pull requests from forks.
+    required: false
+    default: "false"
+  github-token:
+    description: The token for the comment and the attestation (the job's GITHUB_TOKEN by default). Never printed.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  status:
+    description: "passed, failed, error or cancelled (the run's own status), or refused: the run did not start (over budget, needs approval, no such plan, testbench.yaml invalid)."
+    value: ${{ steps.files.outputs.status }}
+  run-id:
+    description: The run's id (empty when it did not start).
+    value: ${{ steps.files.outputs.run-id }}
+  run-dir:
+    description: The run's folder, .testbench/runs/<run-id>, as an absolute path; the artifact holds the same files.
+    value: ${{ steps.files.outputs.run-dir }}
+  report-path:
+    description: The run's report.md (absolute path).
+    value: ${{ steps.files.outputs.report-path }}
+  html-path:
+    description: The run's report.html, one page with the evidence images (absolute path).
+    value: ${{ steps.files.outputs.html-path }}
+  junit-path:
+    description: The run's junit.xml, a test case per step, for test reporters (absolute path).
+    value: ${{ steps.files.outputs.junit-path }}
+  summary-path:
+    description: The markdown written to the job summary (absolute path), for a pull request comment for example. Set even when the run did not start.
+    value: ${{ steps.files.outputs.summary-path }}
+  cost-usd:
+    description: What the run cost in US dollars (time x price, as in the report), such as 0.0123; 0.0000 when it did not start.
+    value: ${{ steps.files.outputs.cost-usd }}
+  artifact-url:
+    description: A link to the uploaded evidence artifact.
+    value: ${{ steps.upload.outputs.artifact-url }}
+  comment-url:
+    description: "With comment: true, a link to the pull request comment; empty when none was posted (not a pull request, a fork, no permission)."
+    value: ${{ steps.comment.outputs.comment-url }}
+  attestation-url:
+    description: "With attest: true, a link to the attestation of report.json and the evidence; empty when none was made."
+    value: ${{ steps.attested.outputs.attestation-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: check the inputs
+      id: prep
+      shell: bash
+      env:
+        PLAN: ${{ inputs.plan }}
+        PROJECT_DIR: ${{ inputs.project-dir }}
+        APPROVE: ${{ inputs.approve }}
+        FAIL_ON_FAILURE: ${{ inputs.fail-on-failure }}
+        PLAYWRIGHT: ${{ inputs.playwright }}
+        SETUP_PYTHON: ${{ inputs.setup-python }}
+        WAIT_MINUTES: ${{ inputs.wait-minutes }}
+        COMMENT: ${{ inputs.comment }}
+        ATTEST: ${{ inputs.attest }}
+      run: |
+        set -euo pipefail
+        bad=0
+        flag() {    # flag NAME VALUE: write NAME=true|false to the step's outputs, or say what is wrong
+          case "$2" in
+            true|True|TRUE) echo "$1=true" >> "$GITHUB_OUTPUT" ;;
+            false|False|FALSE) echo "$1=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error title=agent-testbench::input $1 must be true or false, not '$2'"; bad=1 ;;
+          esac
+        }
+        flag approve "$APPROVE"
+        flag fail-on-failure "$FAIL_ON_FAILURE"
+        flag playwright "$PLAYWRIGHT"
+        flag setup-python "$SETUP_PYTHON"
+        flag comment "$COMMENT"
+        flag attest "$ATTEST"
+        if [ -z "$PLAN" ]; then
+          echo "::error title=agent-testbench::input plan is required: the name of a plan in testbench.yaml"
+          bad=1
+        fi
+        case "$WAIT_MINUTES" in
+          *[!0-9.]* | *.*.* | .)
+            echo "::error title=agent-testbench::wait-minutes must be a number of minutes, such as 30 or 1.5, not '$WAIT_MINUTES'"
+            bad=1 ;;
+        esac
+        cd "${GITHUB_WORKSPACE:-$PWD}"
+        project=""
+        if [ -d "$PROJECT_DIR" ]; then
+          project="$(cd "$PROJECT_DIR" && pwd)"
+        else
+          echo "::error title=agent-testbench::project-dir '$PROJECT_DIR' is not a folder (a relative path starts at $PWD; check out the repository first)"
+          bad=1
+        fi
+        work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/testbench-action.XXXXXX")"
+        { echo "project=$project"; echo "work=$work"; } >> "$GITHUB_OUTPUT"
+        exit "$bad"
+
+    - name: set up Python
+      if: ${{ steps.prep.outputs.setup-python == 'true' }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: install agent-testbench
+      id: install
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PROJECT: ${{ steps.prep.outputs.project }}
+        PLAN: ${{ inputs.plan }}
+        INSTALL: ${{ inputs.install }}
+        EXTRA_PIP: ${{ inputs.extra-pip }}
+        APPROVE: ${{ steps.prep.outputs.approve }}
+        PLAYWRIGHT: ${{ steps.prep.outputs.playwright }}
+      run: |
+        set -euo pipefail
+        cd "$PROJECT"
+        py="$(command -v python || command -v python3 || true)"
+        if [ -z "$py" ]; then
+          echo "::error title=agent-testbench::no python on PATH: leave setup-python on, or set Python up before this step"
+          exit 1
+        fi
+        echo "python=$py" >> "$GITHUB_OUTPUT"
+        web=""
+        if [ "$PLAYWRIGHT" = true ]; then web="[web]"; fi
+        pkgs=()
+        case "$INSTALL" in
+          "") pkgs=("$ACTION_PATH$web") ;;
+          none|false) ;;
+          *) read -r -d '' -a pkgs <<< "$INSTALL" || true ;;
+        esac
+        if [ -n "$EXTRA_PIP" ]; then
+          extra=()
+          read -r -d '' -a extra <<< "$EXTRA_PIP" || true
+          pkgs+=(${extra[@]+"${extra[@]}"})
+        fi
+        if [ ${#pkgs[@]} -gt 0 ]; then
+          echo "pip install ${pkgs[*]}"
+          "$py" -m pip install --disable-pip-version-check "${pkgs[@]}"
+        fi
+        if ! command -v testbench > /dev/null 2>&1; then
+          echo "::error title=agent-testbench::the testbench command is not on PATH (install: '${INSTALL}'); install agent-testbench into the python on PATH, or leave install empty"
+          exit 1
+        fi
+        testbench --version
+        approve=()
+        if [ "$APPROVE" = true ]; then approve=(--approve); fi
+        # Which backend the plan runs on and its time limit; a plan that will be refused needs nothing more.
+        est="$(testbench estimate "$PLAN" --json ${approve[@]+"${approve[@]}"} 2> /dev/null || true)"
+        info="$(printf '%s' "$est" | "$py" -c '
+        import json, sys
+        try:
+            d = json.load(sys.stdin)
+        except ValueError:
+            d = {}
+        print(d.get("backend") or "-", d.get("max_minutes") or 0, "yes" if d.get("allowed") else "no")')"
+        read -r backend minutes allowed <<< "$info" || true
+        { echo "backend=$backend"; echo "plan-minutes=$minutes"; } >> "$GITHUB_OUTPUT"
+        if [ "$backend" = modal ] && [ "$allowed" = yes ] && ! "$py" -c "import modal" > /dev/null 2>&1; then
+          if [ -z "$INSTALL" ]; then
+            "$py" -m pip install --disable-pip-version-check "$ACTION_PATH[modal]"
+          else
+            echo "::warning title=agent-testbench::plan $PLAN runs on Modal but the modal package is not installed; use the modal extra in install: (agent-testbench[modal])"
+          fi
+        fi
+        if [ "$PLAYWRIGHT" = true ]; then
+          if ! "$py" -c "import playwright" > /dev/null 2>&1; then
+            echo "::error title=agent-testbench::playwright is true but the playwright package is not installed; use the web extra in install: (agent-testbench[web])"
+            exit 1
+          fi
+          if [ "$(uname -s)" = Linux ]; then
+            "$py" -m playwright install --with-deps chromium
+          else
+            "$py" -m playwright install chromium
+          fi
+        fi
+
+    - name: run the plan
+      id: run
+      shell: bash
+      env:
+        PROJECT: ${{ steps.prep.outputs.project }}
+        WORK: ${{ steps.prep.outputs.work }}
+        PLAN: ${{ inputs.plan }}
+        APPROVE: ${{ steps.prep.outputs.approve }}
+        WAIT_MINUTES: ${{ inputs.wait-minutes }}
+        PLAN_MINUTES: ${{ steps.install.outputs.plan-minutes }}
+        PY: ${{ steps.install.outputs.python }}
+        PYTHONUNBUFFERED: "1"
+      run: |
+        # Not -e: the run's exit code is a result to record (0 passed, 1 failed, 2 refused, 3 still running).
+        set +e -uo pipefail
+        cd "$PROJECT" || exit 1
+        log="$WORK/run.log"
+        : > "$log"
+        minutes="$WAIT_MINUTES"
+        if [ -z "$minutes" ]; then
+          minutes="$("$PY" -c 'import sys; m = float(sys.argv[1] or 0); print(round(m + 15, 2) if m > 0 else 60)' "$PLAN_MINUTES" 2> /dev/null || echo 60)"
+        fi
+        seconds="$("$PY" -c '
+        import sys
+        m = float(sys.argv[1])
+        if not m > 0:
+            sys.exit(1)
+        print(int(m * 60))' "$minutes" 2> /dev/null)"
+        if [ -z "$seconds" ]; then
+          echo "wait-minutes must be a number of minutes above 0, not '$WAIT_MINUTES'" | tee -a "$log"
+          code=2
+        else
+          args=(run "$PLAN" --wait "$seconds")
+          if [ "$APPROVE" = true ]; then args+=(--approve); fi
+          echo "testbench ${args[*]}    (in $PROJECT; following it for up to $minutes min)"
+          testbench "${args[@]}" 2>&1 | tee -a "$log"
+          code="${PIPESTATUS[0]}"
+        fi
+        run_id="$(sed -n 's/^\[testbench\] run \([^ ]*\) started.*/\1/p' "$log" | head -n 1)"
+        run_dir=""
+        if [ -n "$run_id" ]; then        # .testbench/ sits next to testbench.yaml, here or in a parent folder
+          d="$PROJECT"
+          while :; do
+            if [ -d "$d/.testbench/runs/$run_id" ]; then run_dir="$d/.testbench/runs/$run_id"; break; fi
+            if [ "$d" = / ]; then break; fi
+            d="$(dirname "$d")"
+          done
+        fi
+        timed_out=false
+        if [ "$code" = 3 ] && [ -n "$run_id" ]; then
+          timed_out=true
+          echo "::warning title=agent-testbench::plan $PLAN was still running after $minutes min, so the action cancels it (raise wait-minutes to follow it longer)"
+          testbench cancel "$run_id" 2>&1 | tee -a "$log"
+        fi
+        {
+          echo "exit-code=$code"
+          echo "run-id=$run_id"
+          echo "run-dir=$run_dir"
+          echo "timed-out=$timed_out"
+          echo "wait-minutes=$minutes"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: cancel the run (the workflow was cancelled)
+      if: ${{ cancelled() }}
+      shell: bash
+      env:
+        PROJECT: ${{ steps.prep.outputs.project }}
+        WORK: ${{ steps.prep.outputs.work }}
+      run: |
+        set -uo pipefail
+        run_id="$(sed -n 's/^\[testbench\] run \([^ ]*\) started.*/\1/p' "$WORK/run.log" 2> /dev/null | head -n 1)"
+        if [ -n "$run_id" ] && cd "$PROJECT"; then
+          testbench cancel "$run_id" || true
+        fi
+
+    - name: write the summary, JUnit and HTML
+      id: files
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        PROJECT: ${{ steps.prep.outputs.project }}
+        WORK: ${{ steps.prep.outputs.work }}
+        PLAN: ${{ inputs.plan }}
+        PY: ${{ steps.install.outputs.python }}
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+        RUN_ID: ${{ steps.run.outputs.run-id }}
+        RUN_DIR: ${{ steps.run.outputs.run-dir }}
+        TIMED_OUT: ${{ steps.run.outputs.timed-out }}
+        WAIT_MINUTES: ${{ steps.run.outputs.wait-minutes }}
+      run: |
+        set -uo pipefail
+        if [ -n "$RUN_DIR" ] && [ -f "$RUN_DIR/report.json" ]; then
+          (cd "$PROJECT" && testbench report "$RUN_ID" --format junit -o "$RUN_DIR/junit.xml") \
+            || echo "::warning title=agent-testbench::could not write junit.xml (the output above says why)"
+          (cd "$PROJECT" && testbench report "$RUN_ID" --format html -o "$RUN_DIR/report.html") \
+            || echo "::warning title=agent-testbench::could not write report.html (the output above says why)"
+        fi
+        py="${PY:-$(command -v python3 || command -v python)}"
+        "$py" - << 'PY'
+        import json, os, re, uuid
+        from pathlib import Path
+
+        E = lambda k: os.environ.get(k) or ""
+        plan, run_id, code = E("PLAN"), E("RUN_ID"), E("EXIT_CODE")
+        run_dir = Path(E("RUN_DIR")) if E("RUN_DIR") else None
+        work = Path(E("WORK") or ".")
+        log = (work / "run.log").read_text(errors="replace") if (work / "run.log").is_file() else ""
+
+
+        def load(p):
+            try:
+                return json.loads(p.read_text())
+            except (OSError, ValueError):
+                return None
+
+
+        def tail(text, n=40):
+            return "\n".join(text.rstrip().splitlines()[-n:]) or "(no output)"
+
+
+        def last_line(text):
+            return next((x.strip() for x in reversed(text.splitlines()) if x.strip()), "")
+
+
+        def first_problem(rep):
+            for s in rep.get("steps", []):
+                if s.get("status") == "passed":
+                    continue
+                bad = [c for c in s.get("expectations") or [] if not c.get("ok")]
+                if bad:
+                    return f"{s['name']}: expected {bad[0]['check']}: {bad[0]['detail']}"
+                err = s.get("error") or {}
+                if err:
+                    return f"{s['name']}: {err.get('ename')}: {str(err.get('evalue', ''))[:300]}"
+                return f"{s['name']}: {s.get('status')}"
+            return rep.get("stopped_because") or rep.get("status", "")
+
+
+        rep = load(run_dir / "report.json") if run_dir else None
+        state = load(run_dir / "state.json") if run_dir else None
+        if rep:
+            status = rep.get("status") or "error"
+        elif state:
+            status = state.get("status") or "error"
+        else:
+            status = "refused" if code == "2" else "error"
+        cost = (rep or {}).get("cost_usd")
+        cost = cost if isinstance(cost, (int, float)) else (0.0 if not run_id else None)
+        src = (rep or {}).get("source") or {}
+        timed_out = status == "cancelled" and E("TIMED_OUT") == "true"
+
+        if run_id:
+            commit = (f"commit `{src['commit'][:12]}`" + (" with uncommitted changes" if src.get("dirty") else "")
+                      if src.get("commit") else "code outside git")
+            money = f"about ${cost:.3f}" if cost is not None else "cost unknown"
+            parts = [f"**agent-testbench**: plan `{plan}` **{status}**, {money}, run `{run_id}`, {commit}.", ""]
+            if timed_out:
+                parts += [f"> Still running after {E('WAIT_MINUTES')} min (`wait-minutes`), so the action cancelled it. "
+                          "Raise `wait-minutes`, or shorten the plan.", ""]
+            md = (run_dir / "report.md").read_text(errors="replace") if (run_dir / "report.md").is_file() else ""
+            limit = 900_000                                   # GitHub keeps up to 1 MiB of summary per step
+            if md:
+                parts.append(md[:limit] + ("\n\n(cut short here; the whole report.md is in the artifact)" if len(md) > limit else ""))
+            else:
+                parts += ["No report was written. The run's output:", "", "~~~text", tail(log), "~~~"]
+            if status == "passed":
+                message = f"plan {plan} passed (run {run_id})"
+            elif timed_out:
+                message = f"plan {plan} was still running after {E('WAIT_MINUTES')} min, so the action cancelled it; raise wait-minutes"
+            else:
+                message = f"plan {plan} {status}: " + (first_problem(rep) if rep else last_line(log)) + f" (run {run_id})"
+        elif status == "refused":
+            parts = [f"**agent-testbench**: plan `{plan}` **refused**: the run did not start, so nothing was checked.", "",
+                     "~~~text", tail(log), "~~~", ""]
+            if "Needs approval" in log:
+                parts.append("To approve it here, set `approve: true` on this step: whoever commits that approves this cost "
+                             "for every run of the workflow. Or make the plan cheaper (shorter `max_minutes`, a cheaper GPU).")
+            elif "Refused:" in log:
+                parts.append("`approve: true` does not lift this limit. Make the plan cheaper (shorter `max_minutes`, a "
+                             "cheaper GPU), or have a person raise `budget:` in testbench.yaml.")
+            message = f"plan {plan} was refused: {last_line(log)}"
+        else:
+            if code:
+                why = f"testbench exited with code {code} before a run started"
+                parts = [f"**agent-testbench**: plan `{plan}` **error**: {why}. Its output:", "", "~~~text", tail(log), "~~~"]
+                message = f"{why}: {last_line(log)}"
+            else:
+                message = "the action stopped before testbench ran; the step that failed above says why"
+                parts = [f"**agent-testbench**: plan `{plan}` did not run: {message}."]
+
+        summary = "\n".join(parts).rstrip() + "\n"
+        summary_path = work / "summary.md"
+        summary_path.write_text(summary)
+        if os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+                f.write(summary)
+
+
+        def made(name):
+            return str(run_dir / name) if run_dir and (run_dir / name).is_file() else ""
+
+
+        name = re.sub(r'[":<>|*?\\/\r\n]', "-", E("ARTIFACT_NAME") or f"testbench-{plan}")
+        outputs = {"status": status, "run-id": run_id, "run-dir": str(run_dir or ""), "report-path": made("report.md"),
+                   "html-path": made("report.html"), "junit-path": made("junit.xml"), "summary-path": str(summary_path),
+                   "cost-usd": f"{cost:.4f}" if cost is not None else "", "artifact-name": name,
+                   "started": "true" if run_id else "false",
+                   "message": message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")}
+        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+            for key, value in outputs.items():
+                end = f"EOF_{uuid.uuid4().hex}"
+                f.write(f"{key}<<{end}\n{value}\n{end}\n")
+        print(f"status: {status}" + (f", run {run_id}" if run_id else "") + f"; summary: {summary_path}")
+        PY
+
+    # attest: true. The checksums of report.json and the evidence (checked against report.json first), signed by
+    # GitHub's artifact attestations; the signed bundle goes into the run folder before it is uploaded.
+    - name: list what to attest
+      id: attest-prep
+      if: ${{ !cancelled() && steps.prep.outputs.attest == 'true' }}
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PY: ${{ steps.install.outputs.python }}
+        WORK: ${{ steps.prep.outputs.work }}
+        RUN_DIR: ${{ steps.files.outputs.run-dir }}
+        SUMMARY_FILE: ${{ steps.files.outputs.summary-path }}
+      run: |
+        set -euo pipefail
+        py="${PY:-$(command -v python3 || command -v python)}"
+        "$py" "$ACTION_PATH/src/agent_testbench/github_action.py" attest-subjects
+
+    - name: attest the report and the evidence
+      id: attest
+      if: ${{ !cancelled() && steps.attest-prep.outputs.ready == 'true' }}
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8    # v4.2.2
+      with:
+        subject-checksums: ${{ steps.attest-prep.outputs.checksums }}
+        github-token: ${{ inputs.github-token }}
+        create-storage-record: "false"                # a storage record is for images pushed to a registry
+
+    - name: keep the attestation with the evidence
+      id: attested
+      if: ${{ !cancelled() && steps.attest-prep.outputs.ready == 'true' }}
+      shell: bash
+      env:
+        OUTCOME: ${{ steps.attest.outcome }}
+        ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+        BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        SUBJECTS: ${{ steps.attest-prep.outputs.subjects }}
+        RUN_DIR: ${{ steps.files.outputs.run-dir }}
+        RUN_ID: ${{ steps.files.outputs.run-id }}
+        SUMMARY_FILE: ${{ steps.files.outputs.summary-path }}
+      run: |
+        set -euo pipefail
+        if [ "$OUTCOME" != success ] || [ -z "$ATTESTATION_URL" ]; then
+          line="Attestation: none was made (the step that signs it says why, in the job log). It needs \`permissions: id-token: write\` and \`attestations: write\` on the job, and a public repository (a private one needs GitHub Enterprise Cloud)."
+          printf '\n%s\n' "$line" >> "$GITHUB_STEP_SUMMARY"
+          printf '\n%s\n' "$line" >> "$SUMMARY_FILE"
+          echo "::error title=agent-testbench::attest is true but no attestation was made: the step that signs it says why. It needs permissions id-token: write and attestations: write, and a public repository (a private one needs GitHub Enterprise Cloud)"
+          exit 1
+        fi
+        if [ -n "$BUNDLE" ] && [ -f "$BUNDLE" ]; then
+          cp "$BUNDLE" "$RUN_DIR/attestation.sigstore.json"     # offline checks: gh attestation verify --bundle
+        fi
+        echo "attestation-url=$ATTESTATION_URL" >> "$GITHUB_OUTPUT"
+        line="Attestation: [report.json and $((SUBJECTS - 1)) evidence files]($ATTESTATION_URL), signed by this workflow at commit \`${GITHUB_SHA:0:12}\`. Check a downloaded run with \`testbench verify $RUN_ID --attestation\`, or \`gh attestation verify report.json --repo $GITHUB_REPOSITORY\`."
+        printf '\n%s\n' "$line" >> "$GITHUB_STEP_SUMMARY"
+        printf '\n%s\n' "$line" >> "$SUMMARY_FILE"
+
+    - name: upload the evidence
+      id: upload
+      if: ${{ !cancelled() && steps.files.outputs.run-dir != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.files.outputs.artifact-name }}
+        path: ${{ steps.files.outputs.run-dir }}
+        include-hidden-files: true
+        if-no-files-found: warn
+
+    - name: link the evidence from the summary
+      if: ${{ !cancelled() && steps.upload.outputs.artifact-url != '' }}
+      shell: bash
+      env:
+        URL: ${{ steps.upload.outputs.artifact-url }}
+        NAME: ${{ steps.files.outputs.artifact-name }}
+        SUMMARY_FILE: ${{ steps.files.outputs.summary-path }}
+      run: |
+        set -euo pipefail
+        line="Evidence: [$NAME]($URL), the run folder: report.html with the images, junit.xml, and every log and file the run kept."
+        printf '\n%s\n' "$line" >> "$GITHUB_STEP_SUMMARY"
+        printf '\n%s\n' "$line" >> "$SUMMARY_FILE"
+
+    # comment: true. One comment per plan on the pull request, edited on later pushes; it never fails the job.
+    - name: comment on the pull request
+      id: comment
+      if: ${{ !cancelled() && steps.prep.outputs.comment == 'true' }}
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PY: ${{ steps.install.outputs.python }}
+        TESTBENCH_GITHUB_TOKEN: ${{ inputs.github-token }}
+        PLAN: ${{ inputs.plan }}
+        STATUS: ${{ steps.files.outputs.status }}
+        RUN_ID: ${{ steps.files.outputs.run-id }}
+        RUN_DIR: ${{ steps.files.outputs.run-dir }}
+        MESSAGE: ${{ steps.files.outputs.message }}
+        ARTIFACT_NAME: ${{ steps.files.outputs.artifact-name }}
+        ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        ATTESTATION_URL: ${{ steps.attested.outputs.attestation-url }}
+        SUMMARY_FILE: ${{ steps.files.outputs.summary-path }}
+      run: |
+        set -uo pipefail
+        py="${PY:-$(command -v python3 || command -v python)}"
+        "$py" "$ACTION_PATH/src/agent_testbench/github_action.py" comment \
+          || echo "::warning title=agent-testbench::the pull request comment could not be written (the output above says why); the job does not fail for it"
+
+    - name: pass or fail
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        PLAN: ${{ inputs.plan }}
+        STATUS: ${{ steps.files.outputs.status }}
+        STARTED: ${{ steps.files.outputs.started }}
+        MESSAGE: ${{ steps.files.outputs.message }}
+        FAIL_ON_FAILURE: ${{ steps.prep.outputs.fail-on-failure }}
+      run: |
+        set -euo pipefail
+        if [ "$STATUS" = passed ]; then
+          echo "plan $PLAN passed"
+          exit 0
+        fi
+        if [ "$STARTED" != true ]; then         # refused or could not start: nothing was checked
+          echo "::error title=agent-testbench::${MESSAGE:-the action stopped before testbench ran; the step that failed above says why}"
+          exit 1
+        fi
+        if [ "$FAIL_ON_FAILURE" = false ]; then
+          echo "::warning title=agent-testbench::$MESSAGE (fail-on-failure is false, so this step passes)"
+          exit 0
+        fi
+        echo "::error title=agent-testbench::$MESSAGE"
+        exit 1

@@ -11,7 +11,8 @@ to write instead.
 | `budget.max_run_usd` | `2.0` | refuse a run whose worst case is higher |
 | `budget.ask_above_usd` | `0.5` | above this, `testbench run` needs `--approve` (a person's yes) |
 | `budget.max_day_usd` | `10.0` | refuse a run that would take today's committed total over this |
-| `exclude` | `.git`, `.testbench`, `__pycache__`, `*.pyc`, `.venv`, `venv`, `node_modules`, ... | files never shipped to Modal or Colab |
+| | | each budget value is capped by this machine's `~/.testbench/limits.yaml`, if set (see below) |
+| `exclude` | `.git`, `.testbench`, `__pycache__`, `*.pyc`, `.venv`, `venv`, `node_modules`, ... | files left out of every copy of the project (remote backends, `workdir: copy`); setting it replaces this list. `.testbench`, `.env` and `.env.*` are always left out |
 | `modal.python` | `"3.11"` | Python of the Modal image |
 | `modal.pip` | `[]` | packages for the Modal image (pin them) |
 | `modal.requirements` | none | a requirements file for the Modal image |
@@ -25,13 +26,100 @@ to write instead.
 | `pricing.modal_cpu_core_per_s`, `pricing.modal_mem_gib_per_s` | built in | |
 | `pricing.colab_units_per_hour` | built in (approximate) | `{CPU: 0.1, T4: 1.8, A100: 5.4, ...}`; check `colab usage` |
 | `pricing.colab_usd_per_unit` | `0.10` | |
-| `sessions.backend` | `local` | where `testbench session start` puts its kernel by default: `local`, `modal` or `colab` |
+| `sessions.backend` | `local` | where `testbench session start` puts its kernel by default: `local`, `docker`, `ssh`, `kubernetes`, `modal`, `colab` or a plugin's |
 | `sessions.gpu` | none | default GPU for sessions on that backend |
 | `sessions.idle_minutes` | `10` | a session stops itself after this long without use |
 | `sessions.max_minutes` | `60` | and after this long in any case; its worst-case cost is this many minutes of its hardware (Modal: up to 1440) |
 | `sessions.secrets` | `[]` | secret NAMES passed into every session |
 | `sessions.cpu`, `sessions.memory_gb` | from `modal:` | Modal sessions only |
 | `guard.ask` | `git push`, `gh repo create`, `gh pr merge`, `gh release create` | commands the Claude Code hook asks about first |
+
+## Machine limits
+
+`~/.testbench/limits.yaml` holds limits for every project on this machine. `testbench init` writes it when it is
+missing; after that only you change it.
+
+```yaml
+max_run_usd: 5.00        # refuse any run or session that could cost more, in any project
+ask_above_usd: 1.00      # above this, a person approves (--approve), in any project
+max_day_usd: 20.00       # everything today, all projects together
+```
+
+A project's `budget:` can lower these limits, never raise them; a refusal says which limit it hit and where that
+limit is set. Every launch and finish is written to the project's `.testbench/ledger.jsonl` and to
+`~/.testbench/ledger.jsonl`, so the machine's day limit counts every project, including a new or deleted one. A
+file that is not valid refuses every launch until it is fixed. In Claude Code the guard hook asks you before an
+agent's edit raises a budget in testbench.yaml, changes its `pricing:` or `guard:`, or touches limits.yaml, and
+refuses edits to the ledgers and commands that point testbench at another limits folder. This keeps an agent from
+raising its own limits; it is not a sandbox against an agent set on getting around it.
+
+## The ssh backend
+
+```yaml
+ssh:
+  host: gpu-box                  # required: a Host from ~/.ssh/config, or user@host; `ssh HOST true` must work with keys
+  usd_per_hour: 0.0              # what the machine costs you per hour while it works (0: your own); prices the worst case
+  python: python3                # the machine's Python, 3.10 or newer
+  workdir: ~/.testbench-remote   # where projects, sessions and runs go there
+  setup: venv                    # venv: <workdir>/<project>/venv with testbench's basics and `pip:` (built once, kept);
+  pip: [torch==2.5.1]            #   none: use `python` as it is, with what it has
+  command: [ssh]                 # how to reach it: [ssh, -p, "2222"], [ssh, -J, bastion] ... (also a string)
+```
+
+Plans and sessions on `backend: ssh` run on that machine in a copy of the project (and of this package); a plan's
+`gpu:` is a label there, and the report shows the GPU actually used. Commands go over one reused ssh connection
+in BatchMode, so a host that asks for a password fails with a message instead of hanging. Secrets go over ssh's
+stdin, never onto a command line. The hard stop is on the machine: the watchdog starts first, with the machine's
+own Python, and ends everything the session or run started at its time limit (and a session after it sits idle),
+even if this machine is asleep. A finished or cancelled run's folder there is removed once its evidence is back.
+testbench bounds the work, not the machine: a rented instance that bills while it is on stays on.
+
+## Backends
+
+A backend is where plans and sessions run. Built in: `local`, `docker`, `ssh`, `kubernetes`, `modal`, `colab`
+([docker.md](docker.md), [kubernetes.md](kubernetes.md)); `testbench doctor` lists every
+backend this machine has and whether each is set up. Other backends come from installed packages: a package
+declares an entry point in the `agent_testbench.backends` group that names an instance of
+`agent_testbench.backends.Backend`, and its name can then be used as `backend:` in plans and sessions.
+
+```toml
+# pyproject.toml of the package that provides the backend
+[project.entry-points."agent_testbench.backends"]
+rack = "testbench_rack:backend"
+```
+
+```python
+# testbench_rack.py
+from agent_testbench.backends import Backend, split_gpu
+
+class Rack(Backend):
+    gpus = ("RTX4090",)                          # what `gpu:` may name (NAME or NAME:COUNT)
+    startup_minutes = 2                          # added to every worst case
+    config_defaults = {"rack": {"usd_per_hour": 0.6}}     # its section of testbench.yaml
+
+    def rate_per_minute(self, cfg, hardware):    # US dollars per minute, so budget.check can bound the cost
+        return cfg["rack"]["usd_per_hour"] / 60 * split_gpu(hardware.get("gpu"))[1]
+
+    def plan_runner(self):                       # cls(root=, cfg=, run_dir=, plan=, meta=): run() -> (report, usd),
+        return RackRunner                        #   cancel() -> str, cost(report) -> float
+
+    def session_class(self):                     # cls(root, cfg, sdir, state): start, alive, exec, ls, get, put,
+        return RackSession                       #   install, sync, shell, stop (see backends.Session)
+
+    def cancel_remote(self, state):              # stop remote work from a run's state.json when its driver is gone
+        return ""
+
+    def doctor(self):                            # (what, ok, detail) lines for `testbench doctor`
+        return []
+
+backend = Rack()
+```
+
+Optional: `validate(cfg)` checks the backend's own section (called only when a plan or the sessions use it),
+`max_session_minutes`, and `remote = False` for a backend on this machine (plans then run in the project folder
+and no start-up is priced in). Every remote run and session must have a hard stop on the remote side, so the
+worst case holds even if this machine goes offline. A backend that fails to load is listed by `testbench doctor`
+and only breaks the projects that use it.
 
 ## Live sessions
 
@@ -42,7 +130,10 @@ notebook: run code or cells, look at the values and plots, fix, run again, witho
 |---|---|---|---|
 | `local` | this machine, this Python environment | the project folder itself | supervisor: idle / max minutes |
 | `modal` | a Modal Sandbox (what Modal Notebooks run on) with the GPU you pick; image from `modal:` | copied to `/work/project` (also `/content`); `/testbench` is the project's volume (`$TESTBENCH_CACHE` = `/testbench/cache`) | Modal itself (lifetime = max minutes, idle timeout = idle minutes; a running command counts as activity) and the supervisor |
-| `colab` | a Colab VM through Google's Colab CLI | copied to `/content` | supervisor: idle / max minutes |
+| `colab` | a Colab VM through Google's Colab CLI | copied to `/content` | the VM's own watchdog (max minutes + 10, idle minutes + 10; it releases the VM) and the supervisor (idle / max minutes) |
+| `ssh` | any machine `ssh` reaches (keys, no password) | copied to `<ssh.workdir>/<project>/sessions/NAME/project` | the machine's own watchdog (max minutes + 2, idle minutes + 10) and the supervisor (idle / max minutes) |
+| `docker` | a fresh container on this machine ([docker.md](docker.md)) | copied in with `docker cp` | a watchdog inside the container (max minutes + 2, idle minutes + 10) and the supervisor |
+| `kubernetes` | a Job's pod on your cluster ([kubernetes.md](kubernetes.md)) | copied in with `kubectl exec` | the Job's `activeDeadlineSeconds`, a watchdog in the pod, and the supervisor |
 
 ```
 testbench session start [NAME] [--backend B] [--gpu G] [--idle-minutes N] [--max-minutes N] [--secret NAME] [--approve]
@@ -55,19 +146,29 @@ testbench files [-s NAME] ls [PATH] | get REMOTE [LOCAL] | put LOCAL REMOTE
 `.testbench/sessions/NAME/outputs/`, and for an error the exception, the line that raised it and the end of the
 traceback. Exit codes: 0 ok, 1 error, 3 interrupted at `--timeout` (the kernel and its variables survive), 2
 refused or no such session. Notebook cells are numbered among code cells from 1, with form fields set by
-`--params`. `sync` copies the project again after local edits; variables are kept. The kernel has the headless
-`google.colab` stand-in, so Colab notebooks run as they are.
+`--params`. `sync` copies the project again after local edits; variables are kept. Every session command also takes
+the session as `-s NAME` or `--session NAME`, and with no name picks the only running one. The kernel has the
+headless `google.colab` stand-in, so Colab notebooks run as they are.
 
 Each session's start is checked against the budget like a plan (worst case = `max_minutes` of its hardware), and
 its measured cost is written to the ledger when it stops. Its folder, `.testbench/sessions/NAME/`, holds
 `state.json`, `exec.log` (every command and its outcome) and `outputs/`.
+
+**The hard stop on a Colab VM.** Right after the VM is assigned, before anything is installed, kernelkit's
+watchdog (standard library only) is copied to it and started. At the time limit - a session's `max_minutes`, or a
+plan's total `max_minutes`, plus the 10 start-up minutes the estimate allows for - and, for a session, after
+`idle_minutes` + 10 without a command reaching the VM, it ends everything testbench started there and asks Colab
+to release the VM (what `google.colab.runtime.unassign()` does: a request to the VM's runtime service). `session
+start` says which stop it got: if the VM has no runtime service to ask (no `TBE_RUNTIME_ADDR`), the work is still
+ended, and Colab takes the idle VM back on its own schedule. The supervisor on this machine stops the session
+sooner, at `idle_minutes` / `max_minutes`, while this machine is awake.
 
 ## Plans
 
 ```yaml
 plans:
   <name>:
-    backend: local | modal | colab     # default local
+    backend: local | docker | ssh | kubernetes | modal | colab   # default local; or a plugin's
     gpu: T4                            # modal: T4 L4 A10 L40S A100-40GB A100-80GB H100 H200 B200 B300 RTX-PRO-6000
                                        #        (append :N for N GPUs, e.g. H100:2); colab: T4 L4 G4 A100 H100
     cpu: 4                             # modal only; overrides modal.cpu
@@ -82,22 +183,24 @@ A plan runs its steps in order and stops at the first one that does not pass, un
 
 ## Steps
 
-Exactly one of `notebook:`, `run:` or `web:`.
+Exactly one of `notebook:`, `run:` or `web:`. `params`, `cells`, `uploads` and `colab_shim` are for notebook
+steps; on another step they are refused, not ignored.
 
 | field | default | |
 |---|---|---|
 | `name` | required | unique within the plan |
-| `notebook` | | an `.ipynb`; runs cell by cell in an IPython kernel |
+| `notebook` | | an `.ipynb` or a percent-format `.py`; runs cell by cell in its kernel ([notebooks.md](notebooks.md)) |
 | `run` | | a shell command (bash) |
 | `web` | | see below |
 | `max_minutes` | `10` | the step is stopped when it runs out; also bounds the cost estimate |
-| `params` | `{}` | notebook form fields to set: `{EPOCHS: 2}` replaces the value on `EPOCHS = ...  #@param` |
+| `params` | `{}` | notebook parameters to set: `{EPOCHS: 2}` replaces the value on `EPOCHS = ...  #@param`, or sets a papermill parameter |
 | `cells` | all | code cells to run, counted from 1: `"1-3,5"` or `[1, 2]` |
 | `uploads` | `[]` | answers to `files.upload()`, one list of files per call: `[[data.csv], [a.mp4, b.mp4]]` |
 | `colab_shim` | `true` | install the headless `google.colab` stand-in in the kernel |
 | `env` | `{}` | extra environment variables |
 | `secrets` | `[]` | secret NAMES. Local: must be exported. Modal: Modal secrets of these names are attached |
 | `pythonpath` | `[]` | folders put first on `PYTHONPATH` (e.g. `mocks`) |
+| `mocks` | `{}` | mock LLM SDKs for the step: `[openai, anthropic]`, or with options ([mocks.md](mocks.md)) |
 | `artifacts` | `[]` | globs copied into the run folder as evidence |
 | `expect` | `{}` | see below |
 | `continue_on_failure` | `false` | keep going to the next step even if this one fails |
@@ -108,6 +211,10 @@ between runs (put downloaded weights there); `python` and `testbench` are the en
 `MPLBACKEND=Agg` for child processes.
 
 ## Expectations
+
+The common ones are below; every expectation - `junit:`, `metrics:`, `gpu:`, `image:`, `duration:`, tolerances
+(`"~= 0.93 +- 0.01"`) and ranges (`"between 0.8 and 0.95"`) - with what its failure looks like is in
+[expectations.md](expectations.md).
 
 ```yaml
 expect:
@@ -154,6 +261,61 @@ Recorded: HTTP status, title, page text, console errors, page errors, failed req
 screenshots. If something already answers on the URL before `serve` starts, the step stops instead of
 testing the wrong program.
 
+## Loops
+
+```
+testbench loop start PLAN --metric FILE:KEY --budget-usd N [--goal max|min] [--min-delta X] [--max-hours H] [--approve] [--wait S]
+testbench loop try "what changed" [--wait S]      # exit 0 kept, 1 reverted, 3 still running, 2 refused
+testbench loop status                             # judges a finished try; exit 3 while one is running
+testbench loop stop
+```
+
+- **Start** needs a git repository with no uncommitted changes. It creates the branch `testbench-loop/<id>`, then
+  runs the plan on the code as it is: the baseline. `--metric` names a number one of the plan's json expectations
+  checks (`FILE:KEY`, as in `expect: {json: {FILE: {KEY: ...}}}`), so it reads the same on every backend.
+- **A try** commits every change in the project folder (not `.testbench/`, nor a new `.env` or `.env.*` file,
+  which stays where it is: secrets go by name) and runs the plan in a scratch copy of
+  that commit. It is kept when the run passes and the metric beats the best by more than `--min-delta` (higher for
+  `--goal max`, lower for `min`). Otherwise the branch is reset to the best commit; edits made while the run went
+  are stashed and put back on top. A failing baseline is fine: then the first passing try that reports the metric
+  is kept.
+- **Money and time**: `--budget-usd` bounds all the loop's runs together (finished runs at their measured cost, a
+  running one at its worst case); a try with no room left is refused before anything is committed. Above
+  `ask_above_usd`, a person approves the total once with `--approve`. Each run is still checked against
+  `max_run_usd`, the day limits and this machine's limits. No new tries after `--max-hours`.
+- **Stop** writes `.testbench/loops/<id>/report.md` (each kept change with what it moved and its run, each reverted
+  try and why) and checks out the branch the loop started from. The kept commits stay on the loop's branch.
+- Every verdict also goes to the lab notebook, `.testbench/NOTES.md`.
+
+## Proof records
+
+`report.json` follows a published JSON Schema (`src/agent_testbench/schema/report-v1.schema.json`, `schema_version:
+1`; later versions only add fields). Besides the steps, checks and costs, it records:
+
+| field | |
+|---|---|
+| `source` | at launch: `commit`, `branch`, `dirty` (uncommitted changes or untracked files were part of the run), `changes_sha256` (the diff against the commit and the untracked files), `untracked_files`; null outside git. `.testbench/` is not counted |
+| `environment` | where the plan ran (recorded on that machine, Modal, Colab and ssh too): `python`, `platform`, `machine`, `packages` and `packages_sha256` (of the sorted name==version list) |
+| `evidence`, `evidence_sha256` | every file under `steps/` with its size and sha256, and one sha256 over all of them |
+| `worst_case_usd`, `approved`, `remote_stop` | the bound checked before launch, whether a person approved it, and the hard stop on the remote side |
+
+```
+testbench verify [RUN]                     # exit 0: every evidence file matches; 1: what changed, went missing or was added
+testbench report [RUN] --format html|junit [-o FILE]
+testbench history PLAN [-n N] [--json]     # each run's outcome and every number its checks found, oldest first
+testbench ui [--open]                      # .testbench/ui/index.html: plans, trend lines, runs, loops, sessions
+```
+
+## Prices
+
+`testbench prices` lists every price estimates use and where it comes from: the table built into this version, a
+fetched catalog, or the project's `pricing:`. `testbench prices --update [--url URL]` fetches `pricing/catalog.json`
+from the repository into `~/.testbench/prices.json`. A catalog can raise a price above the built-in one or add
+hardware this version does not know (a new GPU becomes allowed, priced at no less than the dearest hardware this
+version knows); it never lowers a price - that comes with a release - so a stale or tampered catalog only makes
+estimates more cautious. The guard hook asks before `--update --url` or an edit of `~/.testbench/prices.json`. A project's `pricing:` overrides
+both. Nothing is fetched unless asked.
+
 ## Run folder
 
 `.testbench/runs/<YYYYmmdd-HHMMSS-plan>/`:
@@ -162,11 +324,82 @@ testing the wrong program.
 state.json        status, process, remote handles (Modal call id / Colab session), cost
 plan.json         the plan as run
 progress.jsonl    one line per event
-report.json       machine-readable report (rewritten after each step)
+report.json       machine-readable report (rewritten after each step; schema/report-v1.schema.json)
 report.md         the report
+report.html       the report as one page with the evidence images (`testbench report --format html`, `testbench ui`)
 driver.log        the background driver's own output
 steps/NN-name/    log.txt, result.json, executed.ipynb, cellNN_imageK.png, downloads/, artifacts/, screenshots
 ```
 
 `.testbench/ledger.jsonl` records every launch (worst case) and finish (estimated cost);
 `.testbench/NOTES.md` is the lab notebook (`testbench note`), the one file there worth committing.
+
+## Commands
+
+`testbench` alone (or `testbench help`) lists the commands in these groups, with the ones to start with;
+`testbench help COMMAND` (or `testbench COMMAND --help`) shows a command's options and examples. Options are spelled
+out in full: `--appr` is not `--approve`. A mistyped command gets the closest one as a whole command line (`testbench
+rnu smoke`: did you mean `testbench run smoke`?), words in the wrong order get the right order (`testbench smoke
+run`: the command comes first), and a mistyped plan, session, recipe, client or example name gets the closest one.
+`--json` and `--format json` are the same on every command with a JSON form (`report`, `diff`, `history`,
+`estimate`, `exec`, `rescue`); every session command takes `-s NAME` (also `--session NAME`).
+
+| command | what it does | exit codes besides 2 |
+|---|---|---|
+| **try it and set up** | | |
+| `demo [NAME] [DIR]`, `demo --list` | copy an example project to a new folder and run its free plan | 0 the plan did what the example expects (the `test-suite` plan fails on purpose), 1 it did not, 3 still running |
+| `init [--recipe NAME] [--add] [--force]` | write testbench.yaml (a plan for each thing it finds) and AGENTS.md | 0 |
+| `recipes [NAME]` | ready plans for a goal, with their worst case; or print one | 0 |
+| `connect CLIENT... [--user] [--dry-run]`, `connect --list` | register the MCP server in a client's config and write AGENTS.md | 0 |
+| `doctor` | what this machine can run; each `no` line says what to do | 0, whatever it found |
+| `mcp [--http]` | serve the commands as MCP tools | 0 when it stops |
+| **plans** | | |
+| `plans` | the plans, their hardware and worst case | 0 |
+| `run PLAN [--wait SECONDS] [--detach] [--approve]` | run a plan and print its report | 0 passed, 1 failed, 3 still running after `--wait` (and always with `--detach`) |
+| `wait [RUN] [--timeout SECONDS]` | follow a run (`--wait` is the same as `--timeout`) | 0 passed, 1 failed, 3 still running |
+| `status [RUN]` | one line about a run | 0 passed, 1 failed, cancelled, error or lost, 3 still running |
+| `runs [-n N]` | recent runs | 0 |
+| `cancel [RUN]` | stop a run, here and on its remote machine | 0, also when it had already ended |
+| `watch PLAN [--max-runs N]` | run a free plan again on every change | 0 stopped, or the last of `--max-runs` passed; 1 it did not |
+| **proof** | | |
+| `report [RUN] [--format md\|json\|html\|junit] [-o FILE]` | a run's report | 0, a failed run's report too |
+| `verify [RUN] [--attestation [--repo OWNER/REPO]]` | check the evidence against its recorded sha256 | 0 it matches, 1 it does not (2: it could not be checked) |
+| `diff [A B \| PLAN \| RUN] [--json]` | what changed between two runs | 0 |
+| `history PLAN [-n N] [--json]` | a plan's runs over time | 0 |
+| `ui [--open] [--serve [--port N]]` | every run as a page, or the live dashboard | 0 |
+| `export [RUN\|all] [--to mlflow\|wandb\|csv\|jsonl]` | a run in a tracker or a file | 0, 1 a target failed |
+| **live sessions** | | |
+| `session start [NAME] [--backend B] [--gpu G] ...` | start a kernel, inside the budget | 0 |
+| `session list` | sessions, their hardware, uptime and cost | 0 |
+| `session stop [NAME\|--all]` | stop one | 0, also when none was running |
+| `session sync`, `install PKG...`, `shell "CMD"` | copy the project again, pip install, run a shell command | 0; `install`: 1 when pip fails; `shell`: 0 once the command ran (its own exit code is not passed on) |
+| `exec CODE \| -f FILE \| --cells NB[:CELLS]` | run code in the session's kernel | 0 ok, 1 the code raised, 3 interrupted at `--timeout` (the kernel and its variables are kept) |
+| `files ls\|get\|put PATH...` | files on the session's machine | 0 |
+| **loops and notifications** | | |
+| `loop start PLAN --metric FILE:KEY --budget-usd N` | start a loop and run the baseline | 0 the baseline passed, 1 it did not (the loop still started), 3 still running |
+| `loop try "WHAT"` | commit the edits as a try and run the plan | 0 kept, 1 reverted, 3 still running |
+| `loop status`, `loop stop` | the tries so far; the report | 0; `status`: 3 while a try runs |
+| `notify test` | one test message to the `notify:` webhook | 0 accepted, 1 refused by the service |
+| **money** | | |
+| `estimate PLAN [--approve] [--json]` | a plan's worst case and whether it may launch now | 0 it may (2: it may not) |
+| `spend [-n N] [--modal]` | what runs and sessions have cost | 0 |
+| `prices [--update]` | the prices behind every estimate | 0 |
+| **notebooks and the lab notebook** | | |
+| `lint NOTEBOOK... [--strict]` | Colab and headless pitfalls | 0; with `--strict`, 1 when anything is found |
+| `rescue NOTEBOOK [--fix OUT] [--no-run]` | why a notebook does not run, and what to do | 0 it ran, 1 it failed or ran out of time (`--no-run`: something blocks it) |
+| `nb split\|build\|fields` | a notebook as plain cell files | 0 |
+| `note TEXT` | a line in `.testbench/NOTES.md` | 0 |
+
+## Exit codes
+
+Every command uses the same four, and the GitHub Action and the MCP server read them:
+
+| code | means |
+|---|---|
+| `0` | passed, or done |
+| `1` | failed: the run, the check or the code did not pass |
+| `2` | refused or bad input: nothing ran and nothing was spent; the message says what to do instead |
+| `3` | still running: `testbench wait RUN` follows it (for a loop's try, then `testbench loop status`) |
+
+A command line testbench cannot read (an unknown command or option, a missing argument, a value that is not a
+number) is `2` too, with the closest command or the usage, and where the examples are.

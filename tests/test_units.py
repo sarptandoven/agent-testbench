@@ -42,6 +42,12 @@ def test_config_errors_say_what_to_fix(tmp_path, change, message):
         C.load(tmp_path)
 
 
+def test_counted_says_one_of_a_thing():
+    assert [C.counted(n, "try", "tries") for n in (0, 1, 2)] == ["0 tries", "1 try", "2 tries"]
+    assert C.counted(1.0, "hour") == "1 hour" and C.counted(1.5, "hour") == "1.5 hours"
+    assert C.counted(1, "code cell") == "1 code cell" and C.counted(3, "file") == "3 files"
+
+
 def test_parse_cells():
     assert C.parse_cells("1-3,5") == [1, 2, 3, 5]
     assert C.parse_cells([2, 1, 2]) == [1, 2]

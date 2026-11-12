@@ -1,7 +1,6 @@
 ---
 name: iterate
 description: Operate agent-testbench to get notebooks, models, data or video pipelines, and web UIs working - work live in a kernel on this machine, a Modal GPU or a Colab VM (run code and notebook cells, inspect variables, fix, rerun, move files), then prove the result with a plan run inside the budget. Use whenever asked to build, debug, train, test, verify, or "make sure it works", in a project with a testbench.yaml.
-argument-hint: "[what to get working]"
 ---
 
 # Operating the test bench
@@ -41,6 +40,7 @@ and the line that raised it. A call over `--timeout` is interrupted and the kern
 testbench plans                  # what may run, on what hardware, worst-case cost
 testbench run smoke              # prints the report; long runs: testbench wait <run>
 testbench report                 # failing cell and line, missed expectations, evidence, what changed
+testbench diff smoke             # its last two runs: each number old -> new (better or worse), checks flipped, code
 ```
 
 Explore to find and fix the problem; prove with a plan before you say it works. A session is not proof -
@@ -61,22 +61,51 @@ state built up by hand can hide a bug that a clean run exposes.
 
 - **Money.** Never pass `--approve` (or `approved_by_person=true`) yourself: tell the person what you want to
   run, on what hardware, and its worst case (`testbench estimate <plan>`, or the session's max minutes), and
-  wait for a yes. Never raise `budget:` values. Launch cloud work only through `testbench` (no raw
+  wait for a yes. Never raise `budget:` values or edit `~/.testbench/limits.yaml` (the limits for every project on
+  this machine); if a limit is in the way, say which one and let the person decide. Launch cloud work only through `testbench` (no raw
   `modal run`, `modal deploy`, `colab new`). Stop sessions when done; never leave a GPU idle.
 - **Secrets.** Refer to secrets by name only (`secrets:` / `--secret NAME`). Never print, copy or write a
   secret value; never read `.env` or credential files.
-- **Paid APIs.** Tests use strict mocks (a module with the client's name on the step's `pythonpath:`); a real
+- **Paid APIs.** Tests use strict mocks: `mocks: [openai, anthropic]` on the step for those SDKs, else a module
+  with the client's name on the step's `pythonpath:`. A mock's refusal (a 400) names the argument to fix. A real
   paid call is the person's decision.
 - **The outside world.** Commits, pushes, releases, emails and posts need the person's yes each time.
 - **Honesty.** Report failures as findings. Never weaken an expectation to make a run pass; if one was wrong,
   say why you changed it. Never claim "done", "verified" or "perfect" without the run id that shows it.
 
+## Loops (many ideas, judged by a number)
+
+When the goal is a better number - accuracy, loss, latency, FID - and there are many ideas to try, use a loop
+instead of judging by eye: `testbench loop start <plan> --metric outputs/metrics.json:accuracy --budget-usd N`
+(the person sets N; above the approval threshold they approve that total). Then for each idea: edit, and
+`testbench loop try "what changed"`. testbench commits it, runs the plan, and keeps it only if the run passes and
+the metric improves; otherwise the code goes back to the best version. Try one idea at a time, describe it
+plainly, and read `testbench loop status` before the next. `testbench loop stop` when done or when the budget is
+spent, and report the kept changes and the run that proves the best one. Never edit the plan's expectations
+during a loop to make tries pass.
+
+For a loop left to run on its own, give it stopping rules: `--target 0.95` (done once the best reaches it),
+`--patience 4` (no try after 4 in a row were not kept), `--max-tries 20`. When a try is refused for one of them,
+that is the loop's answer: undo the untried edits, `testbench loop stop`, and report. When `--patience` runs out,
+go on only with an idea different in kind from the ones that failed (`testbench loop try --new-direction "..."`),
+not another variation of them.
+
 ## Notebooks
 
+When a notebook does not run (downloaded, old, someone else's), start with `testbench rescue nb.ipynb`: it says
+which cell fails, why and what to do, and writes a plan that proves it once fixed.
+
 Edit notebooks as cell files, not JSON: `testbench nb split nb.ipynb cells/`, edit `cells/NN_*.py`,
-`testbench nb build cells/ nb.ipynb`. Colab form fields (`NAME = value  #@param`) are set with `params:` in a
-plan or `--params` in a session. `testbench lint nb.ipynb` catches what breaks on Colab. The notebook must
+`testbench nb build cells/ nb.ipynb`. Colab form fields (`NAME = value  #@param`) and papermill parameters (a
+cell tagged `parameters`) are set with `params:` in a plan or `--params` in a session; `testbench nb fields nb.ipynb`
+lists them. A percent-format `.py` (`# %%` cells) runs as a notebook too. `testbench lint nb.ipynb` catches what breaks on Colab. The notebook must
 still work on Colab for a person.
+
+## Proof for a person
+
+A report names the commit it ran and hashes its evidence. Before you point someone at a run, `testbench verify
+<run>` should pass. For a person who wants to look rather than read, `testbench report <run> --format html` writes
+one page with the plots inline; `testbench history <plan>` shows how the checked numbers moved across runs.
 
 ## Reporting back
 

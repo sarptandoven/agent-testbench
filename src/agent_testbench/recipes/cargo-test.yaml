@@ -1,0 +1,74 @@
+# Recipe cargo-test: a Rust crate's or workspace's tests - every test passes, here and in a container offline.
+#
+# Proves: cargo-tests - the tests ran in this run, counted from cargo-nextest's JUnit report (written now; one left
+#   over from an earlier run fails): unit, integration and every test binary's tests, a failing one named with its
+#   binary and the panic message and values (`calc.tests::adds (... panicked at src/lib.rs:11:9: assertion `left ==
+#   right` failed left: 3 right: 4)`); and at least as many tests ran as you have. cargo-sandbox - the same in a
+#   fresh container with no network.
+# Why nextest: `cargo test` writes no JUnit (libtest's junit format is unstable and writes one document per test
+#   binary), and nextest's report is the one Rust CI uses. It writes JUnit only for a profile that asks; add to
+#   .config/nextest.toml (fail-fast = false runs every test, so the report names every failure):
+#     [profile.ci]
+#     fail-fast = false
+#     [profile.ci.junit]
+#     path = "junit.xml"
+#   The report then goes to target/nextest/ci/junit.xml. Install nextest once: `cargo install cargo-nextest --locked`
+#   (or its prebuilt binary, https://nexte.st). Ignored tests are left out of the report (`skipped` counts 0); doc
+#   tests are not run by nextest - add a step with `cargo test --doc` if you have them.
+# FILL IN: `tests: ">= N"` with the number of tests you have now (nextest's summary: `N tests run`), your arguments
+#   (`--workspace`, `--all-features`), and the image's tag.
+# Without nextest: a step `run: cargo test --no-fail-fast` with `text: {stdout: ["test result: ok"]}` checks the exit
+#   code and that tests ran, but cannot count them or name the failures.
+# Docker (cargo-sandbox): the container has no network, so the Rust toolchain, nextest, the crates Cargo.toml needs and
+#   what testbench itself runs in the container (Python with ipykernel, jupyter_client, nbformat, nbclient and pyyaml)
+#   go into an image you build once, with the network on. The official rust image has no Python, so it starts from
+#   the official Python image (which has the C linker rustc needs) and copies Rust from the official rust image. Save
+#   these lines without their leading "#" and spaces as Dockerfile.testbench, put `target` in .dockerignore, then
+#   `docker build -f Dockerfile.testbench -t cargo-tests .` (building nextest takes a few minutes). Offline, a crate
+#   the image lacks fails by name (`--offline was specified`): rebuild the image when Cargo.lock changes. Add
+#   `exclude: [.git, target]` to testbench.yaml so this machine's build folder is not copied into each container.
+#     FROM rust:1.97-slim-trixie AS rust
+#     FROM python:3.13-trixie
+#     COPY --from=rust /usr/local/rustup /usr/local/rustup
+#     COPY --from=rust /usr/local/cargo /usr/local/cargo
+#     ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:$PATH
+#     RUN pip install --no-cache-dir "nbformat>=5.9" "nbclient>=0.10" "ipykernel>=6.29" "jupyter_client>=8" "pyyaml>=6"
+#     RUN cargo install cargo-nextest --version 0.9.150 --locked
+#     COPY . /deps
+#     RUN cd /deps && cargo fetch && rm -rf /deps
+#     ENV CARGO_NET_OFFLINE=true
+# Costs: nothing; both run on this machine (usd_per_hour 0). The image build takes a few minutes, once.
+
+# The container: the image built above as it is (setup: none), no network, hard limits on CPU and memory.
+docker:
+  image: cargo-tests                       # FILL IN: the tag you built Dockerfile.testbench as
+  setup: none                              # it already has Rust, nextest, the crates and testbench's basics
+  network: none                            # only a loopback interface: nothing to download, nowhere to send
+  cpu: 2
+  memory_gb: 4
+  usd_per_hour: 0.0
+
+plans:
+  cargo-tests:
+    backend: local
+    description: every test passes, counted from cargo-nextest's JUnit report
+    steps:
+      - name: nextest
+        run: cargo nextest run --profile ci       # FILL IN: your arguments, e.g. --workspace --all-features
+        max_minutes: 20                    # it compiles the tests first
+        artifacts: [target/nextest/ci/junit.xml]
+        expect:
+          exit_code: 0                       # nextest exits 100 when a test fails, 101 when the build fails
+          junit: {path: target/nextest/ci/junit.xml, failures: 0, errors: 0, tests: ">= 1"}    # FILL IN: ">= N"
+          duration: {minutes: "<= 15"}       # a suite that suddenly takes much longer is a finding too
+
+  cargo-sandbox:
+    backend: docker
+    description: every test passes in a fresh container with no network, on the image's crates
+    steps:
+      - name: nextest
+        run: cargo nextest run --profile ci       # FILL IN: your arguments
+        max_minutes: 30                    # a fresh container compiles everything, the dependencies too
+        artifacts: [target/nextest/ci/junit.xml]
+        expect:
+          junit: {path: target/nextest/ci/junit.xml, failures: 0, errors: 0, tests: ">= 1"}    # FILL IN: ">= N"

@@ -1,54 +1,37 @@
 """Money: what a plan can cost at worst, what runs have cost, and whether a launch is allowed.
 
 The worst case of a plan is its hardware's rate times the sum of its steps' max_minutes. Remote steps are
-also stopped on the remote side at that limit (a Modal function timeout, a Colab exec timeout), so the
+also stopped on the remote side at that limit (a Modal function timeout, a watchdog on the Colab VM), so the
 estimate is a bound, not a hope - it holds even if this machine goes offline mid-run.
+
+The limits are the project's `budget:`, capped by this machine's ~/.testbench/limits.yaml, which a project can
+lower but never raise. Every launch and finish goes to the project's ledger and to this machine's, so the
+machine's day limit counts every project together.
 """
 from __future__ import annotations
 
 import datetime as dt
 import json
+import os
+from contextlib import contextmanager
 from pathlib import Path
 
-from . import config as C
+import yaml
 
-# Modal, US dollars per second (modal.com/pricing, checked 2026-10). Override any of them under `pricing:`.
-MODAL_GPU_PER_S = {"B300": 0.001972, "B200": 0.001736, "H200": 0.001261, "H100": 0.001097, "RTX-PRO-6000": 0.000842,
-                   "A100-80GB": 0.000694, "A100-40GB": 0.000583, "A100": 0.000583, "L40S": 0.000542, "A10": 0.000306,
-                   "A10G": 0.000306, "L4": 0.000222, "T4": 0.000164}
-MODAL_CPU_CORE_PER_S = 0.0000131
-MODAL_MEM_GIB_PER_S = 0.00000222
-# Colab bills compute units. These per-hour rates are approximate and vary by account and region; `colab usage`
-# shows your actual rate - put it under `pricing: colab_units_per_hour:`. Pay-as-you-go is ~$10 per 100 units.
-COLAB_UNITS_PER_HOUR = {"CPU": 0.1, "T4": 1.8, "L4": 2.0, "G4": 4.0, "A100": 5.4, "H100": 9.0}
-COLAB_USD_PER_UNIT = 0.10
+from . import backends as B, config as C
 
 
-def rate_per_minute(cfg: dict, plan: dict) -> float:
-    """US dollars per minute for the plan's hardware; 0 for local plans."""
-    prices = cfg.get("pricing") or {}
-    backend = plan["backend"]
-    if backend == "local":
-        return 0.0
-    gpu = (plan.get("gpu") or "").split(":")[0].upper()
-    count = int(plan["gpu"].split(":")[1]) if plan.get("gpu") and ":" in plan["gpu"] else 1
-    if backend == "modal":
-        gpu_rates = {**MODAL_GPU_PER_S, **(prices.get("modal_gpu_per_s") or {})}
-        cpu = float(plan.get("cpu") or cfg["modal"]["cpu"])
-        mem = float(plan.get("memory_gb") or cfg["modal"]["memory_gb"])
-        per_s = (gpu_rates.get(gpu, 0.0) * count if gpu else 0.0) \
-            + cpu * float(prices.get("modal_cpu_core_per_s", MODAL_CPU_CORE_PER_S)) \
-            + mem * float(prices.get("modal_mem_gib_per_s", MODAL_MEM_GIB_PER_S))
-        return per_s * 60
-    units = {**COLAB_UNITS_PER_HOUR, **(prices.get("colab_units_per_hour") or {})}
-    return units.get(gpu or "CPU", 0.0) * float(prices.get("colab_usd_per_unit", COLAB_USD_PER_UNIT)) / 60
+def rate_per_minute(cfg: dict, hardware: dict) -> float:
+    """US dollars per minute for the hardware ({backend, gpu, cpu?, memory_gb?}) of a plan or session; each backend
+    prices its own (Modal's and Colab's published rates, overridable under `pricing:`), and local is free."""
+    return B.get(hardware["backend"]).rate_per_minute(cfg, hardware)
 
 
 def estimate(cfg: dict, hardware: dict, minutes: float, label: str) -> dict:
     """Worst case for `minutes` on `hardware` ({backend, gpu, cpu?, memory_gb?}); a remote machine also pays for
     starting up and installing, so a few minutes are added."""
     rate = rate_per_minute(cfg, hardware)
-    overhead = 0 if hardware["backend"] == "local" else 5
+    overhead = B.get(hardware["backend"]).startup_minutes
     return {"what": label, "backend": hardware["backend"], "gpu": hardware.get("gpu"), "usd_per_minute": rate,
             "max_minutes": float(minutes), "worst_case_usd": round(rate * (float(minutes) + overhead), 4)}
 
@@ -58,55 +41,177 @@ def worst_case(cfg: dict, plan_name: str) -> dict:
     return {**estimate(cfg, plan, C.plan_minutes(plan), f"plan {plan_name}"), "plan": plan_name}
 
 
+LIMIT_KEYS = ("max_run_usd", "ask_above_usd", "max_day_usd")
+LIMITS_TEMPLATE = """\
+# agent-testbench: limits for every project on this machine. A project's testbench.yaml can lower them, never
+# raise them, and the Claude Code hook asks you before an agent edits this file. Raise them here yourself.
+max_run_usd: 5.00        # refuse any run or session that could cost more, in any project
+ask_above_usd: 1.00      # above this, a person approves (--approve), in any project
+max_day_usd: 20.00       # everything today, all projects together
+"""
+
+
+def user_dir() -> Path:
+    """This person's testbench folder: the limits for every project on this machine, and the ledger of all of
+    them (TESTBENCH_USER_DIR, for tests; the hook refuses commands that set it)."""
+    return Path(os.environ.get("TESTBENCH_USER_DIR") or Path.home() / ".testbench")
+
+
+def limits_path() -> Path:
+    return user_dir() / "limits.yaml"
+
+
+def user_limits() -> dict:
+    """The machine's limits, {} when there are none. A broken file refuses every launch rather than allowing it."""
+    p = limits_path()
+    if not p.exists():
+        return {}
+    try:
+        raw = yaml.safe_load(p.read_text()) or {}
+    except yaml.YAMLError as exc:
+        raise C.ConfigError(f"{p} is not valid YAML ({exc}); nothing can launch until a person fixes it") from None
+    if not isinstance(raw, dict):
+        raise C.ConfigError(f"{p} must map {', '.join(LIMIT_KEYS)} to US dollars; nothing can launch until it does")
+    out = {}
+    for key in LIMIT_KEYS:
+        if key in raw:
+            if not C.number(raw[key]):
+                raise C.ConfigError(f"`{key}` in {p} must be a number of US dollars; nothing can launch until a "
+                                    "person fixes it")
+            out[key] = float(raw[key])
+    return out
+
+
+def write_limits_if_missing() -> Path | None:
+    p = limits_path()
+    if p.exists():
+        return None
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(LIMITS_TEMPLATE)
+    return p
+
+
+def limits(cfg: dict) -> dict:
+    """{key: (dollars, where it is set)}: the project's budget, capped by the machine's limits."""
+    machine = user_limits()
+    out = {}
+    for key in LIMIT_KEYS:
+        own = float(cfg["budget"][key])
+        if key in machine and not own <= machine[key]:              # NaN in the project: the machine's limit
+            out[key] = (machine[key], f"{key} ${machine[key]:.2f} in {limits_path()} (this machine's limit, which "
+                                      "a project cannot raise)")
+        else:
+            out[key] = (own, f"budget.{key} ${own:.2f}")
+    return out
+
+
+@contextmanager
+def launching():
+    """Held from a launch's check to its ledger entry, machine-wide: two launches at once (two agents, two MCP
+    calls) cannot both pass a day limit that only has room for one."""
+    from .procs import exclusive
+    with exclusive(user_dir() / ".launch.lock"):
+        yield
+
+
 def ledger_path(root: Path) -> Path:
     return Path(root) / ".testbench" / "ledger.jsonl"
 
 
+def user_ledger_path() -> Path:
+    return user_dir() / "ledger.jsonl"
+
+
 def record(root: Path, entry: dict) -> None:
-    p = ledger_path(root)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a") as f:
-        f.write(json.dumps({"time": dt.datetime.now().isoformat(timespec="seconds"), **entry}) + "\n")
+    """Write an entry to the project's ledger and to this machine's, which holds every project's."""
+    line = {"time": dt.datetime.now().isoformat(timespec="seconds"), **entry}
+    for p, extra in ((ledger_path(root), {}), (user_ledger_path(), {"root": str(Path(root).resolve())})):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a") as f:
+            f.write(json.dumps({**line, **extra}) + "\n")
+
+
+def _read(p: Path) -> list[dict]:
+    """A ledger's entries. One that cannot be read refuses every launch: what was spent is unknown."""
+    if not p.exists():
+        return []
+    rows = []
+    for n, line in enumerate(p.read_text().splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            row = None
+        cost = row.get("worst_case_usd" if row.get("event") == "launch" else "usd", 0) if isinstance(row, dict) else None
+        if not isinstance(row, dict) or not isinstance(row.get("time"), str) or not C.number(cost) or (
+                row.get("event") in ("launch", "finish") and not isinstance(row.get("run"), str)):
+            raise C.ConfigError(f"{p} line {n} is not a ledger entry testbench wrote ({line[:80]!r}); what was spent "
+                                "cannot be counted, so nothing can launch until a person fixes or removes that line")
+        rows.append(row)
+    return rows
 
 
 def entries(root: Path) -> list[dict]:
-    p = ledger_path(root)
-    if not p.exists():
-        return []
-    return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+    return _read(ledger_path(root))
 
 
-def spent_today(root: Path) -> float:
-    """Dollars committed today: finished runs at their measured cost, unfinished ones at their worst case."""
+def _committed_today(rows: list[dict]) -> float:
+    """Finished runs at their measured cost, unfinished ones at their worst case."""
     today = dt.date.today().isoformat()
-    runs: dict[str, float] = {}
-    for e in entries(root):
+    runs: dict[tuple, float] = {}
+    for e in rows:
         if not e["time"].startswith(today):
             continue
+        key = (e.get("root"), e["run"])
         if e["event"] == "launch":
-            runs[e["run"]] = e["worst_case_usd"]
+            runs[key] = e["worst_case_usd"]
         elif e["event"] == "finish":
-            runs[e["run"]] = e["usd"]
+            runs[key] = e["usd"]
     return round(sum(runs.values()), 4)
 
 
+def spent_today(root: Path) -> float:
+    """Dollars committed today in this project."""
+    return _committed_today(entries(root))
+
+
+def spent_today_everywhere() -> float:
+    """Dollars committed today in every project on this machine."""
+    return _committed_today(_read(user_ledger_path()))
+
+
 def check(cfg: dict, est: dict, approve: bool, how_to_lower: str) -> tuple[bool, str, dict]:
-    """(allowed, message, estimate). Over max_run_usd or the day's budget: refused. Over ask_above_usd: needs
-    approve=True, which an agent may only pass after a person said yes."""
-    b = cfg["budget"]
+    """(allowed, message, estimate). Over max_run_usd or a day's budget (the project's, or the machine's for all
+    projects together): refused. Over ask_above_usd: needs approve=True, which an agent may only pass after a
+    person said yes. Each limit is the project's, capped by the machine's limits."""
+    lim = limits(cfg)
     cost, what = est["worst_case_usd"], est["what"]
-    if cost > b["max_run_usd"]:
+    if not C.number(cost) or not all(C.number(v) for v, _ in lim.values()):
+        return False, (f"Refused: the worst case of {what} cannot be priced: it came to {cost!r}, not a number of "
+                       f"dollars. Its minutes ({est.get('max_minutes')!r}), the prices and the budget must be numbers "
+                       "of 0 or more; `testbench prices` shows the prices in use."), est
+    most, where = lim["max_run_usd"]
+    if cost > most:
         return False, (f"Refused: {what} could cost up to ${cost:.2f} ({est['max_minutes']:.0f} min at "
-                       f"${est['usd_per_minute']:.4f}/min), over budget.max_run_usd ${b['max_run_usd']:.2f}. "
+                       f"${est['usd_per_minute']:.4f}/min), over {where}. "
                        f"{how_to_lower}, use a cheaper GPU, or have a person raise the budget."), est
-    today = spent_today(Path(cfg["root"]))
-    if today + cost > b["max_day_usd"]:
+    today, day = spent_today(Path(cfg["root"])), float(cfg["budget"]["max_day_usd"])
+    if today + cost > day:
         return False, (f"Refused: ${today:.2f} already committed today; {what} could add ${cost:.2f}, over "
-                       f"budget.max_day_usd ${b['max_day_usd']:.2f}."), est
-    if cost > b["ask_above_usd"] and not approve:
-        return False, (f"Needs approval: {what} could cost up to ${cost:.2f} (above budget.ask_above_usd "
-                       f"${b['ask_above_usd']:.2f}). Ask a person; if they agree, rerun with --approve."), est
-    return True, f"Within budget: up to ${cost:.2f} (today so far ${today:.2f} of ${b['max_day_usd']:.2f}).", est
+                       f"budget.max_day_usd ${day:.2f}."), est
+    machine_day = user_limits().get("max_day_usd")
+    everywhere = spent_today_everywhere() if machine_day is not None else 0.0
+    if machine_day is not None and everywhere + cost > machine_day:
+        return False, (f"Refused: ${everywhere:.2f} already committed today across every project on this machine; "
+                       f"{what} could add ${cost:.2f}, over max_day_usd ${machine_day:.2f} in {limits_path()} (this "
+                       "machine's limit, which a project cannot raise)."), est
+    ask, where = lim["ask_above_usd"]
+    if cost > ask and not approve:
+        return False, (f"Needs approval: {what} could cost up to ${cost:.2f} (above {where}). Ask a person; if "
+                       "they agree, rerun with --approve."), est
+    machine = f"; ${everywhere:.2f} of ${machine_day:.2f} on this machine" if machine_day is not None else ""
+    return True, f"Within budget: up to ${cost:.2f} (today so far ${today:.2f} of ${day:.2f}{machine}).", est
 
 
 def check_launch(cfg: dict, plan_name: str, approve: bool) -> tuple[bool, str, dict]:

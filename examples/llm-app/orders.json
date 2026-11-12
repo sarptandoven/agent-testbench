@@ -1,0 +1,5 @@
+{
+  "A1001": {"status": "processing", "item": "desk lamp"},
+  "A1002": {"status": "shipped", "item": "wool blanket", "carrier": "UPS", "delivery": "2026-11-04"},
+  "A1003": {"status": "cancelled", "item": "teapot", "refund": "sent on 2026-10-28"}
+}

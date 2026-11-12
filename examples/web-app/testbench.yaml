@@ -1,0 +1,44 @@
+# agent-testbench example: a web app checked the way a person would use it - open it, fill the form, submit, read
+# the answer, look at the screenshots. Needs `pip install "agent-testbench[web]"` and `playwright install chromium`.
+project: web-app
+
+plans:
+  ui:
+    backend: local
+    description: in headless Chromium, split a bill and try a bad one; check the answers and the console (free)
+    steps:
+      - name: split a bill
+        web:
+          serve: python app.py 8974    # started first, stopped afterwards
+          url: http://127.0.0.1:8974/
+          actions:
+            - screenshot: empty-form
+            - fill: {selector: "#total", text: "50"}
+            - fill: {selector: "#people", text: "3"}
+            - fill: {selector: "#tip", text: "15"}
+            - click: "button[type=submit]"
+            - wait_for: "text=Each person pays"
+            - screenshot: split
+        max_minutes: 2
+        expect:
+          web:
+            status: 200
+            title: Split the bill
+            text: ["Each person pays $19.17 (of $57.50 with the tip)."]   # to the nearest cent
+            no_console_errors: true    # an uncaught error, a failed request or a console.error fails the step
+
+      - name: a bad bill is explained
+        web:
+          serve: python app.py 8974
+          url: http://127.0.0.1:8974/
+          actions:
+            - fill: {selector: "#total", text: "80"}
+            - fill: {selector: "#people", text: "0"}
+            - click: "button[type=submit]"
+            - wait_for: "#result.error"
+            - screenshot: no-people
+        max_minutes: 2
+        expect:
+          web:
+            text: ["the bill needs at least one person"]
+            no_console_errors: true

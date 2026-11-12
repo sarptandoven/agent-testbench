@@ -4,7 +4,9 @@
 
 Prints one line `TESTBENCH_RESULT {json}`: status (ok | error | timeout), stdout, stderr, the value of the last
 expression, the files of images it displayed, and for an error its name, message, the cell line that raised it
-and the traceback. A cell that runs past its timeout is interrupted, so the kernel and its state survive.
+and the traceback. A cell that runs past its timeout is interrupted, so the kernel and its state survive. While it
+runs, `busy` sits next to the connection file and `last_used` is touched when it ends: the machine's watchdog
+counts idle time from them.
 """
 import argparse
 import base64
@@ -38,6 +40,8 @@ def _failing_line(tb: str):
 
 def execute(connection_file: str, code: str, timeout: float = 600, out_dir: str = ".", prefix: str = "exec") -> dict:
     from jupyter_client import BlockingKernelClient
+    from .watchdog import mark_busy, mark_used
+    state_dir = Path(connection_file).parent
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     kc = BlockingKernelClient(connection_file=connection_file)
@@ -46,6 +50,9 @@ def execute(connection_file: str, code: str, timeout: float = 600, out_dir: str 
     began = time.time()
     res = {"status": "ok", "stdout": "", "stderr": "", "result": None, "displays": [], "images": [], "error": None,
            "execution_count": None, "seconds": 0.0}
+    pid_file = Path(connection_file).with_name("kernel.pid")
+    kernel_pid = int(pid_file.read_text()) if pid_file.exists() and pid_file.read_text().strip().isdigit() else None
+    mark_busy(state_dir, began + timeout + 120)
     try:
         kc.wait_for_ready(timeout=60)
         msg_id = kc.execute(code, store_history=True, allow_stdin=False, stop_on_error=True)
@@ -62,8 +69,13 @@ def execute(connection_file: str, code: str, timeout: float = 600, out_dir: str 
             if left <= 0 and interrupted:
                 break
             try:
-                msg = kc.get_iopub_msg(timeout=min(max(left, 0.1), 5))
+                msg = kc.get_iopub_msg(timeout=min(max(left, 0.1), 2))
             except queue.Empty:
+                if kernel_pid and not _alive(kernel_pid):
+                    res["status"] = "error"
+                    res["error"] = {"ename": "KernelGone", "evalue": "the kernel stopped while this ran: the session "
+                                    "was stopped, or the kernel died (out of memory, a crash). Start a new session."}
+                    break
                 continue
             if msg.get("parent_header", {}).get("msg_id") != msg_id:
                 continue
@@ -97,14 +109,28 @@ def execute(connection_file: str, code: str, timeout: float = 600, out_dir: str 
                 break
     finally:
         kc.stop_channels()
+        mark_used(state_dir)
     res["stdout"], res["stderr"] = _keep_tail(res["stdout"]), _keep_tail(res["stderr"])
     res["seconds"] = round(time.time() - began, 2)
     return res
 
 
+def _alive(pid: int) -> bool:
+    from ..procs import alive
+    if not alive(pid):
+        return False
+    try:                                              # exited but not yet collected by its parent
+        return Path(f"/proc/{pid}/stat").read_text().split(")")[-1].split()[0] != "Z"
+    except OSError:
+        return True
+
+
 def _interrupt(connection_file: str, kc) -> None:
     pid_file = Path(connection_file).with_name("kernel.pid")
     pid = pid_file.read_text().strip() if pid_file.exists() else ""
+    if os.name == "nt":                               # a signal would end the kernel there: the launcher interrupts it
+        Path(connection_file).with_name("interrupt").write_text(str(time.time()))
+        return
     if pid.isdigit():
         try:
             os.kill(int(pid), signal.SIGINT)

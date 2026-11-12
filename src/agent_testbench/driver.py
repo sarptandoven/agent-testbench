@@ -7,7 +7,6 @@ SIGTERM (from `testbench cancel`) stops the work, cancels anything remote, and s
 from __future__ import annotations
 
 import json
-import signal
 import sys
 import time
 import traceback
@@ -32,8 +31,8 @@ def drive(run_dir: Path) -> dict:
     cfg = C.load(root)
     meta = {"run_id": run_dir.name, "plan": state["plan"], "backend": state["backend"], "gpu": state.get("gpu")}
     runs.write_state(run_dir, status="running", started=time.time())
-    from .backends import get_backend
-    backend = get_backend(state["backend"])(root=root, cfg=cfg, run_dir=run_dir, plan=plan, meta=meta)
+    from . import backends
+    backend = backends.get(state["backend"]).plan_runner()(root=root, cfg=cfg, run_dir=run_dir, plan=plan, meta=meta)
     try:
         rep, cost = backend.run()
     except KeyboardInterrupt:
@@ -48,7 +47,7 @@ def drive(run_dir: Path) -> dict:
         except Exception:
             pass
         cost = backend.cost(rep)
-    return runs.finalize(root, run_dir, rep, cost)
+    return runs.finalize(root, run_dir, rep, cost, cfg)
 
 
 def _partial(run_dir: Path, meta: dict, status: str, why: str) -> dict:
@@ -63,7 +62,8 @@ def _partial(run_dir: Path, meta: dict, status: str, why: str) -> dict:
 
 
 def main():
-    signal.signal(signal.SIGTERM, _on_term)
+    from .procs import on_stop
+    on_stop(_on_term)
     rep = drive(Path(sys.argv[1]))
     print(f"[testbench] run finished: {rep['status']}", flush=True)
 

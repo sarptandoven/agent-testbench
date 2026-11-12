@@ -1,10 +1,9 @@
 """A web UI checked the way a person would: open, click, read, look - and a broken UI caught."""
-import json
 import shutil
 
 import pytest
 
-from conftest import EXAMPLES, chromium_ready, cli
+from conftest import EXAMPLES, chromium_ready, cli, own_port
 
 pytestmark = [pytest.mark.web, pytest.mark.skipif(not chromium_ready(), reason="needs `playwright install chromium`")]
 
@@ -13,6 +12,7 @@ pytestmark = [pytest.mark.web, pytest.mark.skipif(not chromium_ready(), reason="
 def ui(tmp_path):
     dest = tmp_path / "web-ui"
     shutil.copytree(EXAMPLES / "web-ui", dest, ignore=shutil.ignore_patterns(".testbench"))
+    own_port(dest / "testbench.yaml", 8971)
     return dest
 
 

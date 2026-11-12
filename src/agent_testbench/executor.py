@@ -14,14 +14,13 @@ import json
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 
-from . import __version__, expect, notebook
+from . import __version__, expect, mocks, notebook
 
 SHIM = Path(__file__).parent / "colab_shim"
 ARTIFACT_FILE_LIMIT = 200 * 1024 * 1024
@@ -65,7 +64,13 @@ class GpuSampler:
         if not s:
             return None
         return {"gpu": self.name, "busy_pct": round(100 * sum(1 for u, _ in s if u > 10) / len(s)),
-                "mean_util_pct": round(sum(u for u, _ in s) / len(s)), "max_mem_mib": max(m for _, m in s)}
+                "mean_util_pct": round(sum(u for u, _ in s) / len(s)), "max_mem_mib": max(m for _, m in s),
+                "readings": len(s)}
+
+    def reading(self, start: int) -> dict | None:
+        """The window since `start`, sampled once more first, so short steps still get one reading."""
+        self.sample()
+        return self.window(start)
 
     def stop(self):
         self._stop.set()
@@ -80,7 +85,7 @@ def _copy_artifacts(patterns: list[str], workdir: Path, dest: Path) -> list[str]
     kept = []
     for pattern in patterns:
         for hit in sorted(glob.glob(str(workdir / pattern), recursive=True)):
-            src = Path(hit)
+            src = Path(os.path.abspath(hit))           # "../x" is outside the workdir: kept by its name, in dest
             if not src.is_file():
                 continue
             rel = src.relative_to(workdir) if src.is_relative_to(workdir) else Path(src.name)
@@ -95,26 +100,22 @@ def _copy_artifacts(patterns: list[str], workdir: Path, dest: Path) -> list[str]
 
 
 def _run_command(cmd: str, *, workdir: Path, env: dict, deadline: float, log_path: Path) -> dict:
+    from .procs import group_kwargs, shell, stop_and_wait
     with log_path.open("a") as log:
-        proc = subprocess.Popen(cmd, shell=True, cwd=workdir, env=env, stdout=log, stderr=subprocess.STDOUT,
-                                start_new_session=True, executable="/bin/bash" if Path("/bin/bash").exists() else None)
+        proc = subprocess.Popen(cwd=workdir, env=env, stdout=log, stderr=subprocess.STDOUT, **shell(cmd), **group_kwargs())
         try:
             code = proc.wait(timeout=max(1, deadline - time.time()))
             return {"exit_code": code, "timed_out": False}
         except BaseException as exc:                              # timeout, or the run was cancelled
-            for sig in (signal.SIGTERM, signal.SIGKILL):
-                try:
-                    os.killpg(proc.pid, sig)
-                    proc.wait(timeout=10)
-                    break
-                except Exception:
-                    continue
+            stop_and_wait(proc.pid, grace=10, proc=proc)
             if not isinstance(exc, subprocess.TimeoutExpired):
                 raise
             return {"exit_code": None, "timed_out": True}
 
 
-def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_env: dict) -> dict:
+def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_env: dict, gpu=None,
+             run_started: float | None = None) -> dict:
+    """gpu: called once the step's work is done, returns its GPU window (gpu: expectations check it)."""
     step_dir.mkdir(parents=True, exist_ok=True)
     log_path = step_dir / "log.txt"
     log_path.touch()
@@ -123,6 +124,11 @@ def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_e
     env = dict(base_env)
     env.update({k: str(v) for k, v in step["env"].items()})
     paths = [str((workdir / p).resolve()) for p in step["pythonpath"]]
+    mocked = step.get("mocks") or {}
+    if mocked:                                                  # the mock openai / anthropic packages win the import
+        paths = mocks.client_paths(mocked) + paths
+        env.update(mocks.client_env(mocked, workdir))
+        env.pop("TESTBENCH_MOCK_CALLS", None)                    # the log goes to the step's folder, where it is read
     if step["kind"] == "notebook" and step.get("colab_shim", True):
         paths.insert(0, str(SHIM))
     env["PYTHONPATH"] = os.pathsep.join(paths + [p for p in [env.get("PYTHONPATH")] if p])
@@ -169,9 +175,12 @@ def run_step(step: dict, *, project: Path, workdir: Path, step_dir: Path, base_e
             result.update(status="error", error={"ename": type(exc).__name__, "evalue": str(exc)[:2000]})
     text = log_path.read_text(errors="replace")
     result["stdout_tail"] = notebook._tail(text, 40, 5000)
+    result["gpu"] = gpu() if gpu else None
     if result["status"] in ("passed", "failed") or step["kind"] == "run":
-        checks = expect.check(step["expect"], workdir=workdir,
-                              result={**result, "stdout": text, "web": result.pop("_web_full", None) or result.get("web")})
+        seen = {**result, "stdout": text, "web": result.pop("_web_full", None) or result.get("web"),
+                "seconds": time.time() - began, "run_started": run_started, "step_dir": str(step_dir),
+                "mocks": mocked, "command": step.get("run")}
+        checks = expect.check(step["expect"], workdir=workdir, result=seen)
         result["expectations"] = checks
         if result["status"] == "passed" and not all(c["ok"] for c in checks):
             result["status"] = "failed"
@@ -190,8 +199,9 @@ def execute_plan(plan: dict, *, project_dir: str | Path, run_dir: str | Path, wo
     project, run_dir = Path(project_dir).resolve(), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     workdir = Path(workdir).resolve() if workdir else project
+    from .provenance import environment
     report = {"testbench_version": __version__, **(meta or {}), "status": "running", "started": time.time(),
-              "steps": [], "workdir": str(workdir)}
+              "steps": [], "workdir": str(workdir), "environment": environment()}
     sampler = GpuSampler()
     base_env = {**os.environ, "TESTBENCH_RUN_DIR": str(run_dir), "TESTBENCH_PROJECT_DIR": str(project)}
     # steps see the Python that runs testbench first, so `python` and `testbench` in a step mean this environment
@@ -210,9 +220,7 @@ def execute_plan(plan: dict, *, project_dir: str | Path, run_dir: str | Path, wo
             save()
             mark = len(sampler.samples)
             result = run_step(step, project=project, workdir=workdir, step_dir=run_dir / "steps" / f"{i:02d}-{slug(step['name'])}",
-                              base_env=base_env)
-            sampler.sample()                                       # short steps still get one reading
-            result["gpu"] = sampler.window(mark)
+                              base_env=base_env, gpu=lambda: sampler.reading(mark), run_started=report["started"])
             result["dir"] = f"steps/{i:02d}-{slug(step['name'])}"
             report["steps"].append(result)
             _event(run_dir, event="step_end", step=step["name"], index=i, status=result["status"], minutes=result["minutes"])

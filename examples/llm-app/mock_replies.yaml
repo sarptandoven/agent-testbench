@@ -1,0 +1,17 @@
+# What the mock model answers in the plans (testbench.yaml: mocks: {anthropic: {replies: mock_replies.yaml}}).
+# Each pattern is searched in the last user message - or in the tool results, when they come last - and the first
+# rule that matches answers. So the answer to a lookup is made from what lookup_order really returned.
+- match: '"order_id": "(\w+)", "status": "shipped", .*"carrier": "([^"]+)", "delivery": "([^"]+)"'
+  text: 'Order \1 has shipped with \2 and should arrive on \3.'
+- match: '"order_id": "(\w+)", "status": "processing"'
+  text: 'Order \1 is still being packed; you will get an e-mail with tracking as soon as it ships.'
+- match: '"order_id": "(\w+)", "status": "cancelled", .*"refund": "([^"]+)"'
+  text: 'Order \1 was cancelled, and the refund was \2.'
+- match: '"order_id": "(\w+)", "status": "not found"'
+  text: 'I could not find an order \1. Could you check the number in your confirmation e-mail?'
+- match: '(?i)\border (A\d+)'
+  text: Let me look that up.
+  tool: lookup_order
+  input: {order_id: '\1'}
+- match: '(?i)opening hours'
+  text: We are an online shop, so we never close; this chat answers around the clock.

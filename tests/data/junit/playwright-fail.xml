@@ -1,0 +1,84 @@
+<testsuites id="" name="" tests="4" failures="1" skipped="1" errors="0" time="13.364495">
+<testsuite name="flaky.spec.ts" timestamp="2026-11-01T08:16:48.884Z" hostname="chromium" tests="1" failures="0" skipped="0" time="0.024" errors="0">
+<testcase name="passes on retry" classname="flaky.spec.ts" time="0.024">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|test-results/flaky-passes-on-retry-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="home.spec.ts" timestamp="2026-11-01T08:16:48.884Z" hostname="chromium" tests="3" failures="1" skipped="1" time="10.792" errors="0">
+<testcase name="home › has title" classname="home.spec.ts" time="10.394">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|test-results/home-home-has-title-chromium/error-context.md]]
+
+[[ATTACHMENT|test-results/home-home-has-title-chromium-retry1/error-context.md]]
+]]>
+</system-out>
+<failure message="expect(page).toHaveTitle(expected) failed" type="expect.toHaveTitle">
+<![CDATA[  [chromium] › home.spec.ts:6:7 › home › has title ─────────────────────────────────────────────────
+
+    Error: expect(page).toHaveTitle(expected) failed
+
+    Expected: "Other App"
+    Received: "My App"
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveTitle" with timeout 5000ms
+        14 × locator resolved to <html>…</html>
+           - unexpected value "My App"
+
+
+       6 |   test("has title", async ({ page }) => {
+       7 |     await page.setContent(page_html);
+    >  8 |     await expect(page).toHaveTitle("Other App");
+         |                        ^
+       9 |   });
+      10 |
+      11 |   test("button works", async ({ page }) => {
+        at /tmp/tb-lang-tools/proj/playwright/e2e/home.spec.ts:8:24
+
+    Error Context: ../test-results/home-home-has-title-chromium/error-context.md
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: expect(page).toHaveTitle(expected) failed
+
+    Expected: "Other App"
+    Received: "My App"
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveTitle" with timeout 5000ms
+        14 × locator resolved to <html>…</html>
+           - unexpected value "My App"
+
+
+       6 |   test("has title", async ({ page }) => {
+       7 |     await page.setContent(page_html);
+    >  8 |     await expect(page).toHaveTitle("Other App");
+         |                        ^
+       9 |   });
+      10 |
+      11 |   test("button works", async ({ page }) => {
+        at /tmp/tb-lang-tools/proj/playwright/e2e/home.spec.ts:8:24
+
+    Error Context: ../test-results/home-home-has-title-chromium-retry1/error-context.md
+]]>
+</failure>
+</testcase>
+<testcase name="home › button works" classname="home.spec.ts" time="0.398">
+</testcase>
+<testcase name="home › not yet" classname="home.spec.ts">
+<properties>
+<property name="skip" value="">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+</testsuites>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+	<testsuite name="sum" time="0.002657" disabled="0" errors="0" tests="3" failures="0" skipped="1" hostname="vm">
+		<testcase name="adds 1 + 2 to equal 3" time="0.000854" classname="test"/>
+		<testcase name="adds negatives" time="0.000183" classname="test"/>
+		<testcase name="handles big numbers" time="0.000208" classname="test">
+			<skipped type="skipped" message="true"/>
+		</testcase>
+	</testsuite>
+	<!-- tests 3 -->
+	<!-- suites 1 -->
+	<!-- pass 2 -->
+	<!-- fail 0 -->
+	<!-- cancelled 0 -->
+	<!-- skipped 1 -->
+	<!-- todo 0 -->
+	<!-- duration_ms 109.410006 -->
+</testsuites>

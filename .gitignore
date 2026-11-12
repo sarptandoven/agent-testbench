@@ -8,3 +8,9 @@ build/
 .testbench/
 examples/*/outputs/
 .DS_Store
+
+# Claude Code worktrees of parallel agents (local only)
+.claude/worktrees/
+
+# mkdocs build output (mkdocs.yml)
+site/
