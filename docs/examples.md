@@ -122,5 +122,8 @@ a Modal T4 and a Colab runtime, each priced before it starts. It is the project 
 ## More in examples/
 
 - [web-ui](../examples/web-ui): a one-page counter, clicked twice in headless Chromium.
+- [sealed-backtest](../examples/sealed-backtest): a moving-average crossover with the last quarter of its prices
+  sealed: a backtest on the earlier rows, a walk-forward over seven windows, and a holdout plan that may open the
+  sealed quarter once ([sealed data](trading-data.md)).
 - [agent-loop](../examples/agent-loop): an agent of your own in about 60 lines, on the Anthropic SDK and
   testbench's tools ([Python API](python-api.md)).

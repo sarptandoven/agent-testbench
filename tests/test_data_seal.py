@@ -5,8 +5,10 @@ only the rows before the window's test end; and every run records what its steps
 `testbench diff` compare."""
 import datetime as dt
 import hashlib
-import io
 import json
+import shutil
+import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -14,7 +16,7 @@ import pytest
 import yaml
 
 from agent_testbench import budget, config as C, dataseal as DS, executor, runs
-from conftest import cli
+from conftest import EXAMPLES, cli
 
 HOLDOUT = "2025-07-01"
 SEEN = '''\
@@ -163,7 +165,8 @@ def test_a_row_whose_time_cannot_be_read_refuses_the_launch(tmp_path):
     with (root / "data" / "prices.csv").open("a") as f:
         f.write("next tuesday,SPY,1.0\n")
     r = cli(root, "run", "dev", "--foreground")
-    assert r.returncode == 2 and "data/prices.csv line 1502, column `time`: 'next tuesday' is not an ISO 8601" in r.stdout
+    assert r.returncode == 2
+    assert "data/prices.csv line 1502, column `time`: 'next tuesday' is not an ISO 8601" in r.stdout
     assert "a row it cannot place could be a sealed one" in r.stdout and not (root / ".testbench" / "runs").exists()
     (tmp_path / "q.csv").write_text('time,note\n2024-01-02,"a stray quote\n2025-08-01,a sealed row"\n')
     with pytest.raises(DS.DataError, match="line 2 opens a quoted value it does not close"):
@@ -353,7 +356,8 @@ def test_verify_says_when_the_data_changed_since_the_run_and_diff_shows_it(tmp_p
     r = cli(root, "diff")
     assert r.returncode == 0, r.stdout + r.stderr
     assert ("- prices (`data/prices.csv`): the file changed between the runs (sha256 "
-            f"{rep['data']['prices']['file']['sha256'][:12]} -> ") in r.stdout and f"-> {len(lines) - 1} rows" in r.stdout
+            f"{rep['data']['prices']['file']['sha256'][:12]} -> ") in r.stdout
+    assert f"-> {len(lines) - 1} rows" in r.stdout
     d = json.loads(cli(root, "diff", "--json").stdout)
     assert d["data"]["changed"] and d["data"]["roles"][0]["change"] == "file changed"
     assert d["data"]["roles"][0]["a"]["sha256"] == d["data"]["roles"][0]["b"]["sha256"], "the same rows before it"
@@ -372,10 +376,29 @@ def test_verify_says_when_the_data_changed_since_the_run_and_diff_shows_it(tmp_p
     assert r.returncode == 1 and "changed: steps/01-" in r.stdout, "what the step saw is evidence"
 
 
+def test_the_sealed_backtest_example_tunes_walks_forward_and_opens_the_holdout_once(tmp_path):
+    root = tmp_path / "sealed-backtest"
+    shutil.copytree(EXAMPLES / "sealed-backtest", root, ignore=shutil.ignore_patterns(".testbench", "out",
+                                                                                     "__pycache__"))
+    shipped = (root / "data" / "prices.csv").read_bytes()
+    subprocess.run([sys.executable, "make_prices.py"], cwd=root, check=True, timeout=60)
+    assert (root / "data" / "prices.csv").read_bytes() == shipped, "make_prices.py writes the file that ships"
+    for plan in ("backtest", "walk-forward", "holdout"):
+        r = cli(root, "run", plan, "--foreground")
+        assert r.returncode == 0 and f"# PASS - plan `{plan}`" in r.stdout, r.stdout + r.stderr
+    assert "## Walk-forward: 7 windows, 7 passed" in (runs.all_runs(root)[1] / "report.md").read_text()
+    assert "this run is the first to open it" in r.stdout and "the whole file, the sealed rows from" in r.stdout
+    r = cli(root, "run", "holdout", "--foreground")
+    assert r.returncode == 2 and "plans.holdout.holdout.max_opens is 1" in r.stdout
+    r = cli(root, "verify")
+    assert r.returncode == 0 and "data/prices.csv (prices) is the data the run read" in r.stdout
+
+
 def test_a_project_without_data_is_as_before(tmp_path):
     (tmp_path / "testbench.yaml").write_text("plans:\n  tests: python -c pass\n")
     cfg = C.load(tmp_path)
-    assert cfg["data"] == {} and cfg["plans"]["tests"]["workdir"] == "inplace" and "holdout" not in cfg["plans"]["tests"]
+    assert cfg["data"] == {} and cfg["plans"]["tests"]["workdir"] == "inplace"
+    assert "holdout" not in cfg["plans"]["tests"] and "walk_forward" not in cfg["plans"]["tests"]
     run_dir, rep = launch(tmp_path, "tests")
     assert rep["status"] == "passed" and "data" not in rep and "holdout" not in rep and "windows" not in rep
     assert not list((run_dir / "steps").glob("*/data.json"))

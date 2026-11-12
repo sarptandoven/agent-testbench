@@ -75,8 +75,8 @@ def check_data(raw, root: Path, exclude: list[str]) -> dict:
     for role, spec in raw.items():
         where = f"data.{role}"
         if not isinstance(role, str) or not ROLE.fullmatch(role):
-            raise ConfigError(f"`data` has the role {role!r}; a role is a short name of letters, digits and _, starting "
-                              f"with a letter (a step finds its file in TESTBENCH_DATA_<ROLE>), e.g. prices")
+            raise ConfigError(f"`data` has the role {role!r}; a role is a short name of letters, digits and _, "
+                              "starting with a letter (a step finds its file in TESTBENCH_DATA_<ROLE>), e.g. prices")
         if env_name(role) in names:
             raise ConfigError(f"`data.{role}` and `data.{names[env_name(role)]}` would both be {env_name(role)}; "
                               "rename one")
@@ -154,8 +154,8 @@ def check_plan(where: str, plan: dict, data: dict) -> None:
     if wf is not None:
         plan["walk_forward"] = wf = _walk(where, wf, data)
         if holdout:
-            raise ConfigError(f"`{where}`: a plan opens the holdout (holdout:) or walks forward through the rows before "
-                              "it (walk_forward:), not both; make them two plans")
+            raise ConfigError(f"`{where}`: a plan opens the holdout (holdout:) or walks forward through the rows "
+                              "before it (walk_forward:), not both; make them two plans")
     cut = (bool(sealed) and not holdout) or wf is not None
     if cut:
         if plan.get("workdir") == "inplace":
@@ -316,8 +316,8 @@ def _pass(src: Path, name: str, role: str, want: str | None, cut: dt.datetime | 
                 try:
                     text = raw.decode("utf-8")
                 except UnicodeDecodeError as exc:
-                    raise DataError(f"{name} line {line} is not UTF-8 text ({exc.reason}); save the file as UTF-8 CSV") \
-                        from None
+                    raise DataError(f"{name} line {line} is not UTF-8 text ({exc.reason}); save the file as UTF-8 "
+                                    "CSV") from None
                 blank = not text.strip(" \t\r\n,\ufeff")
                 if index is None:                              # the header (and blank lines before it) go along
                     if not blank:
@@ -338,8 +338,8 @@ def _pass(src: Path, name: str, role: str, want: str | None, cut: dt.datetime | 
                 try:
                     t = _parse(cells[index])
                 except ValueError as exc:
-                    raise DataError(f"{name} line {line}, column `{column}`: {exc}. Every row needs a time the seal can "
-                                    "read: a row it cannot place could be a sealed one") from None
+                    raise DataError(f"{name} line {line}, column `{column}`: {exc}. Every row needs a time the seal "
+                                    "can read: a row it cannot place could be a sealed one") from None
                 aware = t.tzinfo is not None
                 zone = zone or (aware, line, cells[index].strip())
                 if aware != zone[0]:
@@ -521,7 +521,7 @@ def windows_of(cfg: dict, plan_name: str) -> list[dict]:
 
 
 def window_count(cfg: dict, plan_name: str) -> int:
-    """How many times a plan's steps run: once per walk-forward window, else once. budget.worst_case multiplies by it."""
+    """How many times a plan's steps run: once per walk-forward window, else once (budget.worst_case uses it)."""
     return len(windows_of(cfg, plan_name)) or 1
 
 
@@ -637,10 +637,10 @@ def holdout(root: Path, cfg: dict, plan_name: str) -> tuple[dict, str | None]:
             "count again)" if latest else "seal rows no opening has seen, with a later holdout_from")
     return rec, (f"Refused: plan {plan_name} opens the holdout (the sealed rows: {what}), which was opened "
                  f"{counted(len(before), 'time')} already (first in run {first.get('run', '?')} at "
-                 f"{first.get('time', '?')}), and plans.{plan_name}.holdout.max_opens is {most}. A holdout is an honest "
-                 "test only while nothing was tuned on it. Nothing ran and nothing was spent. To test on untouched "
-                 f"rows, {move}; or have a person raise holdout.max_opens in testbench.yaml (every report still says "
-                 "how many times the holdout was opened).")
+                 f"{first.get('time', '?')}), and plans.{plan_name}.holdout.max_opens is {most}. A holdout is an "
+                 "honest test only while nothing was tuned on it. Nothing ran and nothing was spent. To test on "
+                 f"untouched rows, {move}; or have a person raise holdout.max_opens in testbench.yaml (every report "
+                 "still says how many times the holdout was opened).")
 
 
 def _readable(text) -> bool:
@@ -711,7 +711,7 @@ class Seal:
         return out
 
     def window(self, k: int) -> dict:
-        """Cut every role to the rows before window k's test end (from the rows before the seal); {role: fingerprint}."""
+        """Cut every role to the rows before window k's test end, from the rows before the seal; {role: fingerprint}."""
         if k == self.current:
             return self.seen
         cut = _parse(self.windows[k]["test_end"])

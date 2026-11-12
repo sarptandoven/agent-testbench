@@ -52,6 +52,14 @@ A number that is not defined is `null` in the JSON (no losing trade means no pro
 comparison, so a check never passes for want of a number. A file the reader refuses fails the step, with the
 reader's message in its log.
 
+## Sealed data
+
+Numbers testbench computes can still come from a strategy tuned on the very rows they grade. testbench.yaml's `data:`
+names the price files the plans read and seals the latest rows (`holdout_from`): every plan but the one that opens
+the holdout sees the file cut before them, each opening is counted (and `max_opens` refuses more), a
+`walk_forward:` plan runs window by window with no row from the future, and every report records the sha256 of the
+data its steps saw, which `testbench verify` and `testbench diff` compare: [Sealed data](trading-data.md).
+
 ## The files
 
 All three are UTF-8 CSV with a header line. Column names match whatever their case and surrounding spaces; other
