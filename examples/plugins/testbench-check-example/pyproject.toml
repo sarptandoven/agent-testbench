@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "testbench-check-example"
+version = "0.1.0"
+description = "An example expect: check for agent-testbench: max_log_lines fails a step that printed too much"
+requires-python = ">=3.10"
+dependencies = ["agent-testbench"]
+
+# testbench finds the check here: the name is the key under expect:, the value is the Check (or its class)
+[project.entry-points."agent_testbench.checks"]
+max_log_lines = "testbench_check_example:MaxLogLines"
+
+[tool.setuptools]
+py-modules = ["testbench_check_example"]

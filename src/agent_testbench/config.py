@@ -638,102 +638,11 @@ def _mocks(where: str, value, root: Path) -> dict:
     return out
 
 
-def _rule(where: str, rule) -> None:
-    from .expect import rule_error
-    bad = rule_error(rule)
-    if bad:
-        raise ConfigError(f"`{where}`: {bad}")
-
-
-def _table(where: str, value, example: str, keys=None, some=False) -> dict:
-    """A mapping; with keys, each of its values is a rule and only those keys are allowed; with some, not empty."""
-    if not isinstance(value, dict):
-        raise ConfigError(f"`{where}` must be a mapping, e.g. {example}")
-    if some and not value:                               # {metrics.json: {}} would check nothing, even a missing file
-        raise ConfigError(f"`{where}` is empty, so nothing would be checked; e.g. {example}")
-    for k, rule in value.items() if keys else ():
-        if k not in keys:
-            raise ConfigError(f"`{where}` has no {k!r}; use {', '.join(keys)}, e.g. {example}")
-        _rule(f"{where}.{k}", rule)
-    return value
-
-
 def _expect(where: str, e: dict) -> None:
-    """Malformed expectations fail at load time, before anything runs (docs/expectations.md has every one)."""
+    """Malformed expectations fail at load time, before anything runs (docs/expectations.md has every one). Each kind
+    of check validates its own value (expect.Check.validate), the built-ins and installed plug-ins alike."""
     from . import expect as X
-    for key in e:
-        if key not in X.KINDS:
-            raise ConfigError(f"`{where}` has no {key!r} check; expectations are {', '.join(X.KINDS)}")
-    for kind in ("json", "text", "media", "metrics", "image"):          # keyed by a file (or stdout)
-        for k in e[kind] if isinstance(e.get(kind), dict) else ():
-            if not isinstance(k, str) or not k.strip():
-                raise ConfigError(f"`{where}.{kind}` has {k!r} where a file's path" + (" (or stdout)" if kind in
-                                  ("text", "metrics") else "") + " goes; write the path in quotes")
-    if "exit_code" in e and (not isinstance(e["exit_code"], int) or isinstance(e["exit_code"], bool)):
-        raise ConfigError(f"`{where}.exit_code` is the code the command must exit with, a whole number such as 0")
-    if "no_errors" in e and not isinstance(e["no_errors"], bool):
-        raise ConfigError(f"`{where}.no_errors` is true or false")
-    if not isinstance(e.get("files", []), list) or not all(isinstance(f, str) and f.strip() for f in e.get("files", [])):
-        raise ConfigError(f"`{where}.files` is a list of paths or globs, e.g. [outputs/model.pt, \"plots/*.png\"]")
-    for path, rules in _table(f"{where}.json", e.get("json") or {}, '{metrics.json: {accuracy: ">= 0.9"}}').items():
-        for key, rule in _table(f"{where}.json.{path}", rules, '{accuracy: ">= 0.9", "losses.-1": "< 0.5"}', some=True).items():
-            _rule(f"{where}.json.{path}.{key}", rule)
-    for source, needles in _table(f"{where}.text", e.get("text") or {}, '{stdout: ["epoch 10"]}').items():
-        needles = [needles] if isinstance(needles, str) else needles
-        if not isinstance(needles, list) or not needles or not all(isinstance(n, str) and n for n in needles):
-            raise ConfigError(f"`{where}.text.{source}` is the text to find, or a list of texts, e.g. [\"epoch 10\"] "
-                              "(an empty text is found in anything)")
-    for path, rules in _table(f"{where}.media", e.get("media") or {}, '{out/video.mp4: {frames: ">= 120"}}').items():
-        _table(f"{where}.media.{path}", rules, '{frames: ">= 120", width: 1920, audio: true}', X.MEDIA_KEYS, some=True)
-    web = _table(f"{where}.web", e.get("web") or {}, '{status: 200, text: ["Count: 2"]}')
-    for k in web:
-        if k not in X.WEB_KEYS:
-            raise ConfigError(f"`{where}.web` has no {k!r}; use {', '.join(X.WEB_KEYS)}")
-    _rule(f"{where}.web.status", web.get("status"))
-    if not isinstance(web.get("text", []), list) or not all(isinstance(t, str) and t for t in web.get("text", [])):
-        raise ConfigError(f"`{where}.web.text` is a list of texts the page must show, e.g. [\"Count: 2\"]")
-    if "title" in web and not (isinstance(web["title"], str) and web["title"]):
-        raise ConfigError(f"`{where}.web.title` is text the page's title contains, e.g. Counter")
-    if not isinstance(web.get("no_console_errors", True), bool):
-        raise ConfigError(f"`{where}.web.no_console_errors` is true or false")
-    junit, example = e.get("junit"), '{path: report.xml, failures: 0, tests: ">= 10"}'
-    if junit is not None and not isinstance(junit, (str, dict, list)):
-        raise ConfigError(f"`{where}.junit` is the report's path or {example}")
-    for i, spec in enumerate(X.junit_specs(junit) or ([None] if isinstance(junit, (str, dict)) else [])):
-        at = f"{where}.junit" + (f"[{i}]" if isinstance(junit, list) else "")
-        if not isinstance(spec, dict) or not isinstance(spec.get("path"), str) or not spec["path"].strip():
-            raise ConfigError(f"`{at}` needs `path:`, the JUnit XML file the test command writes, e.g. {example} "
-                              "(pytest: --junitxml=report.xml)")
-        _table(at, {k: v for k, v in spec.items() if k != "path"}, example, X.JUNIT_KEYS)
-    example = '{"val_loss=([0-9.eE+-]+)": "< 0.3"}'
-    for source, patterns in _table(f"{where}.metrics", e.get("metrics") or {}, f"{{stdout: {example}}}").items():
-        for pattern, rule in _table(f"{where}.metrics.{source}", patterns, example, some=True).items():
-            if not isinstance(pattern, str):
-                raise ConfigError(f"`{where}.metrics.{source}` has {pattern!r} where a regular expression goes; write it "
-                                  f"in quotes, e.g. {example}")
-            try:
-                re.compile(pattern)
-            except re.error as exc:
-                raise ConfigError(f"`{where}.metrics.{source}`: {pattern!r} is not a regular expression ({exc}); its "
-                                  "first group is the number, e.g. \"val_loss=([0-9.eE+-]+)\"") from None
-            _rule(f"{where}.metrics.{source}.{pattern}", rule)
-    _table(f"{where}.gpu", e.get("gpu") or {}, '{busy_pct: ">= 50", max_mem_mib: "<= 15000"}', X.GPU_KEYS)
-    example = "{like: golden/plot.png, max_diff: 0.02}"
-    for path, spec in _table(f"{where}.image", e.get("image") or {}, f"{{outputs/plot.png: {example}}}").items():
-        at = f"{where}.image.{path}"
-        if not isinstance(spec, dict) or not isinstance(spec.get("like"), str) or set(spec) - {"like", "max_diff"}:
-            raise ConfigError(f"`{at}` is {example}: the known-good image and the largest mean pixel difference (0..1)")
-        most = spec.get("max_diff", 0.02)
-        if not isinstance(most, (int, float)) or isinstance(most, bool) or not 0 <= most <= 1:
-            raise ConfigError(f"`{at}.max_diff` is a number from 0 (identical) to 1, e.g. 0.02")
-    _table(f"{where}.duration", e.get("duration") or {}, '{minutes: "<= 5"}', X.DURATION_KEYS)
-    example = '{calls: "<= 5", output_tokens: "<= 2000"}'
-    for sdk, rules in _table(f"{where}.mock_calls", e.get("mock_calls") or {}, f"{{anthropic: {example}}}").items():
-        if sdk not in X.MOCK_SDKS:
-            raise ConfigError(f"`{where}.mock_calls` names {sdk!r}; the mock clients are {', '.join(X.MOCK_SDKS)}")
-        broker = sdk in X.BROKER_SDKS                           # the mock brokers count orders, not tokens
-        _table(f"{where}.mock_calls.{sdk}", rules, '{orders: "<= 20", orders_without_limit: 0}' if broker else example,
-               X.BROKER_KEYS if broker else X.MOCK_KEYS)
+    X.validate(where, e)
 
 
 def parse_cells(spec, where="cells") -> list[int]:

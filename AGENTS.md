@@ -60,6 +60,9 @@
   finds, run here; the record `.testbench/check.json` is the folder's config then, through `config.checked`, which
   reads only local plans from it - never a budget). `executor.step_path`: from uvx, uv tool or pipx, steps get the
   project's `python`.
+- Checks: each `expect:` kind is a `Check` in `expect.py` (`validate` when testbench.yaml loads, `check` after the
+  step), registered like a package's plug-in of kind `checks` (`docs/plugins.md#checks`). A new built-in goes in
+  `KINDS`, `RUN_ORDER`, the schema and docs/expectations.md, and keeps the contract (tests/test_checks_plugins.py).
 - Plans for LLM apps: `mocks.py` and `mock_clients/` (the mock `openai` / `anthropic` packages a step's `mocks:` puts
   first on PYTHONPATH; they never touch the network). The broker mocks `alpaca` / `ccxt` / `ib_async` (+ `ib_insync`)
   share `mock_clients/shared/_testbench_broker.py` (prices, the paper account, fills, the live-account refusal).

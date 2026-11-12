@@ -124,3 +124,5 @@ a Modal T4 and a Colab runtime, each priced before it starts. It is the project 
 - [web-ui](../examples/web-ui): a one-page counter, clicked twice in headless Chromium.
 - [agent-loop](../examples/agent-loop): an agent of your own in about 60 lines, on the Anthropic SDK and
   testbench's tools ([Python API](python-api.md)).
+- [plugins/testbench-check-example](../examples/plugins/testbench-check-example): a check plug-in in one file,
+  `max_log_lines: 200` ([Check plug-ins](plugins.md#checks)).

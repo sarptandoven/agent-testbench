@@ -857,7 +857,10 @@
     "expect": {
       "description": "What must hold for the step to pass; every kind is in docs/expectations.md",
       "type": "object",
-      "additionalProperties": false,
+      "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9_-]*$"},
+      "additionalProperties": {
+        "description": "A check from an installed plug-in package (docs/plugins.md#checks; `testbench plugins` lists them, and `testbench schema` adds the ones that describe their value). testbench refuses a name no installed check has when it loads the file"
+      },
       "properties": {
         "exit_code": {"description": "The code the command must exit with (run steps: default 0)", "type": "integer"},
         "no_errors": {

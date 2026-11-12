@@ -237,7 +237,8 @@ def cmd_recipes(a):
 
 
 def cmd_schema(a):
-    print(C.SCHEMA.read_text(encoding="utf-8"), end="")
+    from .expect import schema_text                      # the shipped file, plus installed check plug-ins' schemas
+    print(schema_text(), end="")
     return 0
 
 

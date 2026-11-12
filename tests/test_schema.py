@@ -223,7 +223,7 @@ REFUSED = [
     STEP + "{name: a, run: x, mocks: {openai: {retries: 2}}}\n",
     STEP + "{name: a, run: x, mocks: {openai: {fail_with: auth}}}\n",
     STEP + "{name: a, run: x, mocks: {openai: {fail_on_call: 0}}}\n",
-    STEP + "{name: a, run: x, expect: {exit: 0}}\n", STEP + "{name: a, run: x, expect: {exit_code: '0'}}\n",
+    STEP + "{name: a, run: x, expect: {'exit code': 0}}\n", STEP + "{name: a, run: x, expect: {exit_code: '0'}}\n",
     STEP + "{name: a, run: x, expect: {no_errors: 'yes'}}\n", STEP + "{name: a, run: x, expect: {files: ['']}}\n",
     STEP + "{name: a, run: x, expect: {files: out.txt}}\n", STEP + "{name: a, run: x, expect: {json: {m.json: {}}}}\n",
     STEP + "{name: a, run: x, expect: {json: {m.json: {a: '=> 0.9'}}}}\n",
@@ -248,6 +248,18 @@ def test_what_testbench_refuses_for_its_shape_the_schema_refuses(tmp_path, text)
     with pytest.raises(C.ConfigError):
         C.load(tmp_path)
     assert problems(text), "an editor would show nothing wrong with a file testbench refuses"
+
+
+def test_a_check_name_testbench_does_not_know_may_be_a_plug_in_s_so_only_testbench_refuses_it(tmp_path):
+    """Check plug-ins add expect: keys the shipped schema cannot know, so it allows any plain name there (a name with
+    a space is still flagged). testbench itself refuses a name no installed check has, naming the near miss."""
+    text = STEP + "{name: a, run: x, expect: {exit: 0, max_log_lines: 200}}\n"
+    (tmp_path / "testbench.yaml").write_text(text)
+    with pytest.raises(C.ConfigError, match=r"has no 'exit' check; expectations are exit_code, .* \(did you mean "
+                                            r"exit_code\?\)"):
+        C.load(tmp_path)
+    assert problems(text) == []
+    assert SCHEMA["$defs"]["expect"]["additionalProperties"] is not False
 
 
 # ---- drift: a config key without a schema entry fails here -------------------------------------------------------
