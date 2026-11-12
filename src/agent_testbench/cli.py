@@ -1851,10 +1851,13 @@ def _chosen(ap, a):
 def _os_error(exc: OSError) -> str:
     if exc.filename and isinstance(exc, PermissionError) and Path(exc.filename).is_dir():
         return f"{exc.filename} is a folder, not a file"          # what Windows says when a folder is opened
+    name = exc.filename
+    if name and not Path(name).is_absolute():
+        name = Path(name).as_posix()                      # as it was typed: notes/x.ipynb, also on Windows
     for kind, what in ((FileNotFoundError, "does not exist"), (IsADirectoryError, "is a folder, not a file"),
                        (NotADirectoryError, "is not a folder"), (PermissionError, "may not be read or written here")):
         if isinstance(exc, kind) and exc.filename:
-            return f"{exc.filename} {what}"
+            return f"{name} {what}"
     return str(exc)
 
 

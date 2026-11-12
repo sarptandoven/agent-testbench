@@ -5,11 +5,17 @@ an unknown name lists the plug-ins too; and a broken plug-in only breaks what us
 import json
 import os
 import re
-import tomllib
 from pathlib import Path
 
 import jsonschema
 import pytest
+try:
+    import tomllib
+except ImportError:                    # Python 3.10: tomli if it is there, else the TOML tests skip
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
 
 from agent_testbench import config as C, expect as X, plugins as P
 from conftest import EXAMPLES, cli, write_config
@@ -117,6 +123,8 @@ def test_the_contract_says_what_a_check_gets_wrong(checks):
 def installed(tmp_path: Path) -> dict:
     """The example plug-in installed as pip would: its module, plus a dist-info whose entry_points.txt says what its
     pyproject.toml says. On PYTHONPATH, both the CLI and the driver it starts find it by its entry point."""
+    if tomllib is None:
+        pytest.skip("reading pyproject.toml needs Python 3.11+ (tomllib) or tomli")
     project = tomllib.loads((EXAMPLE / "pyproject.toml").read_text())["project"]
     dist = tmp_path / "site" / "testbench_check_example-0.1.0.dist-info"
     dist.mkdir(parents=True)

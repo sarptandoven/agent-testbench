@@ -3,12 +3,18 @@ and flag mistakes. Every config that ships or init writes validates; configs tes
 refused by the schema too; and a config key without a schema entry fails here, so the two cannot drift apart."""
 import json
 import re
-import tomllib
 from pathlib import Path
 
 import jsonschema
 import pytest
 import yaml
+try:
+    import tomllib
+except ImportError:                    # Python 3.10: tomli if it is there, else the TOML tests skip
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
 
 from agent_testbench import backends as B, config as C, expect as X, mocks as M, recipes as RC
 from agent_testbench.cli import INIT_TEMPLATE
@@ -39,6 +45,8 @@ def test_it_is_a_draft_2020_12_schema_shipped_in_the_package():
     jsonschema.Draft202012Validator.check_schema(SCHEMA)
     assert SCHEMA["$schema"] == "https://json-schema.org/draft/2020-12/schema" and SCHEMA["$id"] == C.SCHEMA_URL
     assert C.SCHEMA.parent == Path(C.__file__).parent / "schema", "next to report-v1.schema.json, in the package"
+    if tomllib is None:
+        pytest.skip("reading pyproject.toml needs Python 3.11+ (tomllib) or tomli")
     project = tomllib.loads((REPO / "pyproject.toml").read_text())
     wheel = project["tool"]["hatch"]["build"]
     assert wheel["targets"]["wheel"]["packages"] == ["src/agent_testbench"], "the wheel holds the whole package"
