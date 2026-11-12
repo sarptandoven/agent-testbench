@@ -95,6 +95,7 @@ What each part reads from the two reports:
 | Evidence | files added, removed or changed, by the sha256 each report recorded (logs change on every run) |
 | Cost and time | the estimated cost and the minutes of each |
 | Code | the commit and uncommitted changes (their hash) of each; when both commits are in the repository, how far apart they are and `git diff --stat` between them, for the project's folder. Uncommitted changes are hashed, not kept, so only their being different can be told |
+| Data | with [`data:`](trading-data.md), each role: whether the file changed between the runs (sha256, rows, last time) or the steps saw other rows of the same file (a backtest against the holdout's run); left out without `data:` |
 | Where it ran | backend, GPU, Python, platform, machine, and the packages that changed version (runs from before testbench recorded versions say only whether the package set differs) |
 
 `--json` gives the same as data: `verdict`, `fixed`, `broke`, `still_failing` (those three are the report's own

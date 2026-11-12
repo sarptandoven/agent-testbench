@@ -293,6 +293,51 @@ def _environment(a: dict, b: dict) -> dict:
             "b": {k: eb.get(k) for k in ("python", "implementation", "platform", "machine")}}
 
 
+def _data(a: dict, b: dict) -> dict:
+    """The data each run read, by role (report.json's `data`): the file it was cut from and what the steps saw."""
+    da = a.get("data") if isinstance(a.get("data"), dict) else {}
+    db = b.get("data") if isinstance(b.get("data"), dict) else {}
+    roles = []
+    for role in dict.fromkeys([*db, *da]):
+        x, y = da.get(role), db.get(role)
+        x, y = (x if isinstance(x, dict) else None), (y if isinstance(y, dict) else None)
+        fx, fy = ((v or {}).get("file") if isinstance((v or {}).get("file"), dict) else {} for v in (x, y))
+        brief = lambda d, f: None if d is None else {                                          # noqa: E731
+            "path": d.get("path"), "view": d.get("view"), "holdout_from": d.get("holdout_from"),
+            "sha256": d.get("sha256"), "rows": d.get("rows"), "first": d.get("first"), "last": d.get("last"),
+            "file_sha256": f.get("sha256"), "file_rows": f.get("rows"), "file_last": f.get("last")}
+        change = ("new" if x is None else "gone" if y is None
+                  else "file changed" if fx.get("sha256") != fy.get("sha256")
+                  else "saw other rows" if x.get("sha256") != y.get("sha256") else "same")
+        roles.append({"role": str(role), "a": brief(x, fx), "b": brief(y, fy), "change": change})
+    return {"recorded": bool(da or db), "roles": roles, "changed": any(r["change"] != "same" for r in roles)}
+
+
+def _data_lines(d: dict) -> list[str]:
+    lines = []
+    view = {"sealed": "the rows before the seal", "full": "the whole file", "windows": "walk-forward windows"}
+    for r in d["roles"]:
+        x, y, role = r["a"], r["b"], R._line(r["role"])
+        if r["change"] == "new":
+            lines.append(f"- {role} (`{R._line(y['path'])}`): read only by B ({y['rows']} rows, sha256 "
+                         f"{str(y['sha256'])[:12]})")
+        elif r["change"] == "gone":
+            lines.append(f"- {role} (`{R._line(x['path'])}`): read only by A")
+        elif r["change"] == "file changed":
+            lines.append(f"- {role} (`{R._line(y['path'])}`): the file changed between the runs (sha256 "
+                         f"{str(x['file_sha256'])[:12]} -> {str(y['file_sha256'])[:12]}; {_g(x['file_rows'])} -> "
+                         f"{_g(y['file_rows'])} rows, last {x['file_last']} -> {y['file_last']}), so their numbers "
+                         "are about different data")
+        elif r["change"] == "saw other rows":
+            lines.append(f"- {role} (`{R._line(y['path'])}`): the same file, but the steps saw other rows: "
+                         f"{view.get(x['view'], x['view'])} in A ({_g(x['rows'])} rows to {x['last']}), "
+                         f"{view.get(y['view'], y['view'])} in B ({_g(y['rows'])} rows to {y['last']})")
+        else:
+            lines.append(f"- {role} (`{R._line(y['path'])}`): the same data ({_g(y['rows'])} rows seen, sha256 "
+                         f"{str(y['sha256'])[:12]})")
+    return lines
+
+
 def _brief(rep: dict) -> dict:
     return {k: rep.get(k) for k in ("run_id", "plan", "status", "started", "backend", "gpu", "minutes", "cost_usd")}
 
@@ -321,7 +366,7 @@ def compare(a: dict, b: dict, root: Path | None = None) -> dict:
             "fixed": delta["fixed"], "broke": delta["broke"], "still_failing": delta["still_failing"],
             "steps": _steps(a, b, delta), "numbers": _numbers(a, b), "checks": _check_changes(a, b),
             "evidence": _evidence(a, b), "cost_usd": _span(a, b, "cost_usd"), "minutes": _span(a, b, "minutes"),
-            "code": _code(a, b, root), "environment": _environment(a, b)}
+            "code": _code(a, b, root), "environment": _environment(a, b), "data": _data(a, b)}
 
 
 # ---- in words --------------------------------------------------------------------------------------------------
@@ -412,6 +457,8 @@ def render(d: dict) -> str:
         lines += ["", "```", *stat, "```"]
     elif code["stat"] == "":
         lines += ["", "No file of the project changed between the two commits."]
+    if (d.get("data") or {}).get("recorded"):
+        lines += ["", "## Data", "", *_data_lines(d["data"])]
     lines += ["", "## Where it ran", "", *_where(d)]
     return R._encodable("\n".join(lines).rstrip() + "\n")
 
@@ -455,4 +502,7 @@ def summary(d: dict, limit: int = 3) -> str:
     for key, what in (("now_failing", "now failing"), ("now_passing", "now passing")):
         if d["checks"][key] and not (d["broke"] if key == "now_failing" else d["fixed"]):
             parts.append(f"{len(d['checks'][key])} check(s) {what}")
+    changed = [r["role"] for r in (d.get("data") or {}).get("roles", []) if r["change"] == "file changed"]
+    if changed:
+        parts.append(f"the data changed ({', '.join(changed)})")
     return "; ".join(parts) or "no change in step results or checked numbers"

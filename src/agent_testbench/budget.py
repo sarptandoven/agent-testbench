@@ -37,8 +37,15 @@ def estimate(cfg: dict, hardware: dict, minutes: float, label: str) -> dict:
 
 
 def worst_case(cfg: dict, plan_name: str) -> dict:
+    """A walk-forward plan runs its steps once per window, so its minutes are its steps' times the windows its data
+    cuts (read from the data; a DataError, a ConfigError, says why when they cannot be cut)."""
     plan = cfg["plans"][plan_name]
-    return {**estimate(cfg, plan, C.plan_minutes(plan), f"plan {plan_name}"), "plan": plan_name}
+    if not plan.get("walk_forward"):
+        return {**estimate(cfg, plan, C.plan_minutes(plan), f"plan {plan_name}"), "plan": plan_name}
+    from . import dataseal
+    n = dataseal.window_count(cfg, plan_name)
+    return {**estimate(cfg, plan, C.plan_minutes(plan) * n, f"plan {plan_name} ({n} walk-forward windows)"),
+            "plan": plan_name, "windows": n}
 
 
 LIMIT_KEYS = ("max_run_usd", "ask_above_usd", "max_day_usd")
@@ -237,6 +244,9 @@ def check(cfg: dict, est: dict, approve: bool, how_to_lower: str, command: str =
 
 
 def check_launch(cfg: dict, plan_name: str, approve: bool) -> tuple[bool, str, dict]:
-    return check(cfg, worst_case(cfg, plan_name), approve,
-                 f"lower the max_minutes of plan {plan_name}'s steps in {C.CONFIG_NAME} ({{fit}} min in all would fit)",
-                 f"testbench run {plan_name}", f"testbench estimate {plan_name}")
+    est = worst_case(cfg, plan_name)
+    windows = ", counted once per window, or cut fewer windows (a longer walk_forward.step)" if est.get("windows") \
+        else ""
+    return check(cfg, est, approve,
+                 f"lower the max_minutes of plan {plan_name}'s steps in {C.CONFIG_NAME} ({{fit}} min in all would "
+                 f"fit{windows})", f"testbench run {plan_name}", f"testbench estimate {plan_name}")

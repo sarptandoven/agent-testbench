@@ -135,11 +135,15 @@ class Testbench:
         if not rep or "evidence" not in rep:
             raise TestbenchError(f"{run.id} has no recorded evidence to check (it ran before agent-testbench recorded "
                                  "hashes, or never finished)")
-        problems = provenance.verify(run.dir, rep)
+        problems, data = provenance.verify(run.dir, rep), []
+        if not problems and isinstance(rep.get("data"), dict):      # and the data it read is still the same
+            from . import dataseal
+            problems = data = dataseal.verify(self.root, rep)[0]
         src = rep.get("source") or {}
         where = (f"commit {src['commit'][:12]}" + (" with uncommitted changes" if src.get("dirty") else "")) if src \
             else "code outside git"
-        message = (f"{run.id}: the evidence no longer matches its report: " + "; ".join(problems)) if problems else \
+        message = (f"{run.id}: " + "; ".join(data)) if data else \
+            (f"{run.id}: the evidence no longer matches its report: " + "; ".join(problems)) if problems else \
             (f"{run.id}: all {len(rep['evidence'])} evidence files match their recorded sha256 "
              f"({rep['evidence_sha256'][:16]}); ran on {where}")
         return {"run": run.id, "ok": not problems, "problems": problems, "message": message, "source": src or None}

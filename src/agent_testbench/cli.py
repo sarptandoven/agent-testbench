@@ -253,10 +253,17 @@ def cmd_plans(a):
         print("capped by this machine: " + "; ".join(w.split(" (")[0] for w in capped))
     print()
     for name, plan in cfg["plans"].items():
-        est = budget.worst_case(cfg, name)
         hw = plan["backend"] + (f" {plan['gpu']}" if plan.get("gpu") else "")
-        print(f"{name}: {hw}, {len(plan['steps'])} step(s), up to {est['max_minutes']:.0f} min, worst case "
-              f"${est['worst_case_usd']:.2f}" + (f" - {plan['description']}" if plan.get("description") else ""))
+        steps = f"{len(plan['steps'])} step(s)"
+        try:
+            est = budget.worst_case(cfg, name)
+        except C.ConfigError as exc:                     # a walk-forward whose data cannot be read or cut
+            print(f"{name}: {hw}, {steps}, worst case not known: {exc}")
+            continue
+        steps += f" x {est['windows']} walk-forward windows" if est.get("windows") else ""
+        what = " - opens the holdout" if plan.get("holdout") else ""
+        print(f"{name}: {hw}, {steps}, up to {est['max_minutes']:.0f} min, worst case "
+              f"${est['worst_case_usd']:.2f}{what}" + (f" - {plan['description']}" if plan.get("description") else ""))
         for s in plan["steps"]:
             what = s.get("notebook") or s.get("run") or s["web"]["url"]
             print(f"    - {s['name']} ({s['kind']}: {what}, {s['max_minutes']} min)")
@@ -527,6 +534,14 @@ def cmd_verify(a):
           f"({rep['evidence_sha256'][:16]}); ran on "
           + (f"commit {src['commit'][:12]}" + (" with uncommitted changes" if src.get("dirty") else "") if src
              else "code outside git"))
+    changed = []
+    if isinstance(rep.get("data"), dict):                # the data it read: still the same bytes?
+        from . import dataseal
+        changed, notes = dataseal.verify(root, rep)
+        for line in changed + notes:
+            print(f"{run_dir.name}: {line}")
+    if changed:
+        return 1
     if not a.attestation:
         return 0
     code, text = provenance.verify_attestation(run_dir, rep, a.repo or provenance.github_repo(root))

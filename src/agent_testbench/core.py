@@ -73,6 +73,8 @@ LAYER_MODULES = (
     "agent_testbench.scaffold", "agent_testbench.recipes", "agent_testbench.lint", "agent_testbench.selftest",
     # the trading pack: standard files, testbench's own metrics, overfitting statistics
     "agent_testbench.trading",
+    # the data seal: sealed holdout rows, walk-forward windows, data fingerprints
+    "agent_testbench.dataseal",
 )
 
 # The only package outside the standard library a core module imports at module level (testbench.yaml, limits.yaml).

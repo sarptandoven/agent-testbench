@@ -20,7 +20,9 @@ project as a copy, and (with NVIDIA's Container Toolkit) the machine's GPUs.
 
 Nothing from this machine is mounted: the project and this package are copied into each container with `docker cp`
 and the evidence is copied back the same way, so the container sees a copy of the project and none of this machine's
-folders, and what comes back is owned by you (not by the container's root). The hard stop is inside the container:
+folders, and what comes back is owned by you (not by the container's root). Sealed data (testbench.yaml's data: with
+holdout_from) is cut on this machine before it is copied, so the sealed rows never enter a container but the holdout
+plan's (dataseal.py). The hard stop is inside the container:
 it starts kernelkit's watchdog before the work, and the watchdog ends the work at the time limit (a session also after
 it sits idle). The container runs with --rm under docker's init and ends with its work, so it removes itself even if
 testbench here has stopped. Secrets are passed by name (-e NAME): docker reads their values from this environment, so
@@ -234,14 +236,18 @@ def create_args(cfg: dict, name: str, image: str, command: list[str], labels: di
     return args + list(d.get("run_args") or []) + [image, *command]
 
 
-def bundle(root: Path | None, exclude: list[str], *, pkg: bool, files: dict[str, bytes] | None = None):
+def bundle(root: Path | None, exclude: list[str], *, pkg: bool, files: dict[str, bytes] | None = None,
+           replace: dict[str, Path] | None = None):
     """A tar.gz to unpack at the container's / : the project at /work/project, this package at /work/pkg, and
-    `files` by their path in the container. Kept in a temporary file, not in memory."""
+    `files` by their path in the container. replace: project files sent as another local file instead (the sealed
+    data, cut on this machine). Kept in a temporary file, not in memory."""
     out = tempfile.TemporaryFile()
+    replace = replace or {}
     with tarfile.open(fileobj=out, mode="w:gz") as t:
         if root is not None:
             for f in project_files(root, exclude):
-                t.add(f, arcname=f"{PROJECT[1:]}/{f.relative_to(root)}", recursive=False)
+                rel = f.relative_to(root).as_posix()
+                t.add(replace.get(rel, f), arcname=f"{PROJECT[1:]}/{rel}", recursive=False)
         if pkg:
             t.add(PKG, arcname=f"{WORK[1:]}/pkg/agent_testbench", filter=lambda m: None if "__pycache__" in m.name else m)
         for path, data in (files or {}).items():
@@ -328,7 +334,9 @@ class DockerRunner:
         files = {f"{WORK}/plan.json": json.dumps(self.plan).encode()}
         if d.get("ca_bundle"):
             files[f"{WORK}/ca.crt"] = Path(d["ca_bundle"]).read_bytes()
-        upload(self.docker, name, bundle(self.root, self.cfg["exclude"], pkg=True, files=files))
+        from ..dataseal import cut_copies
+        with cut_copies(self.root, self.plan) as sealed:     # the sealed rows never leave this machine
+            upload(self.docker, name, bundle(self.root, self.cfg["exclude"], pkg=True, files=files, replace=sealed))
         started = runs.spawn([*d["command"], "start", "--attach", name], cwd=self.run_dir,
                              log_path=self.run_dir / "container.log")
         print(f"[testbench] hard stop after {limit:g} min {REMOTE_STOP}", flush=True)
@@ -441,7 +449,8 @@ class DockerSession:
         self.docker(*create_args(self.cfg, name, image, command, {"session": s["name"]}, secrets,
                                  env={"TESTBENCH_SESSION": s["name"]}), timeout=1800)
         files = {f"{WORK}/ca.crt": Path(d["ca_bundle"]).read_bytes()} if d.get("ca_bundle") else {}
-        upload(self.docker, name, bundle(self.root, self.cfg["exclude"], pkg=True, files=files))
+        with self._sealed() as sealed:
+            upload(self.docker, name, bundle(self.root, self.cfg["exclude"], pkg=True, files=files, replace=sealed))
         from ..runs import spawn
         started = spawn([*self.docker.command, "start", "--attach", name], cwd=self.sdir,
                         log_path=self.sdir / "kernel.log")
@@ -504,8 +513,14 @@ class DockerSession:
         p = self._busy(f"{shlex.quote(self.python)} -m pip install {' '.join(shlex.quote(x) for x in packages)}", 1800)
         return p.stdout[-3000:] + ("" if p.returncode == 0 else f"\n(pip exited {p.returncode})")
 
+    def _sealed(self):
+        """The project's sealed data (testbench.yaml's data:) cut on this machine: a session sees what plans see."""
+        from ..dataseal import cut_copies, sealed_view
+        return cut_copies(self.root, sealed_view(self.cfg))
+
     def sync(self) -> str:
-        upload(self.docker, self.name, bundle(self.root, self.cfg["exclude"], pkg=False))
+        with self._sealed() as sealed:
+            upload(self.docker, self.name, bundle(self.root, self.cfg["exclude"], pkg=False, replace=sealed))
         self.docker("exec", self.name, "sh", "-c", f": > {KERNEL}/last_used", check=False, timeout=60)
         return f"project files copied to {PROJECT} in container {self.name} (variables in the kernel are kept)"
 

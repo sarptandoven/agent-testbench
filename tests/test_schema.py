@@ -16,7 +16,8 @@ except ImportError:                    # Python 3.10: tomli if it is there, else
     except ImportError:
         tomllib = None
 
-from agent_testbench import backends as B, config as C, expect as X, mocks as M, plugins as P, recipes as RC
+from agent_testbench import (backends as B, config as C, dataseal as DS, expect as X, mocks as M, plugins as P,
+                             recipes as RC)
 from agent_testbench.cli import INIT_TEMPLATE
 from conftest import EXAMPLES, REPO, cli, make_notebook
 
@@ -160,8 +161,15 @@ docker: {image: "python:3.12-slim", network: none, gpus: all, cpu: 2, run_args: 
 kubernetes: {namespace: ml, usd_per_hour: {cpu: 0, A100: 2.5}, env_secrets: {HF_TOKEN: hf-token/token},
              volumes: [{name: data, persistentVolumeClaim: {claimName: d}}],
              volume_mounts: [{name: data, mountPath: /data}]}
+data:
+  prices: {path: data/prices.csv, time: date, holdout_from: 2025-07-01}
+  fills: data/fills
 x-anchors: &step {max_minutes: 3}
 plans:
+  final: {holdout: {max_opens: 1}, steps: [python backtest.py]}
+  wf:
+    walk_forward: {data: prices, train: 24mo, test: 6mo, step: 3mo, anchored: true, start: 2020-01-01}
+    steps: [python backtest.py]
   nb:
     backend: colab
     gpu: A100
@@ -248,6 +256,15 @@ REFUSED = [
     STEP + "{name: a, run: x, expect: {duration: {hours: 1}}}\n",
     STEP + "{name: a, run: x, expect: {mock_calls: {gemini: {cost: 1}}}}\n",
     STEP + "{name: a, run: x, expect: {mock_calls: {openai: {cost: 1}}}}\n",
+    "data: [prices.csv]\n", "data: {'bad-role': p.csv}\n", "data: {prices: /abs/p.csv}\n", "data: {prices: ../p.csv}\n",
+    "data: {prices: {path: p.csv, holdout_from: soon}}\n", "data: {prices: {path: p.csv, cut: 2025-07-01}}\n",
+    "data: {prices: {time: date}}\n", "data: {prices: .testbench/p.csv}\n",
+    "data: {prices: p.csv}\nplans: {p: {holdout: 2, steps: [x]}}\n",
+    "data: {prices: p.csv}\nplans: {p: {holdout: {max_opens: 0}, steps: [x]}}\n",
+    "data: {prices: p.csv}\nplans: {p: {walk_forward: {train: 2m, test: 1mo}, steps: [x]}}\n",
+    "data: {prices: p.csv}\nplans: {p: {walk_forward: {train: 24mo}, steps: [x]}}\n",
+    "data: {prices: p.csv}\nplans: {p: {walk_forward: {train: 1y, test: 1mo, every: 1mo}, steps: [x]}}\n",
+    "data: {prices: p.csv}\nplans: {p: {walk_forward: {train: 1y, test: 1mo, anchored: 'yes'}, steps: [x]}}\n",
 ]
 
 
@@ -301,9 +318,11 @@ def test_every_config_key_has_a_schema_entry():
             assert not missing, f"{section}.{sorted(missing)} (backend {name}) have no entry in {C.SCHEMA.name}"
     backends = _enum(_props("$defs/plan_full")["backend"])
     assert set(B.BUILTIN) <= backends == _enum(top["sessions"]["properties"]["backend"]), "the built-ins, listed"
-    for key in ("project", "notify", "export", "plans"):
+    for key in ("project", "notify", "export", "data", "plans"):
         assert key in top
-    assert set(C.PLAN_DEFAULTS) | {"steps", "cpu", "memory_gb"} == set(_props("$defs/plan_full"))
+    assert set(C.PLAN_DEFAULTS) | set(C.PLAN_DATA_KEYS) | {"steps", "cpu", "memory_gb"} == set(_props("$defs/plan_full"))
+    assert set(DS.ROLE_KEYS) == set(SCHEMA["$defs"]["data_role"]["anyOf"][1]["properties"]), "data.<role>'s keys"
+    assert set(DS.WALK_KEYS) == set(_props("$defs/plan_full")["walk_forward"]["properties"]), "walk_forward's keys"
     step, allowed = set(_props("$defs/step_full")), {"name", *C.STEP_KINDS, *C.STEP_DEFAULTS}
     assert allowed == step, (f"a step takes exactly the keys config._step allows: add {sorted(allowed - step)} to, "
                              f"or remove {sorted(step - allowed)} from, $defs.step_full in {C.SCHEMA.name}")

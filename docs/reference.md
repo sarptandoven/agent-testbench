@@ -64,6 +64,9 @@ file loads, and `testbench schema` adds the installed plug-ins' own descriptions
 | `sessions.secrets` | `[]` | secret NAMES passed into every session |
 | `sessions.cpu`, `sessions.memory_gb` | from `modal:` | Modal sessions only |
 | `guard.ask` | `git push`, `gh repo create`, `gh pr merge`, `gh release create` | commands the Claude Code hook asks about first |
+| `data.<role>.path` | none | the data the plans read, by role: a CSV file (or a folder of CSV files) with a time column, relative to the project; steps find it in `TESTBENCH_DATA_<ROLE>`. `data: {prices: data/prices.csv}` is the path alone ([sealed data](trading-data.md)) |
+| `data.<role>.time` | the first of `time`, `date`, `timestamp`, `datetime` | its time column (ISO 8601 times) |
+| `data.<role>.holdout_from` | none | rows at or after this time are sealed: every plan but the one with `holdout:` sees the file cut before it, in a copy of the project |
 
 ## Machine limits
 
@@ -211,11 +214,21 @@ plans:
     memory_gb: 16                      # modal only
     workdir: inplace | copy            # local default inplace (the project folder); remote always a copy
     description: what this plan proves
+    holdout: true | {max_opens: 1}     # this plan opens the sealed rows of data: (one plan may); counted, max refused
+    walk_forward: {data: prices, train: 24mo, test: 6mo, step: 6mo, anchored: false, start: 2020-01-01}
     steps: [...]
 ```
 
 A plan runs its steps in order and stops at the first one that does not pass, unless that step has
 `continue_on_failure: true`.
+
+With `data:` ([sealed data](trading-data.md)): a plan of a project with sealed data, and any walk-forward plan, runs
+in a copy (`workdir: inplace` is refused), where each sealed file holds only the rows before `holdout_from`; the
+plan with `holdout:` sees every row, and its reports say how many times they were opened before. `walk_forward:`
+runs the steps once per window (lengths: a whole number and `d`, `w`, `mo` or `y`; `step` defaults to `test`), each
+with only the rows before its test end and `TESTBENCH_WINDOW`, `TESTBENCH_TRAIN_START` / `_END`,
+`TESTBENCH_TEST_START` / `_END`; its worst case is the steps' minutes times the windows, cut from the data at launch
+(fewer than 2 windows is refused there, exit 2).
 
 Short forms, for plans that run on this machine (`backend: local`) with the default `max_minutes`. Each is read
 as the long form it stands for, so runs, estimates, reports and plan.json are the same as if it were written out:
@@ -366,9 +379,13 @@ testbench loop stop
 | `environment` | where the plan ran (recorded on that machine, Modal, Colab and ssh too): `python`, `platform`, `machine`, `packages` and `packages_sha256` (of the sorted name==version list) |
 | `evidence`, `evidence_sha256` | every file under `steps/` with its size and sha256, and one sha256 over all of them |
 | `worst_case_usd`, `approved`, `remote_stop` | the bound checked before launch, whether a person approved it, and the hard stop on the remote side |
+| `data` | with `data:` in testbench.yaml, each role: `path`, `view` (`sealed`, `full`, `windows`), the `bytes`, `sha256`, `rows`, `first` and `last` time of what the steps saw, the whole `file` at launch and the `sealed` rows' (each step folder's `data.json` holds what its data was, as evidence) |
+| `holdout` | a run of the plan that opens the holdout: `opened_before` (earlier openings of these sealed rows), `max_opens`, the `first` and `last` of them |
+| `windows` | a walk-forward plan: each window's dates, train and test rows, outcome and data |
 
 ```
 testbench verify [RUN]                     # exit 0: every evidence file matches; 1: what changed, went missing or was added
+                                           #   (and with data:, 1 when a data file is not what the run read)
 testbench report [RUN] --format html|junit [-o FILE]
 testbench history PLAN [-n N] [--json]     # each run's outcome and every number its checks found, oldest first
 testbench ui [--open]                      # .testbench/ui/index.html: plans, trend lines, runs, loops, sessions
@@ -396,10 +413,13 @@ report.json       machine-readable report (rewritten after each step; schema/rep
 report.md         the report
 report.html       the report as one page with the evidence images (`testbench report --format html`, `testbench ui`)
 driver.log        the background driver's own output
-steps/NN-name/    log.txt, result.json, executed.ipynb, cellNN_imageK.png, downloads/, artifacts/, screenshots
+steps/NN-name/    log.txt, result.json, executed.ipynb, cellNN_imageK.png, downloads/, artifacts/, screenshots,
+                  data.json (with data:, what the step's data files held)
+work/             on local, the copy of the project a `workdir: copy` plan runs in (sealed files cut)
 ```
 
 `.testbench/ledger.jsonl` records every launch (worst case) and finish (estimated cost);
+`.testbench/holdout.jsonl` every opening of the sealed holdout (run, time, commit, the data's sha256 and last time);
 `.testbench/NOTES.md` is the lab notebook (`testbench note`), the one file there worth committing.
 `.testbench/check.json` is what `testbench check` found in a folder with no testbench.yaml, the plans `init`
 would write there; commands in that folder read their plans from it (only plans that run on this machine, with
