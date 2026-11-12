@@ -25,14 +25,20 @@ def project(tmp_path_factory):
     write_config(root, {"project": "proj", "plans": {
         "smoke": {"steps": [{"name": "ok", "run": "true", "max_minutes": 1}]},
         "bad": {"steps": [{"name": "no", "run": "false", "max_minutes": 1}]},
-        "slow": {"steps": [{"name": "nap", "run": "python -c \"import time; time.sleep(3)\"", "max_minutes": 1}]}}})
+        "slow": {"steps": [{"name": "nap", "run": "python slow.py", "max_minutes": 2}]}}})
+    # slow runs until the test lets it go, so it is still running when status and wait --wait 0 look, however
+    # loaded the machine is (a fixed sleep made them race)
+    (root / "slow.py").write_text("import pathlib, time\nt = time.time()\n"
+                                  "while not pathlib.Path('go').exists() and time.time() - t < 100:\n"
+                                  "    time.sleep(0.05)\n")
     env = {"TESTBENCH_USER_DIR": str(root.parent / "user")}
     LAUNCHES.update({"run smoke": cli(root, "run", "smoke", env=env).returncode,
                      "run bad": cli(root, "run", "bad", env=env).returncode,
                      "run slow --detach": cli(root, "run", "slow", "--detach", env=env).returncode,
                      "status (running)": cli(root, "status", env=env).returncode,
-                     "wait --wait 0 (running)": cli(root, "wait", "--wait", "0", env=env).returncode,
-                     "wait": cli(root, "wait", env=env).returncode,
+                     "wait --wait 0 (running)": cli(root, "wait", "--wait", "0", env=env).returncode})
+    (root / "go").write_text("")
+    LAUNCHES.update({"wait": cli(root, "wait", env=env).returncode,
                      "run nope": cli(root, "run", "nope", env=env).returncode})
     return root
 
