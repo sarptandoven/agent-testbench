@@ -28,6 +28,14 @@ expect:
   junit: {path: report.xml, tests: ">= 10", skipped: "<= 2"}
   metrics:
     stdout: {"val_loss=([0-9.eE+-]+)": "< 0.3"}
+  numbers:                              # numbers a metric reader reads from files: json, csv, junit, trading, ...
+    reader: csv
+    files: logs/train.csv
+    rules: {loss.last: "< 0.3", accuracy.max: ">= 0.9"}
+  strategy:                             # a backtest's standard files, with guardrails (docs/trading.md)
+    equity: out/equity.csv
+    sharpe: ">= 1"
+    beats: buy_and_hold
   gpu: {busy_pct: ">= 50", max_mem_mib: "<= 15000"}
   image:
     plots/loss.png: {like: golden/loss.png, max_diff: 0.02}
@@ -43,8 +51,8 @@ A package can add kinds of check of its own: [Check plug-ins](plugins.md#checks)
 
 ## Rules
 
-Wherever an expectation compares a value (json, media, web status, junit, metrics, gpu, duration), the rule is
-one of:
+Wherever an expectation compares a value (json, media, web status, junit, metrics, numbers, strategy, gpu,
+duration), the rule is one of:
 
 | rule | holds when |
 |---|---|
@@ -184,6 +192,75 @@ metrics:
 The detail gives the value, how many lines matched and the text of the last match (which shows a pattern that
 matched the wrong line, such as `loss=` inside `val_loss=`). A file source that is missing, or that was last
 written before the run started, fails instead of being read.
+
+## numbers
+
+Rules on the numbers a [metric reader](plugins.md#metrics) reads from the step's files: testbench's own reading of
+the evidence, by name, instead of a regular expression over what the code printed about itself. The built-in readers
+are `json`, `csv` (each column's `.last`, `.mean`, `.max`, `.min`, and `rows`), `junit` and `trading` (a backtest's
+[numbers](trading.md#the-numbers)); a package can add one, and `testbench numbers` lists them all with the files each
+reads. `testbench numbers READER PATH` prints the names and numbers to write rules with.
+
+```yaml
+numbers:
+  reader: trading
+  files: {equity: out/equity.csv, trades: out/trades.csv}   # or a path, or a list in the reader's order
+  options: {calendar: stocks, risk_free: 0.04}             # the reader's own
+  rules: {sharpe: ">= 1", max_drawdown: ">= -0.2", trades: ">= 50"}
+```
+
+Several readers in one step: a list of such blocks. `files:` left out, the reader looks for its own (`metrics.json`,
+`metrics.csv`, `junit.xml`, `equity.csv`, here or one folder down). A reader that takes `keys` (json) reads exactly
+the names the rules give, so `losses.-1` is the last item of a list, as under `json:`.
+
+```
+- expected trading out/equity.csv: sharpe >= 1: 0.842 (wanted >= 1.0)
+- expected trading out/equity.csv: sharpe >= 1: sharpe is undefined (null): volatility, sharpe and sortino are null: they need at least 3 rows (2 returns)
+- expected json out/metrics.json: f1 >= 0.8: f1 is undefined (null): no 'f1' in out/metrics.json
+- expected csv logs/train.csv: lr.last < 1: reader csv gave no number 'lr.last' (did you mean loss.last?); it gave rows, epoch.last, ...
+- expected trading out/equity.csv: sharpe >= 1: out/equity.csv: no such file in /work/project (the equity file trading was told to read)
+- expected trading out/equity.csv: sharpe >= 1: out/trades.csv: the file was last written before this run started, so it is an old result, not this run's
+```
+
+Each finding is named after the reader, the first file named and the number, and a measured number comes first in
+its detail, so history and `testbench loop --metric check:sharpe` read it back. A number the reader did not give,
+or gave as `null` because it is not defined, fails its rule with the reader's note on why: a rule never passes for
+want of a number. A file that is missing, that the reader refuses, or that was last written before the run started
+(any file it read, including one it found by itself) fails every rule of the block.
+
+When `testbench.yaml` loads, a reader that is not installed, a key other than `reader`, `files`, `options` and
+`rules`, an option the reader does not take or a value it refuses, a file role it does not read, a rule that
+compares with text, and - for a reader that says which names it gives (`trading`, `junit`) - a name it does not
+give are refused, with the near miss:
+
+```
+testbench: `plans.p.steps[0].expect.numbers.rules` names 'sharp' (did you mean sharpe?), a number reader trading does not give; it gives start_equity, end_equity, ...
+testbench: `plans.p.steps[0].expect.numbers`: reader trading has no option 'risk_fre' (did you mean risk_free?); its options are risk_free, periods_per_year, calendar, symbol
+```
+
+## strategy
+
+The trading pack's check: a backtest's standard files (equity.csv, and trades.csv and prices.csv next to it), rules
+on testbench's numbers for it, and guardrails built in - fees or slippage must have been charged (`costs: none`
+allows zero costs, and the report says so), at least 20 round trips (`min_trades`), and `beats: buy_and_hold` needs a
+benchmark to beat. [Checking a strategy](trading.md#checking-a-strategy) has the whole of it.
+
+```yaml
+strategy:
+  equity: out/equity.csv          # the default
+  sharpe: ">= 1"                  # a rule on any of the trading numbers
+  max_drawdown: ">= -0.25"
+  beats: buy_and_hold
+  min_trades: 30                  # default 20
+  costs: required                 # default; or none
+```
+
+```
+- expected strategy out/equity.csv: sharpe >= 1: 0.842 (wanted >= 1.0); daily bars, 252 a year; 3 years
+- expected strategy out/equity.csv: beats buy and hold: no benchmark to beat: add a benchmark column to out/equity.csv (a buy-and-hold price or equity at the same times), or write prices.csv next to it (time, symbol, close; ...)
+- expected strategy out/equity.csv: trades >= 20 (min_trades): 12 (wanted >= 20.0); round trips in out/trades.csv, from 24 fills; a number from this few trades means little: ...
+- expected strategy out/equity.csv: costs modelled: false: every fee and slippage in out/trades.csv is 0: the backtest charged no trading costs, so its returns are better than an account would get. ...
+```
 
 ## junit
 
@@ -401,8 +478,8 @@ mock_calls:
 ## The numbers, over time
 
 A check that measured a number starts its detail with it (`0.27 (wanted < 0.3)`). That is how the numbers of
-every kind of check above (json values, junit counts, numbers printed to the log, GPU use, image differences,
-durations) reach:
+every kind of check above (json values, junit counts, numbers printed to the log, a reader's numbers, a strategy's,
+GPU use, image differences, durations) reach:
 
 - the comparison with the previous run of the plan (`- train | stdout /val_loss=([0-9.eE+-]+)/ < 0.3: 0.25 -> 0.21`),
 - `testbench history PLAN` (each number across runs),

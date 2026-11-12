@@ -67,6 +67,14 @@ def outputs(plan: dict) -> list[str]:
         out += [k for key in ("json", "media", "image") for k in (e.get(key) or {})]
         out += [k for key in ("text", "metrics") for k in (e.get(key) or {}) if k not in ("stdout", "stderr")]
         out += [str(j.get("path")) for j in expect.junit_specs(e.get("junit")) if isinstance(j, dict) and j.get("path")]
+        for block in e.get("numbers") if isinstance(e.get("numbers"), list) else [e.get("numbers")]:
+            files = block.get("files") if isinstance(block, dict) else None
+            out += [files] if isinstance(files, str) else list(files.values() if isinstance(files, dict) else
+                                                               files or [])
+        if "strategy" in e:                              # equity.csv, and the trades.csv next to it (prices.csv may
+            strategy = e["strategy"]                     # be data the backtest reads, so it is not left out)
+            equity = strategy if isinstance(strategy, str) else (strategy or {}).get("equity") or "out/equity.csv"
+            out += [equity, str(Path(equity).parent / "trades.csv")]
     return list(dict.fromkeys(str(p).replace("\\", "/").removeprefix("./") for p in out))
 
 
