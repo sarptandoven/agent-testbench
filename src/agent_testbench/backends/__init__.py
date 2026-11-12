@@ -136,7 +136,7 @@ def _instance(obj, name: str) -> Backend:
 
 # ---- the contract: what `testbench plugin test` and plugins.assert_conforms("backends", obj) check ---------------
 
-OWN_SECTIONS = ("project", "plans", "notify", "export", "root")     # testbench.yaml's own, besides config.DEFAULTS'
+OWN_SECTIONS = ("project", "plans", "notify", "export", "data", "root")     # testbench.yaml's own, besides DEFAULTS'
 PRICE_KEY = re.compile(r"usd|price", re.I)                         # a backend's own price settings, by their name
 TRIAL_MINUTES = 60                                                 # the one step of the plan it is priced with
 

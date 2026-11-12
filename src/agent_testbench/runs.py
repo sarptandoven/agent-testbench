@@ -102,8 +102,17 @@ def launch(root: Path, cfg: dict, plan_name: str, approve: bool = False, foregro
         raise LaunchRefused(C.no_plan(cfg, plan_name))
     plan = cfg["plans"][plan_name]
     source = provenance.source(root)                   # the code this run proves, before anything changes it
+    sealed = None
+    if cfg.get("data"):                                # data: read once - fingerprints, the cut, walk-forward windows
+        from . import dataseal
+        try:
+            sealed = dataseal.prepare(root, cfg, plan_name)
+        except C.ConfigError as exc:
+            raise LaunchRefused(str(exc)) from None
+        plan = sealed["plan"]
     with budget.launching():
-        ok, message, est = budget.check_launch(cfg, plan_name, approve)
+        opened, refused = (dataseal.holdout(root, cfg, plan_name) if sealed and sealed["opening"] else (None, None))
+        ok, message, est = (False, refused, {}) if refused else budget.check_launch(cfg, plan_name, approve)
         if ok:
             stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
             run_dir = runs_dir(root) / f"{stamp}-{plan_name}"
@@ -116,9 +125,14 @@ def launch(root: Path, cfg: dict, plan_name: str, approve: bool = False, foregro
             write_state(run_dir, run_id=run_dir.name, plan=plan_name, backend=plan["backend"], gpu=plan.get("gpu"),
                         status="queued", created=time.time(), worst_case_usd=est["worst_case_usd"],
                         usd_per_minute=est["usd_per_minute"], approved=bool(approve), budget_message=message,
-                        source=source, **({"origin": origin} if origin else {}))
+                        source=source, **({"origin": origin} if origin else {}),
+                        **({"data": sealed["data"]} if sealed else {}), **({"holdout": opened} if opened else {}))
             budget.record(root, {"event": "launch", "run": run_dir.name, "plan": plan_name, "backend": plan["backend"],
                                  "worst_case_usd": est["worst_case_usd"]})
+            if opened:                                 # every opening of the holdout, for the reports that follow
+                dataseal.record_opening(root, run_dir.name, plan_name, source, sealed["data"])
+    if refused:                                        # the holdout's max_opens: not a question for a person
+        raise LaunchRefused(refused)
     if not ok:                                         # told outside the launch lock, so no launch waits on it
         from . import notify
         notify.approval_needed(root, cfg, message, est, f"testbench run {plan_name} --approve")
@@ -251,6 +265,11 @@ def finalize(root: Path, run_dir: Path, rep: dict, cost_usd: float, cfg: dict | 
                cost_usd=round(cost_usd, 4), schema_version=provenance.SCHEMA_VERSION, source=state.get("source"),
                worst_case_usd=state.get("worst_case_usd"), approved=bool(state.get("approved")),
                remote_stop=state.get("remote_stop"))
+    if state.get("data"):                              # the data at launch, with what the steps saw where they ran
+        from . import dataseal
+        rep["data"] = dataseal.merge(state["data"], rep.get("data"))
+    if state.get("holdout"):
+        rep["holdout"] = state["holdout"]
     rep["evidence"], rep["evidence_sha256"] = provenance.evidence(run_dir)
     rep["delta"] = R.compare(previous_report(root, run_dir, state["plan"]), rep)
     R.write(run_dir, rep)

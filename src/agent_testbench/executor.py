@@ -241,6 +241,7 @@ def execute_plan(plan: dict, *, project_dir: str | Path, run_dir: str | Path, wo
     base_env = {**os.environ, "TESTBENCH_RUN_DIR": str(run_dir), "TESTBENCH_PROJECT_DIR": str(project),
                 "PATH": step_path(project)}
     stop_reason = None
+    seal, seen, steps = None, {}, plan["steps"]                 # data: cut in the run's copy (dataseal.py)
 
     def save():
         (run_dir / "report.json").write_text(json.dumps(report, indent=1, default=str))
@@ -249,13 +250,28 @@ def execute_plan(plan: dict, *, project_dir: str | Path, run_dir: str | Path, wo
 
     save()
     try:
-        for i, step in enumerate(plan["steps"], 1):
+        if plan.get("data"):
+            from . import dataseal                              # a layer: only for plans of a project with data:
+            seal = dataseal.Seal(plan, workdir)
+            try:
+                report["data"] = seal.begin()
+                base_env.update(seal.env())
+            except dataseal.DataError as exc:
+                report["status"], stop_reason, steps = "error", f"its data could not be prepared: {exc}", []
+        for i, step in enumerate(steps, 1):
             _event(run_dir, event="step_start", step=step["name"], index=i)
             save()
             mark = len(sampler.samples)
-            result = run_step(step, project=project, workdir=workdir, step_dir=run_dir / "steps" / f"{i:02d}-{slug(step['name'])}",
+            step_dir = run_dir / "steps" / f"{i:02d}-{slug(step['name'])}"
+            if seal:                                            # what the step's data files hold, as evidence
+                seen[step.get("window")] = data = seal.window(step["window"]) if step.get("window") else seal.seen
+                step_dir.mkdir(parents=True, exist_ok=True)
+                (step_dir / "data.json").write_text(json.dumps(data, indent=1))
+            result = run_step(step, project=project, workdir=workdir, step_dir=step_dir,
                               base_env=base_env, gpu=lambda: sampler.reading(mark), run_started=report["started"])
             result["dir"] = f"steps/{i:02d}-{slug(step['name'])}"
+            if step.get("window"):
+                result["window"] = step["window"]
             report["steps"].append(result)
             _event(run_dir, event="step_end", step=step["name"], index=i, status=result["status"], minutes=result["minutes"])
             save()
@@ -267,7 +283,11 @@ def execute_plan(plan: dict, *, project_dir: str | Path, run_dir: str | Path, wo
         report["status"] = "cancelled"
     finally:
         sampler.stop()
-        if report["status"] != "cancelled":
+        if seal:
+            seal.close()
+            if seal.windows:                                    # a line per walk-forward window
+                report["windows"] = dataseal.windows_report(plan, report["steps"], seen)
+        if report["status"] not in ("cancelled", "error"):
             ran = report["steps"]
             report["status"] = "passed" if ran and len(ran) == len(plan["steps"]) and all(s["status"] == "passed" for s in ran) \
                 else "failed"

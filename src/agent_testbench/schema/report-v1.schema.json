@@ -73,6 +73,56 @@
         "metrics_moved": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "number"}}}
       }
     },
+    "data": {
+      "type": ["object", "null"],
+      "description": "the data the plan's steps read, by role (testbench.yaml's data:): what the steps saw, measured where they ran, and the file it was cut from, read at launch",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["path", "view", "sha256", "rows"],
+        "properties": {
+          "path": {"type": "string", "description": "the file or folder, relative to the project"},
+          "time": {"type": ["string", "null"], "description": "the time column"},
+          "holdout_from": {"type": ["string", "null"], "description": "rows at or after this time are sealed; null when nothing is"},
+          "view": {"enum": ["sealed", "full", "windows"], "description": "sealed: the rows before holdout_from; full: the whole file (the holdout plan, or no seal); windows: cut per walk-forward window from the rows before the seal"},
+          "bytes": {"type": "integer", "description": "the size of what the steps saw"},
+          "sha256": {"type": "string", "description": "sha256 of the bytes the steps saw (a folder: over each file's name and sha256)"},
+          "rows": {"type": "integer"},
+          "first": {"type": ["string", "null"], "description": "the earliest time the steps saw"},
+          "last": {"type": ["string", "null"], "description": "the latest time the steps saw"},
+          "file": {"$ref": "#/$defs/fingerprint", "description": "the whole file at launch, on the machine that launched the run (what `testbench verify` compares)"},
+          "sealed": {"anyOf": [{"$ref": "#/$defs/fingerprint"}, {"type": "null"}], "description": "the sealed rows (at or after holdout_from) at launch; null without a seal"},
+          "note": {"type": "string", "description": "something to know about this data, in words"}
+        }
+      }
+    },
+    "holdout": {
+      "type": ["object", "null"],
+      "description": "a run of the plan that opens the holdout: how many times the sealed rows were opened before it",
+      "properties": {
+        "opened_before": {"type": "integer", "description": "earlier openings whose file reached into the sealed period"},
+        "max_opens": {"type": ["integer", "null"]},
+        "first": {"type": ["object", "null"], "description": "the first of them: {run, time}"},
+        "last": {"type": ["object", "null"], "description": "the latest of them: {run, time}"},
+        "roles": {"type": "object", "additionalProperties": {"type": "string"}, "description": "each sealed role and its holdout_from"}
+      }
+    },
+    "windows": {
+      "type": "array",
+      "description": "a walk-forward plan's windows, oldest first: each ran every step of the plan",
+      "items": {
+        "type": "object",
+        "required": ["k", "n", "train_start", "train_end", "test_start", "test_end", "status"],
+        "properties": {
+          "k": {"type": "integer"}, "n": {"type": "integer"}, "window": {"type": "string", "description": "k/n"},
+          "train_start": {"type": "string"}, "train_end": {"type": "string"},
+          "test_start": {"type": "string"}, "test_end": {"type": "string", "description": "the window's data holds only rows before it"},
+          "train_rows": {"type": "integer"}, "test_rows": {"type": "integer"},
+          "status": {"type": "string", "description": "passed when every step of the window passed; skipped when none ran"},
+          "steps": {"type": "array", "items": {"type": "string"}},
+          "data": {"type": ["object", "null"], "description": "what the window's data files held, by role"}
+        }
+      }
+    },
     "steps": {
       "type": "array",
       "items": {
@@ -119,6 +169,17 @@
                            "readings": {"type": "integer", "description": "nvidia-smi samples in the step's window"}}
           }
         }
+      }
+    }
+  },
+  "$defs": {
+    "fingerprint": {
+      "type": "object",
+      "description": "rows of a data file: their size, sha256, count and first and last time",
+      "properties": {
+        "bytes": {"type": "integer"}, "sha256": {"type": "string"}, "rows": {"type": "integer"},
+        "first": {"type": ["string", "null"]}, "last": {"type": ["string", "null"]},
+        "files": {"type": "integer", "description": "a folder: how many CSV files"}
       }
     }
   }

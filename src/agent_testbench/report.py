@@ -128,6 +128,8 @@ def render(report: dict) -> str:
                   + (f"; evidence sha256 `{r['evidence_sha256'][:16]}` (`testbench verify` checks it)"
                      if r.get("evidence_sha256") else "") + "."]
     lines += [""]
+    if holdout_line(r):
+        lines += [holdout_line(r), ""]
     if r.get("launch_error"):
         lines += ["## Could not start", "", r["launch_error"], ""]
     failing = [s for s in r.get("steps", []) if s["status"] != "passed"]
@@ -168,6 +170,20 @@ def render(report: dict) -> str:
         if not any(d.get(k) for k in ("fixed", "broke", "still_failing", "metrics_moved")):
             lines += ["- no change in step results or checked numbers"]
         lines += [""]
+    data = r.get("data") if isinstance(r.get("data"), dict) else {}
+    if data:
+        lines += ["## Data", ""] + [f"- {_line(role)}: {data_line(d)}" for role, d in data.items()
+                                    if isinstance(d, dict)] + [""]
+    windows = [w for w in r.get("windows") or [] if isinstance(w, dict)]
+    if windows:
+        passed = sum(w.get("status") == "passed" for w in windows)
+        lines += [f"## Walk-forward: {counted(len(windows), 'window')}, {passed} passed", "",
+                  "| | window | train | test | rows (train / test) |", "|---|---|---|---|---|"]
+        lines += [f"| {_icon(w.get('status'))} | {_cell(w.get('window'))} | {_cell(w.get('train_start'))} to "
+                  f"{_cell(w.get('train_end'))} | {_cell(w.get('test_start'))} to {_cell(w.get('test_end'))} | "
+                  f"{_cell(w.get('train_rows'))} / {_cell(w.get('test_rows'))} |" for w in windows]
+        lines += ["", "The plan passes only when every window does; window k's data holds only the rows before its "
+                      "test end.", ""]
     lines += ["## Steps", "", "| | step | minutes | checks | GPU busy |", "|---|---|---|---|---|"]
     for s in r.get("steps", []):
         checks = s.get("expectations") or []
@@ -195,6 +211,41 @@ def render(report: dict) -> str:
                 lines += [f"- {_line(s['name'])}: {_line(c['check'])} - {_line(c['detail'])}"]
         lines += [""]
     return _encodable("\n".join(lines).rstrip() + "\n")
+
+
+def _short(sha) -> str:
+    return f"`{str(sha)[:12]}`" if sha else "-"
+
+
+def data_line(d: dict) -> str:
+    """One role of report.json's `data` in words: what the steps saw, the sealed part, the whole file."""
+    cut, file, sealed = d.get("holdout_from"), d.get("file") or {}, d.get("sealed") or {}
+    saw = {"sealed": f"the rows before {cut} (the rest is sealed)",
+           "full": "the whole file" + (f", the sealed rows from {cut} included" if cut else ""),
+           "windows": "cut per walk-forward window from these rows" + (f", before the seal at {cut}" if cut else "")
+           }.get(d.get("view"), "the file")
+    text = (f"`{_line(d.get('path'))}`, {saw}: {d.get('rows')} rows, {d.get('first')} to {d.get('last')}, sha256 "
+            f"{_short(d.get('sha256'))}")
+    if cut:
+        text += f"; sealed: {sealed.get('rows', 0)} rows from {cut}, sha256 {_short(sealed.get('sha256'))}"
+    if file and file.get("sha256") != d.get("sha256"):
+        text += f"; the whole file: {file.get('rows')} rows, sha256 {_short(file.get('sha256'))}"
+    return _line(text + (f". {d['note']}" if d.get("note") else ""))
+
+
+def holdout_line(r: dict) -> str:
+    """For a run of the holdout plan: how many times the sealed rows were opened before it, as a warning."""
+    h = r.get("holdout")
+    if not isinstance(h, dict):
+        return ""
+    roles = h.get("roles") if isinstance(h.get("roles"), dict) else {}
+    what = ", ".join(f"{role} from {cut}" for role, cut in roles.items()) or "the sealed rows"
+    n, first = h.get("opened_before"), h.get("first") if isinstance(h.get("first"), dict) else {}
+    if not n:
+        return f"Holdout ({_line(what)}): this run is the first to open it, so results on it are untouched."
+    return _line(f"**Warning**: the holdout ({what}) was opened {counted(n, 'time')} before this run: results on it "
+                 f"are no longer untouched (first opened in run `{first.get('run')}`)" + (
+                     f"; holdout.max_opens is {h['max_opens']}" if h.get("max_opens") else "") + ".")
 
 
 def write(run_dir: Path, report: dict) -> None:
@@ -261,6 +312,9 @@ def html_body(report: dict, run_dir: Path) -> str:
            f"<div class=muted>run <code>{e(str(r.get('run_id')))}</code>"
            + (f" &middot; stopped because {e(r['stopped_because'])}" if r.get("stopped_because") else "") + "</div>",
            "<div class=facts>" + "".join(f"<div><b>{e(k)}</b>{e(str(v))}</div>" for k, v in facts) + "</div>"]
+    if holdout_line(r):
+        out.append(f"<p class={'cancelled' if (r.get('holdout') or {}).get('opened_before') else 'muted'}>"
+                   f"{e(holdout_line(r).replace('**', ''))}</p>")
     if r.get("launch_error"):
         out += ["<h2>Could not start</h2>", f"<pre>{e(r['launch_error'])}</pre>"]
     for s in [s for s in r.get("steps", []) if s["status"] != "passed"]:
@@ -288,6 +342,20 @@ def html_body(report: dict, run_dir: Path) -> str:
         out += [f"<h2>Compared with <code>{e(str(d.get('previous_run')))}</code> ({e(str(d.get('previous_status')))})</h2>",
                 "<ul>" + "".join(f"<li>{x}</li>" for x in items) + "</ul>"
                 if items else "<p class=muted>no change in step results or checked numbers</p>"]
+    data = r.get("data") if isinstance(r.get("data"), dict) else {}
+    if data:
+        out += ["<h2>Data</h2><ul>" + "".join(f"<li>{e(str(role))}: {e(data_line(d).replace('`', ''))}</li>"
+                                              for role, d in data.items() if isinstance(d, dict)) + "</ul>"]
+    windows = [w for w in r.get("windows") or [] if isinstance(w, dict)]
+    if windows:
+        out += [f"<h2>Walk-forward: {e(counted(len(windows), 'window'))}, "
+                f"{sum(w.get('status') == 'passed' for w in windows)} passed</h2><div class=scroll><table><tr><th></th>"
+                "<th>window</th><th>train</th><th>test</th><th>rows (train / test)</th></tr>"
+                + "".join(f"<tr><td class='{e(str(w.get('status')))}'>{e(_icon(w.get('status')))}</td>"
+                          f"<td>{e(str(w.get('window')))}</td><td>{e(str(w.get('train_start')))} to "
+                          f"{e(str(w.get('train_end')))}</td><td>{e(str(w.get('test_start')))} to "
+                          f"{e(str(w.get('test_end')))}</td><td>{e(str(w.get('train_rows')))} / "
+                          f"{e(str(w.get('test_rows')))}</td></tr>" for w in windows) + "</table></div>"]
     rows = []
     for s in r.get("steps", []):
         checks = s.get("expectations") or []

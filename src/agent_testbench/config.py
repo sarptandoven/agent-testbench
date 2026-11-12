@@ -31,6 +31,7 @@ DEFAULTS = {
     "sessions": {"backend": "local", "gpu": None, "idle_minutes": 10, "max_minutes": 60, "secrets": []},
 }
 PLAN_DEFAULTS = {"backend": "local", "gpu": None, "workdir": None, "description": ""}
+PLAN_DATA_KEYS = ("holdout", "walk_forward")           # a plan's keys for the data seal (dataseal.py), when written
 STEP_DEFAULTS = {"max_minutes": 10, "params": {}, "env": {}, "secrets": [], "pythonpath": [], "artifacts": [],
                  "expect": {}, "uploads": [], "cells": None, "colab_shim": True, "continue_on_failure": False,
                  "mocks": {}}
@@ -215,11 +216,18 @@ def validate(raw: dict, root: Path) -> dict:
         raise ConfigError("`guard.ask` is a list of commands the hook asks about first, e.g. [git push, gh pr merge]")
     cfg["notify"] = _notify(cfg.get("notify"))
     cfg["export"] = check_export(cfg.get("export"))
+    data, cfg["data"] = cfg.get("data"), {}
+    if data is not None:                                 # data: by role, a sealed holdout, walk-forward windows
+        from . import dataseal
+        cfg["data"] = dataseal.check_data(data, root, cfg["exclude"])
     plans = cfg.get("plans") or {}
     if not isinstance(plans, dict):
         raise ConfigError(f"`plans:` maps plan names to plans; it is {_brief(plans)}. Under `plans:`, write each plan "
                           f"one of these ways:\n{PLAN_FORMS}")
-    cfg["plans"] = {name: _plan(name, plan, root) for name, plan in plans.items()}
+    cfg["plans"] = {name: _plan(name, plan, root, cfg["data"]) for name, plan in plans.items()}
+    if sum(bool(p.get("holdout")) for p in cfg["plans"].values()) > 1:
+        from . import dataseal
+        dataseal.check_plans(cfg["plans"])
     for name in sorted({p["backend"] for p in cfg["plans"].values()} | {cfg["sessions"]["backend"]}):
         B.get(name).validate(cfg)
     return cfg
@@ -446,7 +454,7 @@ def long_form(name, plan):
     return plan
 
 
-def _plan(name: str, plan: dict, root: Path) -> dict:
+def _plan(name: str, plan: dict, root: Path, data: dict | None = None) -> dict:
     where = f"plans.{name}"
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,40}", name):
         raise ConfigError(f"`{where}`: plan names use letters, digits, - or _" + ("" if isinstance(name, str) else
@@ -464,6 +472,9 @@ def _plan(name: str, plan: dict, root: Path) -> dict:
         raise ConfigError(f"`{where}` is {_brief(plan)}; a plan is written one of these ways:\n{PLAN_FORMS}")
     plan = {**PLAN_DEFAULTS, **plan}
     check_hardware(where, plan["backend"], plan.get("gpu"))
+    if data or any(k in plan for k in PLAN_DATA_KEYS):
+        from . import dataseal                           # holdout:, walk_forward:, and a copy when data is cut
+        dataseal.check_plan(where, plan, data or {})
     from . import backends as B
     plan["workdir"] = plan["workdir"] or ("copy" if B.get(plan["backend"]).remote else "inplace")
     if plan["workdir"] not in ("inplace", "copy"):

@@ -594,6 +594,13 @@
         }
       }
     },
+    "data": {
+      "description": "The data the plans read, by role: a CSV file (or a folder of CSV files) with a time column, and optionally a sealed holdout (docs/trading-data.md)",
+      "type": ["object", "null"],
+      "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9_]{0,40}$"},
+      "additionalProperties": {"$ref": "#/$defs/data_role"},
+      "examples": [{"prices": {"path": "data/prices.csv", "time": "time", "holdout_from": "2025-07-01"}}]
+    },
     "plans": {
       "description": "Plans by name: a command, a list of commands, or the long form with backend, gpu and steps",
       "type": ["object", "null"],
@@ -602,6 +609,32 @@
     }
   },
   "$defs": {
+    "data_role": {
+      "description": "One role's data: its path, or {path, time, holdout_from}",
+      "anyOf": [
+        {"description": "The path of the CSV file or folder, relative to the project", "$ref": "#/$defs/data_path"},
+        {
+          "type": "object",
+          "required": ["path"],
+          "additionalProperties": false,
+          "properties": {
+            "path": {"description": "The CSV file, or a folder of CSV files, relative to the project; a step finds it in TESTBENCH_DATA_<ROLE>", "$ref": "#/$defs/data_path"},
+            "time": {"description": "The time column (default: the first of time, date, timestamp, datetime); its values are ISO 8601", "type": "string", "pattern": "\\S"},
+            "holdout_from": {"description": "Rows at or after this time are sealed: only the plan with holdout: sees them", "type": "string", "pattern": "^\\d{4}-\\d\\d-\\d\\d([Tt ]\\d\\d:\\d\\d(:\\d\\d([.,]\\d{1,9})?)? ?([Zz]|[+-]\\d\\d(:?\\d\\d)?)?)?$"}
+          }
+        }
+      ]
+    },
+    "data_path": {
+      "description": "A path in the project, relative to it: not absolute, without .., not in .testbench",
+      "type": "string",
+      "pattern": "^\\s*(?![/\\\\])(?![A-Za-z]:)(?!(\\./)*\\.testbench([/\\\\]|$))(?!(.*[/\\\\])?\\.\\.([/\\\\]|$))\\S"
+    },
+    "length": {
+      "description": "A length of time: a whole number and d (days), w (weeks), mo (months) or y (years), e.g. 24mo",
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,4}\\s*(d|w|mo|y)$"
+    },
     "rule": {
       "description": "A check on one value: \">= 0.9\", \"~= 0.93 +- 0.01\", \"between 0.8 and 0.95\", or a bare value meaning equality",
       "type": ["string", "number", "boolean", "null"],
@@ -665,6 +698,33 @@
           "enum": ["inplace", "copy", null]
         },
         "description": {"description": "What this plan proves, in a line", "type": ["string", "null"]},
+        "holdout": {
+          "description": "This plan opens the sealed holdout: it sees every row, and each opening is counted in its reports; {max_opens: 1} refuses a second",
+          "anyOf": [
+            {"type": ["boolean", "null"]},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "max_opens": {"description": "How many times the holdout may be opened; a launch past it is refused", "type": ["integer", "null"], "minimum": 1}
+              }
+            }
+          ]
+        },
+        "walk_forward": {
+          "description": "Run the steps once per window over the rows before the seal, oldest first: {data: prices, train: 24mo, test: 6mo, step: 6mo}",
+          "type": "object",
+          "required": ["train", "test"],
+          "additionalProperties": false,
+          "properties": {
+            "data": {"description": "The data role whose time column the windows are cut from (default: the only one)", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,40}$"},
+            "train": {"description": "How long each train period is: a whole number and d, w, mo or y", "$ref": "#/$defs/length"},
+            "test": {"description": "How long each test period is, right after its train period", "$ref": "#/$defs/length"},
+            "step": {"description": "How far each window moves on from the one before (default: the test length)", "$ref": "#/$defs/length"},
+            "anchored": {"description": "true: every train period starts at the first window's start and grows; false (default): it rolls forward", "type": "boolean"},
+            "start": {"description": "When the first train period starts (default: the first row's day, or month for lengths in mo or y)", "type": "string", "pattern": "^\\d{4}-\\d\\d-\\d\\d([Tt ]\\d\\d:\\d\\d(:\\d\\d([.,]\\d{1,9})?)? ?([Zz]|[+-]\\d\\d(:?\\d\\d)?)?)?$"}
+          }
+        },
         "steps": {
           "description": "The steps, run in order; a plan stops at the first that fails unless it has continue_on_failure",
           "type": "array",
