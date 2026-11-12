@@ -188,6 +188,7 @@ def test_without_elicitation_it_says_what_needs_approval(tmp_path, plugin, monke
     out = asyncio.run(mcp_server.server.call_tool("run_plan", {"plan": "on-fake", "project_dir": str(root)}))
     text = " ".join(getattr(c, "text", "") for c in content(out))
     assert "Needs approval" in text and "--approve" in text and "[exit 2]" in text
+    assert "approved_by_person=true on this tool: set it only after the person said yes" in text, text
 
 
 def _post(url, body, session=None):

@@ -76,7 +76,7 @@ Real messages, from the test suite's stand-in for a webhook (the last two with s
 {"text": "agent-testbench, scoring: needs your approval: plan score could cost up to $66.00 (above budget.ask_above_usd $0.50). On fake FAKE1. The agent was told to wait for a person's yes: tell it yes to let it go ahead (`testbench run score --approve`), or no.",
  "event": "approval_needed", "what": "plan score", "plan": "score", "backend": "fake", "gpu": "FAKE1",
  "status": "waiting for approval", "worst_case_usd": 66.0, "max_minutes": 0.1,
- "message": "Needs approval: plan score could cost up to $66.00 (above budget.ask_above_usd $0.50). Ask a person; if they agree, rerun with --approve.",
+ "message": "Needs approval: plan score could cost up to $66.00 (above budget.ask_above_usd $0.50). Ask a person; only they approve it, with `testbench run score --approve`.",
  "approve_with": "testbench run score --approve"}
 ```
 

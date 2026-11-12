@@ -121,19 +121,56 @@ def test_outside_a_project_every_command_says_where_to_start(tmp_path, monkeypat
     assert code == 2 and "No testbench.yaml here or in any parent of" in out and "Run `testbench init`" in out, out
 
 
-def test_no_command_shows_the_commands_in_groups(tmp_path):
+def test_no_command_shows_the_core_commands_in_groups(tmp_path):
     wide = {"COLUMNS": "100"}
     r = cli(tmp_path, env=wide)
     assert r.returncode == 2 and "Traceback" not in r.stderr, r.stderr
     assert r.stdout == cli(tmp_path, "--help", env=wide).stdout == cli(tmp_path, "help", env=wide).stdout
+    top = CLI._subcommands(CLI.build_parser()).choices
+    line = {n: s for names in CLI.GROUPS.values() for n, s in names.items()}
+    core = [n for names in CLI.CORE.values() for n in names if n in top]
+    for title, names in CLI.CORE.items():
+        assert f"\n  {title}\n" in r.stdout
+    for name in core:
+        assert f"    {name:<9} {line[name]}" in r.stdout, name
+    for name in set(top) - set(core):
+        assert f"\n    {name} " not in r.stdout, f"{name} is not a core command: only `help --all` lists it"
+    assert f"\n{len(top) - len(core)} more, for setup, money, notebooks and the rest: testbench help --all\n" \
+        in r.stdout
+    assert "start with:\n  testbench demo" in r.stdout and "exit codes: 0 passed or done, 1 failed, 2 refused" \
+        in r.stdout
+    assert len(r.stdout.splitlines()) < 45, "the core at a glance"
+    r = cli(tmp_path, "rnu")
+    assert r.returncode == 2 and "did you mean `testbench run`?" in r.stderr and "Traceback" not in r.stderr
+    assert "`testbench help --all` lists every command" in r.stderr
+    assert "invalid choice" not in r.stderr, "not argparse's list of every command"
+
+
+def test_help_all_lists_every_command_in_its_group(tmp_path):
+    wide = {"COLUMNS": "100"}
+    r = cli(tmp_path, "help", "--all", env=wide)
+    assert r.returncode == 0 and "Traceback" not in r.stderr, r.stderr
+    assert r.stdout == cli(tmp_path, "--help", "--all", env=wide).stdout == cli(tmp_path, "--all", env=wide).stdout
     for title, names in CLI.GROUPS.items():
         assert f"\n  {title}\n" in r.stdout
         for name, line in names.items():
             assert f"    {name:<9} {line}" in r.stdout, name
-    assert "start with:\n  testbench demo" in r.stdout and "exit codes: 0 passed or done, 1 failed, 2 refused" in r.stdout
-    r = cli(tmp_path, "rnu")
-    assert r.returncode == 2 and "did you mean `testbench run`?" in r.stderr and "Traceback" not in r.stderr
-    assert "invalid choice" not in r.stderr, "not argparse's list of every command"
+    for name in CLI._subcommands(CLI.build_parser()).choices:
+        assert f"\n    {name} " in r.stdout, f"`testbench help --all` lists every command; not {name}"
+    assert "more, for setup" not in r.stdout and "start with:\n  testbench demo" in r.stdout
+
+
+def test_help_lists_only_commands_the_parser_has(monkeypatch, capsys):
+    """CORE may name a command another change adds (it is skipped until then), and a command GROUPS lacks still
+    shows under `other` in `help --all`."""
+    monkeypatch.setitem(CLI.CORE, "start", ("demo", "no-such-command", "doctor"))
+    monkeypatch.setitem(CLI.CORE, "nothing here yet", ("no-such-command",))
+    monkeypatch.setitem(CLI.GROUPS, "proof", {k: v for k, v in CLI.GROUPS["proof"].items() if k != "history"})
+    code, core = tb(capsys, "--help")
+    assert code == 0 and "no-such-command" not in core and "nothing here yet" not in core
+    assert "\n  start\n    demo " in core and "\n    doctor " in core
+    code, every = tb(capsys, "help", "--all")
+    assert code == 0 and "no-such-command" not in every and "\n  other\n    history " in every
 
 
 def test_every_command_is_in_one_group_with_a_short_line():
@@ -142,6 +179,9 @@ def test_every_command_is_in_one_group_with_a_short_line():
     assert sorted(grouped) == sorted(top), "a new command needs a line in cli.GROUPS"
     assert all(len(f"    {n:<9} {line}") <= 78 for names in CLI.GROUPS.values() for n, line in names.items()), \
         "one line each in an 80-column terminal"
+    core = [n for names in CLI.CORE.values() for n in names]
+    assert len(core) == len(set(core)) <= 12 and set(core) - set(top) <= {"check"}, \
+        "the core is a dozen commands the parser has (check: until `testbench check` lands)"
 
 
 def test_every_command_has_examples_that_parse():

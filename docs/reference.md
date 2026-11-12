@@ -336,52 +336,59 @@ steps/NN-name/    log.txt, result.json, executed.ipynb, cellNN_imageK.png, downl
 
 ## Commands
 
-`testbench` alone (or `testbench help`) lists the commands in these groups, with the ones to start with;
+`testbench` alone (or `testbench help`) lists the core: the dozen commands in the first three groups below, with
+the ones to start with. `testbench help --all` lists every command, in the groups of the rest of the table.
 `testbench help COMMAND` (or `testbench COMMAND --help`) shows a command's options and examples. Options are spelled
 out in full: `--appr` is not `--approve`. A mistyped command gets the closest one as a whole command line (`testbench
 rnu smoke`: did you mean `testbench run smoke`?), words in the wrong order get the right order (`testbench smoke
-run`: the command comes first), and a mistyped plan, session, recipe, client or example name gets the closest one.
-`--json` and `--format json` are the same on every command with a JSON form (`report`, `diff`, `history`,
-`estimate`, `exec`, `rescue`); every session command takes `-s NAME` (also `--session NAME`).
+run`: the command comes first), a mistyped plan, session, recipe, client or example name gets the closest one, and
+so does a file that is not there (`testbench lint trian.ipynb`: did you mean `testbench lint train.ipynb`?). A value
+an option cannot take gets an example of that option. `--json` and `--format json` are the same on every command
+with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`); every session command takes `-s NAME`
+(also `--session NAME`).
 
 | command | what it does | exit codes besides 2 |
 |---|---|---|
-| **try it and set up** | | |
+| **start** | | |
 | `demo [NAME] [DIR]`, `demo --list` | copy an example project to a new folder and run its free plan | 0 the plan did what the example expects (the `test-suite` plan fails on purpose), 1 it did not, 3 still running |
-| `init [--recipe NAME] [--add] [--force]` | write testbench.yaml (a plan for each thing it finds) and AGENTS.md | 0 |
-| `recipes [NAME]` | ready plans for a goal, with their worst case; or print one | 0 |
-| `connect CLIENT... [--user] [--dry-run]`, `connect --list` | register the MCP server in a client's config and write AGENTS.md | 0 |
+| `check` | a zero-config run of this project ([getting started](getting-started.md)) | `testbench help check` |
 | `doctor` | what this machine can run; each `no` line says what to do | 0, whatever it found |
-| `mcp [--http]` | serve the commands as MCP tools | 0 when it stops |
-| **plans** | | |
+| **prove it with a plan** | | |
 | `plans` | the plans, their hardware and worst case | 0 |
+| `estimate PLAN [--approve] [--json]` | a plan's worst case and whether it may launch now | 0 it may (2: it may not) |
 | `run PLAN [--wait SECONDS] [--detach] [--approve]` | run a plan and print its report | 0 passed, 1 failed, 3 still running after `--wait` (and always with `--detach`) |
-| `wait [RUN] [--timeout SECONDS]` | follow a run (`--wait` is the same as `--timeout`) | 0 passed, 1 failed, 3 still running |
-| `status [RUN]` | one line about a run | 0 passed, 1 failed, cancelled, error or lost, 3 still running |
-| `runs [-n N]` | recent runs | 0 |
-| `cancel [RUN]` | stop a run, here and on its remote machine | 0, also when it had already ended |
-| `watch PLAN [--max-runs N]` | run a free plan again on every change | 0 stopped, or the last of `--max-runs` passed; 1 it did not |
-| **proof** | | |
 | `report [RUN] [--format md\|json\|html\|junit] [-o FILE]` | a run's report | 0, a failed run's report too |
 | `verify [RUN] [--attestation [--repo OWNER/REPO]]` | check the evidence against its recorded sha256 | 0 it matches, 1 it does not (2: it could not be checked) |
-| `diff [A B \| PLAN \| RUN] [--json]` | what changed between two runs | 0 |
-| `history PLAN [-n N] [--json]` | a plan's runs over time | 0 |
 | `ui [--open] [--serve [--port N]]` | every run as a page, or the live dashboard | 0 |
-| `export [RUN\|all] [--to mlflow\|wandb\|csv\|jsonl]` | a run in a tracker or a file | 0, 1 a target failed |
-| **live sessions** | | |
+| **work live, improve in a loop** | | |
 | `session start [NAME] [--backend B] [--gpu G] ...` | start a kernel, inside the budget | 0 |
 | `session list` | sessions, their hardware, uptime and cost | 0 |
 | `session stop [NAME\|--all]` | stop one | 0, also when none was running |
 | `session sync`, `install PKG...`, `shell "CMD"` | copy the project again, pip install, run a shell command | 0; `install`: 1 when pip fails; `shell`: 0 once the command ran (its own exit code is not passed on) |
 | `exec CODE \| -f FILE \| --cells NB[:CELLS]` | run code in the session's kernel | 0 ok, 1 the code raised, 3 interrupted at `--timeout` (the kernel and its variables are kept) |
-| `files ls\|get\|put PATH...` | files on the session's machine | 0 |
-| **loops and notifications** | | |
 | `loop start PLAN --metric FILE:KEY --budget-usd N` | start a loop and run the baseline | 0 the baseline passed, 1 it did not (the loop still started), 3 still running |
 | `loop try "WHAT"` | commit the edits as a try and run the plan | 0 kept, 1 reverted, 3 still running |
 | `loop status`, `loop stop` | the tries so far; the report | 0; `status`: 3 while a try runs |
+| **set up** (the rest: `testbench help --all`) | | |
+| `init [--recipe NAME] [--add] [--force]` | write testbench.yaml (a plan for each thing it finds) and AGENTS.md | 0 |
+| `recipes [NAME]` | ready plans for a goal, with their worst case; or print one | 0 |
+| `connect CLIENT... [--user] [--dry-run]`, `connect --list` | register the MCP server in a client's config and write AGENTS.md | 0 |
+| `selftest [--keep]` | check the main promises hold on this machine, in a temporary folder (a minute or so, local and free) | 0 they all held, 1 one did not |
+| `mcp [--http]` | serve the commands as MCP tools | 0 when it stops |
+| **runs** | | |
+| `wait [RUN] [--timeout SECONDS]` | follow a run (`--wait` is the same as `--timeout`) | 0 passed, 1 failed, 3 still running |
+| `status [RUN]` | one line about a run | 0 passed, 1 failed, cancelled, error or lost, 3 still running |
+| `runs [-n N]` | recent runs | 0 |
+| `cancel [RUN]` | stop a run, here and on its remote machine | 0, also when it had already ended (the message says how to read it instead) |
+| `watch PLAN [--max-runs N]` | run a free plan again on every change | 0 stopped, or the last of `--max-runs` passed; 1 it did not |
+| **proof** | | |
+| `diff [A B \| PLAN \| RUN] [--json]` | what changed between two runs | 0 |
+| `history PLAN [-n N] [--json]` | a plan's runs over time | 0 |
+| `export [RUN\|all] [--to mlflow\|wandb\|csv\|jsonl]` | a run in a tracker or a file | 0, 1 a target failed |
+| **sessions and notifications** | | |
+| `files ls\|get\|put PATH...` | files on the session's machine | 0 |
 | `notify test` | one test message to the `notify:` webhook | 0 accepted, 1 refused by the service |
 | **money** | | |
-| `estimate PLAN [--approve] [--json]` | a plan's worst case and whether it may launch now | 0 it may (2: it may not) |
 | `spend [-n N] [--modal]` | what runs and sessions have cost | 0 |
 | `prices [--update]` | the prices behind every estimate | 0 |
 | **notebooks and the lab notebook** | | |
@@ -398,8 +405,9 @@ Every command uses the same four, and the GitHub Action and the MCP server read 
 |---|---|
 | `0` | passed, or done |
 | `1` | failed: the run, the check or the code did not pass |
-| `2` | refused or bad input: nothing ran and nothing was spent; the message says what to do instead |
+| `2` | refused or bad input: nothing ran and nothing was spent; the message says what was refused, why, and the command (or the file and field to edit) that fixes it |
 | `3` | still running: `testbench wait RUN` follows it (for a loop's try, then `testbench loop status`) |
 
 A command line testbench cannot read (an unknown command or option, a missing argument, a value that is not a
-number) is `2` too, with the closest command or the usage, and where the examples are.
+number) is `2` too, with the closest command, or the usage and an example of the option, and where the examples
+are.

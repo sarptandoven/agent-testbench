@@ -32,9 +32,9 @@ Real messages, from a plan on a machine priced at $3/h:
 
 ```
 $ testbench run long
-Refused: plan long could cost up to $3.10 (60 min at $0.0500/min), over budget.max_run_usd $2.00. Lower the steps' max_minutes, use a cheaper GPU, or have a person raise the budget.
+Refused: plan long could cost up to $3.10 (60 min at $0.0500/min), over budget.max_run_usd $2.00. Lower the max_minutes of plan long's steps in testbench.yaml (38 min in all would fit), use a cheaper GPU or backend, or have a person raise budget.max_run_usd in testbench.yaml. `testbench estimate long` checks it again.
 $ testbench run check
-Needs approval: plan check could cost up to $0.60 (above budget.ask_above_usd $0.50). Ask a person; if they agree, rerun with --approve.
+Needs approval: plan check could cost up to $0.60 (above budget.ask_above_usd $0.50). Ask a person; only they approve it, with `testbench run check --approve`.
 ```
 
 A loop takes one `--budget-usd` for all its runs together, approved once if it is above the threshold; each run

@@ -45,7 +45,11 @@ def near(word, names, cutoff: float = 0.6) -> str:
 
 def no_plan(cfg: dict, name) -> str:
     """What to say when testbench.yaml has no plan of that name: the closest one, and every plan."""
-    return f"No plan {name!r}{near(name, cfg['plans'])}. Plans: {', '.join(cfg['plans'])}"
+    if not cfg["plans"]:
+        return (f"No plan {name!r}: {CONFIG_NAME} has no plans yet. Add one under `plans:` (`testbench recipes` has "
+                "ready ones, `testbench init --add --recipe NAME` adds them)")
+    return (f"No plan {name!r}{near(name, cfg['plans'])}. Plans: {', '.join(cfg['plans'])}. `testbench plans` shows "
+            "each with its hardware and worst case")
 
 
 def find_root(start: str | Path = ".") -> Path:
@@ -72,7 +76,10 @@ def load(root: str | Path) -> dict:
         raise ConfigError(f"{path} nests too deeply to read; testbench.yaml needs only a few levels") from None
     except (yaml.YAMLError, ValueError) as exc:                  # ValueError: an integer too long to read
         raise ConfigError(f"{path} is not valid YAML: {exc}") from None
-    return validate({} if raw is None else raw, root)
+    try:
+        return validate({} if raw is None else raw, root)
+    except ConfigError as exc:                                   # the field and what to write, and in which file
+        raise ConfigError(f"{path}: {exc}") from None
 
 
 def _parse(text: str):

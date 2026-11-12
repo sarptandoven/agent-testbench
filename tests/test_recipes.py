@@ -158,6 +158,7 @@ def test_init_with_recipes_writes_a_config_that_loads(tmp_path):
     assert cfg["modal"]["pip"] == ["torch==2.14.1"] and cfg["colab"]["pip"] == []
     r = cli(root, "init", "--recipe", "pytest")
     assert r.returncode == 2 and "already exists (use --force to replace it, or --add to add" in r.stdout
+    assert "`testbench init --add --recipe pytest` adds them" in r.stdout
 
 
 def test_init_without_a_recipe_is_unchanged(tmp_path):
@@ -166,7 +167,8 @@ def test_init_without_a_recipe_is_unchanged(tmp_path):
     assert r.returncode == 0 and "plan train-smoke: a training script (train.py)" in r.stdout
     assert "# modal:" in (tmp_path / "testbench.yaml").read_text() and "Recipe" not in r.stdout
     r = cli(tmp_path, "init")
-    assert r.returncode == 2 and r.stdout.strip() == f"{tmp_path / 'testbench.yaml'} already exists (use --force to replace it)"
+    assert r.returncode == 2 and r.stdout.startswith(f"{tmp_path / 'testbench.yaml'} already exists (use --force to "
+                                                     "replace it): ") and "`testbench init --force`" in r.stdout
     r = cli(tmp_path, "init", "--add")
     assert r.returncode == 2 and "--add adds a recipe's plans" in r.stdout
 

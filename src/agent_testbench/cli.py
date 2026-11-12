@@ -107,14 +107,18 @@ def cmd_init(a):
     for f in [target] + ([] if a.add else [root / "AGENTS.md", root / "CLAUDE.md"]):
         C.own_file(root, f)
     if a.add and not a.recipe:
-        print("--add adds a recipe's plans to testbench.yaml: testbench init --add --recipe NAME (`testbench recipes` "
-              "lists them)")
+        print("--add adds a recipe's plans to testbench.yaml, so it needs the recipe: `testbench init --add --recipe "
+              "NAME` (`testbench recipes` lists them)")
         return 2
     if a.add and target.exists():
         return _add_recipes(root, target, a.recipe)
     if target.exists() and not a.force:
+        chosen = shlex.join(w for r in a.recipe for w in ("--recipe", r))
         print(f"{target} already exists (use --force to replace it"
-              + (", or --add to add the recipe's plans to it)" if a.recipe else ")"))
+              + (f", or --add to add the recipe's plans to it): `testbench init --add {chosen}` adds them and changes "
+                 f"nothing else; `testbench init {chosen} --force` replaces the file" if a.recipe else
+                 "): `testbench plans` shows what it holds; `testbench init --force` writes a new one in its place, "
+                 "and `testbench init --add --recipe NAME` adds a recipe's plans to it"))
         return 2
     from .scaffold import detect
     found = detect(root)
@@ -387,8 +391,9 @@ def cmd_export(a):
     else:
         targets = cfg["export"]
     if not targets:
-        print("Nothing to export to: pass --to mlflow, wandb, csv or jsonl, or add an `export:` section to "
-              "testbench.yaml, e.g. `export: {csv: .testbench/runs.csv}` (docs/export.md)")
+        print("Nothing to export to: testbench.yaml has no `export:` section and no --to was given. Name a target, "
+              "e.g. `testbench export --to csv` (a row per run in .testbench/runs.csv; or mlflow, wandb, jsonl), or "
+              "add `export: {csv: .testbench/runs.csv}` to testbench.yaml to export after every run (docs/export.md)")
         return 2
     try:
         for t in targets:
@@ -444,7 +449,8 @@ def cmd_ui(a):
         from . import dashboard
         return dashboard.serve(root, cfg, dashboard.PORT if a.port is None else a.port, a.open)
     if a.port is not None:
-        print("testbench: --port goes with --serve (the live dashboard)", file=sys.stderr)
+        print(f"testbench: --port goes with --serve (the live dashboard): `testbench ui --serve --port {a.port}`",
+              file=sys.stderr)
         return 2
     index = ui.build(root, cfg)
     print(f"wrote {index} (static pages: open it in a browser; each run's page is report.html in its folder)")
@@ -457,14 +463,18 @@ def cmd_ui(a):
 def cmd_verify(a):
     from . import provenance
     if a.repo and not a.attestation:
-        print("testbench: --repo goes with --attestation (whose workflow should have signed the report)", file=sys.stderr)
+        fix = shlex.join(["testbench", "verify", *([a.run] if a.run else []), "--attestation", "--repo", a.repo])
+        print(f"testbench: --repo goes with --attestation (whose workflow should have signed the report): `{fix}`",
+              file=sys.stderr)
         return 2
     root, _ = _root_cfg()
     run_dir = runs.resolve(root, a.run)
     rep = R.load(run_dir)
     if not rep or "evidence" not in rep:
+        plan = runs.read_state(run_dir).get("plan") or "PLAN"
         print(f"{run_dir.name} has no recorded evidence to check (it ran before agent-testbench recorded hashes, or "
-              "never finished)")
+              f"never finished). `testbench status {run_dir.name}` says how it stands; a new run records it: "
+              f"`testbench run {plan}`")
         return 2
     problems = provenance.verify(run_dir, rep)
     if problems:
@@ -890,7 +900,8 @@ def cmd_demo(a):
     demo, given = DEMOS[name], [x for x in (a.name, a.dir) if x is not None]
     target = Path(folder or demo["dir"]).resolve()
     if target.exists() and any(target.iterdir()):
-        print(f"{target} is not empty; give `testbench demo` a new folder")
+        print(f"{target} is not empty, so the example is not copied there; give it a new folder: "
+              f"`testbench demo {name} {shlex.quote(target.name + '-2')}`")
         return 2
     missing = [pkg for mod, pkg in demo["needs"].items() if iu.find_spec(mod) is None]
     if missing:
@@ -946,7 +957,19 @@ class _Parser(argparse.ArgumentParser):
 
     def error(self, message):
         self.print_usage(sys.stderr)
-        self.exit(2, f"{self.prog}: error: {message}\n`{self.prog} --help` says what it takes, with examples.\n")
+        self.exit(2, f"{self.prog}: error: {message}\n{self._example(message)}`{self.prog} --help` says what it takes, "
+                     "with examples.\n")
+
+    def _example(self, message: str) -> str:
+        """'For example: `testbench runs -n 30`. ': the command's example that uses the option the mistake is about,
+        else its first; '' for a parser without examples."""
+        if not (self.epilog or "").startswith("examples:"):
+            return ""
+        lines = [ln.strip().split("  #")[0].strip() for ln in self.epilog.splitlines() if ln.startswith("  testbench ")]
+        about = re.match(r"argument ([^:]+):", message)
+        named = set(about.group(1).split("/")) if about else set()
+        hit = next((ln for ln in lines if named & set(ln.split())), lines[0] if lines else "")
+        return f"For example: `{hit}`. " if hit else ""
 
 
 def _number(text: str) -> float:
@@ -984,7 +1007,7 @@ def _count(text: str) -> int:
     return v
 
 
-GROUPS = {   # `testbench --help`: the commands as README's Commands table groups them, one short line each
+GROUPS = {   # `testbench help --all`: every command, in the groups README's Commands table uses, one short line each
     "try it and set up": {
         "demo": "copy an example project, run its free plan, show what is next",
         "init": "write testbench.yaml and AGENTS.md for this project",
@@ -1024,6 +1047,12 @@ GROUPS = {   # `testbench --help`: the commands as README's Commands table group
         "rescue": "why a notebook does not run, and what to do",
         "nb": "a notebook as plain cell files: split, build, fields",
         "note": "add a line to the lab notebook (.testbench/NOTES.md)"},
+}
+
+CORE = {   # `testbench --help`: the commands a newcomer needs, each with its line from GROUPS; `help --all`: every one
+    "start": ("demo", "check", "doctor"),
+    "prove it with a plan": ("plans", "estimate", "run", "report", "verify", "ui"),
+    "work live, improve in a loop": ("session", "exec", "loop"),
 }
 
 ABOUT = ("testbench runs your code on real machines - this one, a container, an ssh box, a Modal GPU, a Colab VM - "
@@ -1225,9 +1254,20 @@ def commands(ap) -> dict:
     return out
 
 
+def _listing(groups: dict, top: dict) -> list[str]:
+    """Each group's title and its commands, one line each. A name the parser lacks is left out, and so is a group
+    left with none: CORE may name a command another branch adds."""
+    lines = []
+    for title, names in groups.items():
+        shown = [textwrap.fill(f"{n:<9} {summary}", _width(), initial_indent="    ", subsequent_indent=" " * 14)
+                 for n, summary in names.items() if n in top]
+        lines += [f"  {title}"] * bool(shown) + shown
+    return lines
+
+
 def _finish(ap) -> None:
-    """Every command's --help gets a description and ends with its examples; `testbench --help` lists the commands in
-    the groups README uses."""
+    """Every command's --help gets a description and ends with its examples. `testbench --help` lists the core
+    commands (CORE) and how many more there are; `testbench help --all` lists every one in the groups README uses."""
     found = commands(ap)
     for path, p in found.items():
         sub = _subcommands(ap if " " not in path else found[path.rsplit(" ", 1)[0]])
@@ -1236,13 +1276,13 @@ def _finish(ap) -> None:
         if path in examples():
             p.epilog = "examples:\n" + examples()[path]
     top = _subcommands(ap).choices
-    other = {n: p.summary for n, p in top.items() if all(n not in names for names in GROUPS.values())}
-    lines = [_wrap(ABOUT), "", "commands:"]
-    for title, names in {**GROUPS, "other": other}.items():
-        lines += [f"  {title}"] * bool(names) + [
-            textwrap.fill(f"{n:<9} {summary}", _width(), initial_indent="    ", subsequent_indent=" " * 14)
-            for n, summary in names.items() if n in top]
-    ap.description = "\n".join(lines)
+    line = {n: summary for names in GROUPS.values() for n, summary in names.items()}
+    other = {n: p.summary for n, p in top.items() if n not in line}
+    core = {title: {n: line.get(n) or top[n].summary for n in names if n in top} for title, names in CORE.items()}
+    more = len(set(top) - {n for names in core.values() for n in names})
+    ap.description = "\n".join([_wrap(ABOUT), "", "commands:", *_listing(core, top)] + [
+        "", f"{more} more, for setup, money, notebooks and the rest: testbench help --all"] * bool(more))
+    ap.every_command = "\n".join([_wrap(ABOUT), "", "commands:", *_listing({**GROUPS, "other": other}, top)])
 
 
 RUN = "a run id, a prefix of one, last or last~N (default: the latest run)"
@@ -1251,7 +1291,8 @@ SESSION = "the session's name (default: the only running one)"
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = _Parser(prog="testbench", usage="testbench [-h] [--version] COMMAND ...", epilog=START)
+    ap = _Parser(prog="testbench", usage="testbench [-h] [--all] [--version] COMMAND ...", epilog=START)
+    ap.add_argument("--all", action="store_true", help="with --help: every command, not only the core ones")
     ap.add_argument("--version", action="version", version=f"agent-testbench {__version__}")
     sub = ap.add_subparsers(dest="cmd", metavar="COMMAND", help=argparse.SUPPRESS, prog="testbench", parser_class=_Parser)
     p = sub.add_parser("init", help="write testbench.yaml and the working rules (AGENTS.md) for this project",
@@ -1571,7 +1612,9 @@ def _no_command(parser, sub, prog: str, word: str, rest: list, i: int) -> str:
             f" (or {' or '.join(close[1:])})?" if close[1:] else "?")
     else:
         hint = ""
-    return f"no command {word!r}" + (f"; {hint}" if hint else ".") + f" `{prog} --help` lists the commands."
+    every = ("`testbench help --all` lists every command" if prog == "testbench"
+             else f"`{prog} --help` lists the commands")
+    return f"no command {word!r}" + (f"; {hint}" if hint else ".") + f" {every}."
 
 
 def _check_command(ap, argv: list) -> int | None:
@@ -1610,6 +1653,28 @@ def _os_error(exc: OSError) -> str:
     return str(exc)
 
 
+def _look_again(parser, argv: list, exc: OSError) -> str:
+    """For a file named on the command line that is not there: the closest file of its kind next to it, as the whole
+    command line again; else where paths start from and what is there. '' for a path the command line did not name."""
+    if not isinstance(exc, FileNotFoundError) or not exc.filename:
+        return ""
+    path = Path(exc.filename)
+    at = next((k for k, w in enumerate(argv) if str(exc.filename) in w or path.name and path.name in (
+        Path(w).name, Path(w.rsplit(":", 1)[0]).name)), None)             # nb.ipynb:1-3 names nb.ipynb
+    if at is None:
+        return ""
+    folder = path.parent if path.parent.is_dir() else None
+    names = sorted(p.name for p in folder.iterdir() if p.is_file() and p.suffix == path.suffix) if folder else []
+    close = difflib.get_close_matches(path.name, names, n=1, cutoff=0.5) or names[:1] * (len(names) == 1)
+    if close:
+        fixed = argv[at].replace(str(exc.filename), str(path.with_name(close[0])), 1)
+        fixed = fixed if fixed != argv[at] else argv[at].replace(path.name, close[0], 1)
+        return f"; did you mean `{shlex.join(['testbench', *argv[:at], fixed, *argv[at + 1:]])}`?"
+    kind = f"{path.suffix} files" if path.suffix else "files"
+    return (f" (paths start from {Path.cwd()})" + (f"; the {kind} in {folder}: {', '.join(names[:6])}" if names else "")
+            + f". `{parser.prog} --help` says what it takes")
+
+
 def _utf8_on_windows(argv) -> None:
     """Windows Python reads and writes text in the legacy code page unless in UTF-8 mode, and reports and logs carry
     whatever programs print. Run once more in UTF-8 mode; everything started from there inherits it."""
@@ -1624,6 +1689,10 @@ def main(argv=None):
     if argv[:1] == ["help"]:                         # `testbench help run` is `testbench run --help`
         argv = [*argv[1:], "--help"]
     ap = build_parser()
+    if "--all" in argv and set(argv) <= {"--all", "-h", "--help"}:       # `testbench help --all`: every command
+        ap.description = ap.every_command
+        ap.print_help()
+        sys.exit(0)
     code = _check_command(ap, argv)
     if code is not None:
         sys.exit(code)
@@ -1641,7 +1710,7 @@ def main(argv=None):
         print(f"testbench: {exc}", file=sys.stderr)
         sys.exit(2)
     except (FileNotFoundError, IsADirectoryError, NotADirectoryError, PermissionError) as exc:
-        print(f"testbench: {_os_error(exc)}", file=sys.stderr)
+        print(f"testbench: {_os_error(exc)}{_look_again(_chosen(ap, a), argv, exc)}", file=sys.stderr)
         sys.exit(2)
 
 

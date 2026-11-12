@@ -256,18 +256,28 @@ plugin, which adds the `iterate` and `setup` skills.
 
 ## Commands
 
+`testbench --help` shows the core, a dozen commands:
+
 | | |
 |---|---|
-| `testbench demo` / `init [--recipe]` / `recipes` / `connect` / `doctor` / `mcp [--http]` | try it, set up, check this machine, serve MCP |
-| `testbench session start/list/stop/sync/install/shell`, `exec`, `files` | live kernels |
-| `testbench plans` / `run` / `wait` / `runs` / `cancel` / `watch` | plans |
-| `testbench report [--format html\|junit]` / `verify [--attestation]` / `diff` / `history` / `ui [--serve]` / `export` | proof |
-| `testbench loop start/try/status/stop` / `notify test` | improvement loops, notifications |
-| `testbench estimate` / `spend [--modal]` / `prices [--update]` | money |
+| `testbench demo` / `check` / `doctor` | start: an example project, a first run of yours, what this machine can run |
+| `testbench plans` / `estimate` / `run` / `report [--format html\|junit]` / `verify [--attestation]` / `ui [--serve]` | prove it with a plan: its worst case, the run, its report and evidence, every run as a page |
+| `testbench session start/list/stop/...` / `exec` / `loop start/try/status/stop` | work live in a kernel, improve in a loop |
+
+The rest, for setup, money, notebooks and more (`testbench help --all` lists every command in groups):
+
+| | |
+|---|---|
+| `testbench init [--recipe]` / `recipes` / `connect` / `selftest` / `mcp [--http]` | set up a project and your agents, check the promises hold here, serve MCP |
+| `testbench wait` / `status` / `runs` / `cancel` / `watch` | follow, list and stop runs; run a free plan again on every change |
+| `testbench diff` / `history` / `export` | what changed between runs, the checked numbers over time, MLflow / W&B / csv / jsonl |
+| `testbench files` / `notify test` | files on a session's machine; a test message to the `notify:` webhook |
+| `testbench spend [--modal]` / `prices [--update]` | money |
 | `testbench lint` / `rescue` / `nb split/build/fields` / `note` | notebooks and the lab notebook |
 
 `testbench help COMMAND` shows a command's options and examples; exit codes are in
-[docs/reference.md](docs/reference.md#exit-codes) (0 passed, 1 failed, 2 refused or bad input, 3 still running).
+[docs/reference.md](docs/reference.md#exit-codes) (0 passed, 1 failed, 2 refused or bad input, 3 still running). A
+refusal (exit 2) says what was refused, why, and the command or the testbench.yaml field that fixes it.
 
 ## Documentation
 

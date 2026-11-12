@@ -79,8 +79,11 @@ def start(root: Path, cfg: dict, name: str = "main", backend: str | None = None,
           idle_minutes: float | None = None, max_minutes: float | None = None, secrets: list[str] | None = None,
           approve: bool = False) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,30}", name):
-        raise SessionError("session names use letters, digits, - or _ (up to 31 characters)")
+        raise SessionError(f"session names use letters, digits, - or _ (up to 31 characters), not {name!r}; e.g. "
+                           "`testbench session start gpu-1`")
     hw = hardware(cfg, backend, gpu)
+    how = " ".join(["testbench session start", name] + (["--backend", hw["backend"]] if backend else [])
+                   + (["--gpu", hw["gpu"]] if hw["gpu"] else []))           # this start, as a person types it
     idle = idle_minutes or cfg["sessions"]["idle_minutes"]
     longest = max_minutes or cfg["sessions"]["max_minutes"]
     for what, v in (("idle_minutes", idle), ("max_minutes", longest)):
@@ -90,18 +93,21 @@ def start(root: Path, cfg: dict, name: str = "main", backend: str | None = None,
     most = B.get(hw["backend"]).max_session_minutes
     if most and longest > most:
         raise SessionError(f"a {hw['backend']} session can last at most {C.counted(most / 60, 'hour')} "
-                           f"(max_minutes <= {most:g})")
+                           f"(max_minutes <= {most:g}): `{how} --max-minutes {most:g}`")
     sdir = sessions_dir(root) / name
     if (sdir / "state.json").exists():
         old = read(sdir)
         if old.get("status") in ACTIVE:
-            raise SessionError(f"session {name!r} is already running on {old['backend']}; stop it first or use another name")
+            raise SessionError(f"session {name!r} is already running on {old['backend']}; work in it "
+                               f"(`testbench exec -s {name} ...`), stop it first (`testbench session stop {name}`), "
+                               "or start another under a new name")
         archive = sessions_dir(root) / ".old" / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}"
         archive.parent.mkdir(parents=True, exist_ok=True)
         sdir.rename(archive)
     with budget.launching():
         ok, message, est = budget.check(cfg, budget.estimate(cfg, hw, longest, f"session {name}"), approve,
-                                        "Lower max_minutes")
+                                        f"start it for fewer minutes: `{how} --max-minutes {{fit}}`",
+                                        f"{how} --max-minutes {longest:g}")
         if ok:
             (sdir / "outputs").mkdir(parents=True)
             now = time.time()
@@ -115,9 +121,7 @@ def start(root: Path, cfg: dict, name: str = "main", backend: str | None = None,
                                  "backend": hw["backend"], "worst_case_usd": est["worst_case_usd"]})
     if not ok:                                         # told outside the launch lock, so no launch waits on it
         from . import notify
-        how = " ".join(["testbench session start", name] + (["--backend", hw["backend"]] if backend else [])
-                       + (["--gpu", hw["gpu"]] if hw["gpu"] else []) + ["--max-minutes", f"{longest:g}", "--approve"])
-        notify.approval_needed(root, cfg, message, est, how)
+        notify.approval_needed(root, cfg, message, est, f"{how} --max-minutes {longest:g} --approve")
         raise SessionError(message)
     write(sdir, ledger_id=f"session:{name}:{int(now)}")
     be = B.get(hw["backend"]).session_class()(root, cfg, sdir, state)

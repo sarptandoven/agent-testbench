@@ -76,8 +76,9 @@ def user_limits() -> dict:
     for key in LIMIT_KEYS:
         if key in raw:
             if not C.number(raw[key]):
+                usual = {"max_run_usd": "5.00", "ask_above_usd": "1.00", "max_day_usd": "20.00"}[key]   # the template's
                 raise C.ConfigError(f"`{key}` in {p} must be a number of US dollars; nothing can launch until a "
-                                    "person fixes it")
+                                    f"person fixes it (e.g. `{key}: {usual}`)")
             out[key] = float(raw[key])
     return out
 
@@ -181,10 +182,21 @@ def spent_today_everywhere() -> float:
     return _committed_today(_read(user_ledger_path()))
 
 
-def check(cfg: dict, est: dict, approve: bool, how_to_lower: str) -> tuple[bool, str, dict]:
+def _raise(key: str, where: str) -> str:
+    """Who raises a limit, and in which file: the project's budget, or this machine's limits."""
+    return (f"have a person raise {key} in {limits_path()}" if "this machine's limit" in where
+            else f"have a person raise budget.{key} in {C.CONFIG_NAME}")
+
+
+def check(cfg: dict, est: dict, approve: bool, how_to_lower: str, command: str = "",
+          again: str = "") -> tuple[bool, str, dict]:
     """(allowed, message, estimate). Over max_run_usd or a day's budget (the project's, or the machine's for all
     projects together): refused. Over ask_above_usd: needs approve=True, which an agent may only pass after a
-    person said yes. Each limit is the project's, capped by the machine's limits."""
+    person said yes. Each limit is the project's, capped by the machine's limits.
+
+    Every refusal says how to get under the limit: how_to_lower may hold {fit}, the minutes that would fit under
+    max_run_usd; command is the launch without --approve (`testbench run smoke`), which a person approves with;
+    again is the command that checks again without launching (`testbench estimate smoke`)."""
     lim = limits(cfg)
     cost, what = est["worst_case_usd"], est["what"]
     if not C.number(cost) or not all(C.number(v) for v, _ in lim.values()):
@@ -193,26 +205,38 @@ def check(cfg: dict, est: dict, approve: bool, how_to_lower: str) -> tuple[bool,
                        "of 0 or more; `testbench prices` shows the prices in use."), est
     most, where = lim["max_run_usd"]
     if cost > most:
+        rate = est["usd_per_minute"]
+        fit = int(est["max_minutes"] + (most - cost) / rate) if rate > 0 else 0     # whole minutes, start-up paid
+        fixes = [how_to_lower.format(fit=fit)] * (fit >= 1) + ["use a cheaper GPU or backend",
+                                                               _raise("max_run_usd", where)]
+        fix = ", ".join(fixes[:-1]) + ", or " + fixes[-1]
         return False, (f"Refused: {what} could cost up to ${cost:.2f} ({est['max_minutes']:.0f} min at "
-                       f"${est['usd_per_minute']:.4f}/min), over {where}. "
-                       f"{how_to_lower}, use a cheaper GPU, or have a person raise the budget."), est
+                       f"${rate:.4f}/min), over {where}. {fix[:1].upper() + fix[1:]}."
+                       + (f" `{again}` checks it again." if again else "")), est
     today, day = spent_today(Path(cfg["root"])), float(cfg["budget"]["max_day_usd"])
     if today + cost > day:
         return False, (f"Refused: ${today:.2f} already committed today; {what} could add ${cost:.2f}, over "
-                       f"budget.max_day_usd ${day:.2f}."), est
+                       f"budget.max_day_usd ${day:.2f}. Wait for running work to finish (runs still going count at "
+                       f"their worst case) or until tomorrow, launch something cheaper, or have a person raise "
+                       f"budget.max_day_usd in {C.CONFIG_NAME}. `testbench spend` shows what today's runs cost."), est
     machine_day = user_limits().get("max_day_usd")
     everywhere = spent_today_everywhere() if machine_day is not None else 0.0
     if machine_day is not None and everywhere + cost > machine_day:
         return False, (f"Refused: ${everywhere:.2f} already committed today across every project on this machine; "
                        f"{what} could add ${cost:.2f}, over max_day_usd ${machine_day:.2f} in {limits_path()} (this "
-                       "machine's limit, which a project cannot raise)."), est
+                       "machine's limit, which a project cannot raise). Wait for running work to finish or until "
+                       "tomorrow, launch something cheaper, or have a person raise max_day_usd in that file. "
+                       "`testbench spend` shows today's total on this machine."), est
     ask, where = lim["ask_above_usd"]
     if cost > ask and not approve:
-        return False, (f"Needs approval: {what} could cost up to ${cost:.2f} (above {where}). Ask a person; if "
-                       "they agree, rerun with --approve."), est
+        how = f"`{command} --approve`" if command else "--approve"
+        return False, (f"Needs approval: {what} could cost up to ${cost:.2f} (above {where}). Ask a person; only "
+                       f"they approve it, with {how}."), est
     machine = f"; ${everywhere:.2f} of ${machine_day:.2f} on this machine" if machine_day is not None else ""
     return True, f"Within budget: up to ${cost:.2f} (today so far ${today:.2f} of ${day:.2f}{machine}).", est
 
 
 def check_launch(cfg: dict, plan_name: str, approve: bool) -> tuple[bool, str, dict]:
-    return check(cfg, worst_case(cfg, plan_name), approve, "Lower the steps' max_minutes")
+    return check(cfg, worst_case(cfg, plan_name), approve,
+                 f"lower the max_minutes of plan {plan_name}'s steps in {C.CONFIG_NAME} ({{fit}} min in all would fit)",
+                 f"testbench run {plan_name}", f"testbench estimate {plan_name}")
