@@ -80,6 +80,17 @@ a strategy good until it survives costs, look-ahead, an untouched holdout and th
 - `tools.for_openai_agents()`, `for_langchain()` and `for_claude_agent_sdk()`: the MCP tools as each framework's own
   tool objects through one call path; the model is never offered an approval flag.
 
+**Polish**
+- `testbench --version` and `--help` start about three times faster (about 60 ms); the CLI loads config,
+  budget, reports and notebooks only for commands that use them (a test keeps it so).
+- One set of command groups everywhere: `help --all`, `--help` (its top three groups), README's Commands table and
+  docs/reference.md use the same groups and lines, and tests fail when they drift. The README is reorganized for a
+  newcomer, and the documentation site has nine sections.
+- A newcomer walkthrough (a Python, JS, notebook, trading and plug-in author persona) fixed what they stalled on:
+  no pointer to FILL IN lines when there are none, a missing module named with the command that installs it
+  (for uvx too), a stopped Docker daemon said plainly, `plugin test` finding a module in the current folder,
+  a printed score checked for notebooks that write no JSON, a pandas-free trading snippet, and more.
+
 **Trust**
 - docs/threat-model.md: who can do what, what each cannot, how, and the test that proves it.
 - The guard hook reads commands with their quoting taken off: `--approve` in quotes, with backslashes, in a variable,
