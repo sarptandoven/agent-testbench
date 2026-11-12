@@ -784,7 +784,7 @@
         },
         "mocks": {
           "$ref": "#/$defs/mocks",
-          "description": "Strict mock LLM clients for the step, which never touch the network: [openai, anthropic], or with options (docs/mocks.md)"
+          "description": "Strict mock SDKs for the step, which never touch the network: [openai, anthropic], [alpaca], an installed plug-in's, or with options (docs/mocks.md)"
         }
       }
     },
@@ -986,21 +986,14 @@
         "mock_calls": {
           "description": "What the mock clients saw: {anthropic: {calls: \"<= 5\"}} or, for a mock broker, {alpaca: {orders: \"<= 20\", orders_without_limit: 0, live: 0}}",
           "type": ["object", "null"],
-          "propertyNames": {"enum": ["anthropic", "openai", "alpaca", "ccxt", "ib_async"]},
+          "propertyNames": {"pattern": "^\\S+$"},
           "additionalProperties": {
-            "description": "Rules on this mock client's calls",
-            "type": ["object", "null"],
-            "additionalProperties": false,
-            "properties": {
-              "calls": {"description": "calls: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
-              "refused": {"description": "refused: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
-              "injected": {"description": "injected: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
-              "input_tokens": {"description": "input_tokens: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
-              "output_tokens": {"description": "output_tokens: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
-              "tool_calls": {"description": "tool_calls: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"}
-            }
+            "description": "Rules on an installed plug-in mock's calls (counted like the mock clients')",
+            "$ref": "#/$defs/client_calls"
           },
           "properties": {
+            "anthropic": {"description": "Rules on the mock anthropic's calls", "$ref": "#/$defs/client_calls"},
+            "openai": {"description": "Rules on the mock openai's calls", "$ref": "#/$defs/client_calls"},
             "alpaca": {
               "description": "Rules on what trading code did with the mock alpaca",
               "$ref": "#/$defs/broker_calls"
@@ -1041,16 +1034,30 @@
       ]
     },
     "mocks": {
-      "description": "Mock clients by name, or with options: [openai, anthropic], {anthropic: {replies: tests/replies.yaml}}, or a mock broker: {alpaca: {prices: data/prices.csv, cash: 100000, fee_usd: 1}}",
+      "description": "Mock clients by name, or with options: [openai, anthropic], {anthropic: {replies: tests/replies.yaml}}, or a mock broker: {alpaca: {prices: data/prices.csv, cash: 100000, fee_usd: 1}}; an installed plug-in's mock by its name",
       "anyOf": [
         {"type": "null"},
-        {"enum": ["anthropic", "openai", "alpaca", "ccxt", "ib_async"]},
-        {"type": "array", "items": {"enum": ["anthropic", "openai", "alpaca", "ccxt", "ib_async"]}},
+        {
+          "type": "string",
+          "anyOf": [{"enum": ["anthropic", "openai", "alpaca", "ccxt", "ib_async"]}, {"pattern": "^\\S+$"}]
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "anyOf": [{"enum": ["anthropic", "openai", "alpaca", "ccxt", "ib_async"]}, {"pattern": "^\\S+$"}]
+          }
+        },
         {
           "type": "object",
-          "propertyNames": {"enum": ["anthropic", "openai", "alpaca", "ccxt", "ib_async"]},
-          "additionalProperties": {"$ref": "#/$defs/mock_options"},
+          "propertyNames": {"pattern": "^\\S+$"},
+          "additionalProperties": {
+            "description": "An installed plug-in mock's options (its package says which)",
+            "type": ["object", "null"]
+          },
           "properties": {
+            "anthropic": {"description": "The mock anthropic client: its options", "$ref": "#/$defs/mock_options"},
+            "openai": {"description": "The mock openai client: its options", "$ref": "#/$defs/mock_options"},
             "alpaca": {
               "description": "The mock broker for alpaca-py (TradingClient, the historical data clients): its settings",
               "$ref": "#/$defs/broker_options"
@@ -1124,6 +1131,19 @@
           "description": "Let code ask for a live account (paper=False, no sandbox, IB's live ports); off, it is refused, and on record either way",
           "type": "boolean"
         }
+      }
+    },
+    "client_calls": {
+      "description": "Rules on a mock client's calls",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "calls": {"description": "calls: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+        "refused": {"description": "refused: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+        "injected": {"description": "injected: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+        "input_tokens": {"description": "input_tokens: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+        "output_tokens": {"description": "output_tokens: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+        "tool_calls": {"description": "tool_calls: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"}
       }
     },
     "broker_calls": {

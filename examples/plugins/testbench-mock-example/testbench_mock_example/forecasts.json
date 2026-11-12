@@ -1,0 +1,4 @@
+{
+  "Paris": [{"summary": "sunny", "high_c": 21, "low_c": 12}, {"summary": "cloudy", "high_c": 18, "low_c": 11}],
+  "London": [{"summary": "rain", "high_c": 15, "low_c": 9}, {"summary": "showers", "high_c": 16, "low_c": 10}]
+}

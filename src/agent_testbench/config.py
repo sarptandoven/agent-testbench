@@ -592,7 +592,8 @@ def _step(where: str, step: dict, root: Path) -> dict:
 
 
 def _mocks(where: str, value, root: Path) -> dict:
-    """mocks: [openai, anthropic], or with options: {anthropic: {replies: tests/replies.yaml, fail_on_call: 3}}."""
+    """mocks: [openai, anthropic], or with options: {anthropic: {replies: tests/replies.yaml, fail_on_call: 3}}. Each
+    mock, built in or a plug-in's, checks its own options (mocks.Mock.validate)."""
     example = "[openai, anthropic], or with options {anthropic: {replies: tests/replies.yaml, fail_on_call: 3}}"
     if value in (None, [], {}):
         return {}
@@ -605,37 +606,7 @@ def _mocks(where: str, value, root: Path) -> dict:
         value = {v: {} for v in value}
     if not isinstance(value, dict):
         raise ConfigError(f"`{where}` lists the mock clients, e.g. {example}")
-    core, out = M.client_core(), {}
-    for name, opts in value.items():
-        if name not in M.SDKS:
-            hint = " (the mock ib_async also answers `import ib_insync`: list ib_async)" if name == "ib_insync" else ""
-            raise ConfigError(f"`{where}` names {name!r}; testbench has mock clients for {', '.join(M.SDKS)}{hint}. "
-                              "For another API, write a strict mock with agent_testbench.mocks.StrictAPI and list its "
-                              "folder under pythonpath:")
-        opts = opts or {}
-        if name in M.BROKERS:                   # alpaca, ccxt, ib_async: prices, cash, fees, the live-account rule
-            now = opts.get("now") if isinstance(opts, dict) else None
-            if now is not None and not isinstance(now, (str, int, float)):
-                opts = {**opts, "now": str(now)}                 # YAML reads `now: 2024-01-05` as a date
-            bad = M.broker_core().setup_error(opts, str(root))
-            if bad:
-                raise ConfigError(f"`{where}.{name}`: {bad}")
-            out[name] = opts
-            continue
-        bad = core.options_error(opts)
-        if bad:
-            raise ConfigError(f"`{where}.{name}`: {bad}")
-        if "replies" in opts:
-            f = root / opts["replies"]
-            if not f.is_file():
-                raise ConfigError(f"`{where}.{name}.replies`: {opts['replies']} does not exist (paths are relative to "
-                                  f"{root})")
-            try:
-                core.parse_replies(yaml.safe_load(f.read_text(encoding="utf-8")))
-            except (yaml.YAMLError, ValueError) as exc:
-                raise ConfigError(f"`{where}.{name}.replies` ({opts['replies']}): {exc}") from None
-        out[name] = opts
-    return out
+    return {name: M.find(name, where).validate(f"{where}.{name}", opts, root) for name, opts in value.items()}
 
 
 def _expect(where: str, e: dict) -> None:
