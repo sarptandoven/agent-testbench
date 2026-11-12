@@ -36,6 +36,7 @@ nav:
   - Expectations: expectations.md
   - Notebooks: notebooks.md
   - Mock LLM clients: mocks.md
+  - Trading: trading.md
   - Rescue a notebook: rescue.md
   - Backends:
       - Overview: backends.md
