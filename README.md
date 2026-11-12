@@ -125,6 +125,7 @@ LangChain / LangGraph and the Claude Agent SDK get them as their own tools: `too
 | `docker` | a fresh container here; `network: none` for a sandbox, `gpus: all` for NVIDIA GPUs | a watchdog inside the container | [docs/docker.md](docs/docker.md) |
 | `ssh` | any machine `ssh` reaches: a GPU box, a university server, a rented instance | a watchdog on that machine | [reference](docs/reference.md#the-ssh-backend) |
 | `kubernetes` | a Job on your cluster's GPU or CPU nodes, through kubectl | the Job's `activeDeadlineSeconds`, and a watchdog in the pod | [docs/kubernetes.md](docs/kubernetes.md) |
+| `runpod` | a [RunPod](https://www.runpod.io) pod of its own on any of its GPUs (RTX 4090 ... B200), through its REST API | the pod terminates itself at the priced worst case, and a watchdog in the pod | [docs/runpod.md](docs/runpod.md) |
 | `modal` | a [Modal](https://modal.com) Sandbox or function with any GPU (T4 ... B200) | Modal's own timeouts | your Modal account |
 | `colab` | a [Colab](https://colab.research.google.com) VM through Google's Colab CLI | a watchdog on the VM, which releases it | your compute units |
 | plugins | anything a package registers (`agent_testbench.backends` entry point) | the backend's own (`testbench plugin test` checks it has one) | [docs/plugins.md](docs/plugins.md) |
@@ -315,7 +316,8 @@ refusal (exit 2) says what was refused, why, and the command or the testbench.ya
 - [docs/expectations.md](docs/expectations.md) - every expectation, with what its failure looks like
 - [docs/recipes.md](docs/recipes.md), [docs/notebooks.md](docs/notebooks.md), [docs/rescue.md](docs/rescue.md),
   [docs/mocks.md](docs/mocks.md) - starting points, what notebook steps accept, rescuing notebooks, mock LLM SDKs
-- [docs/docker.md](docs/docker.md), [docs/kubernetes.md](docs/kubernetes.md) - the docker and kubernetes backends
+- [docs/docker.md](docs/docker.md), [docs/kubernetes.md](docs/kubernetes.md), [docs/runpod.md](docs/runpod.md) - the
+  docker, kubernetes and runpod backends
 - [docs/loops.md](docs/loops.md), [docs/notify.md](docs/notify.md), [docs/export.md](docs/export.md) - loops,
   notifications, exports to MLflow and W&B
 - [docs/clients.md](docs/clients.md), [docs/python-api.md](docs/python-api.md) - other coding agents, the Python API
@@ -340,6 +342,7 @@ refusal (exit 2) says what was refused, why, and the command or the testbench.ya
 - **ssh**: `ssh HOST true` must work with keys; `ssh: {host: HOST, usd_per_hour: 0}` in testbench.yaml.
 - **Docker**: a running Docker (or podman); `docker: {network: none}` for no network.
 - **Kubernetes**: kubectl with a context for your cluster; `kubernetes: {usd_per_hour: {cpu: 0, A100: 2.5}}`.
+- **RunPod**: an API key from runpod.io exported as `RUNPOD_API_KEY`; `gpu: H100-SXM` on a `backend: runpod` plan.
 - **Trackers**: `pip install "agent-testbench[mlflow]"` or `[wandb]` for exports.
 - **Web steps**: `playwright install chromium`.
 
@@ -349,8 +352,8 @@ refusal (exit 2) says what was refused, why, and the command or the testbench.ya
 
 `python -m pytest` runs everything that needs no account - notebooks in real kernels, expectations, budgets and
 limits, the guard hook, the MCP server over stdio and HTTP, loops on real git repositories, the ssh backend through
-a stand-in for ssh, Docker in real containers, web steps in Chromium - on Linux and macOS with Python 3.10 and
-3.12, and on Windows. `tests/test_live.py` runs the same things on Modal, Colab or a real ssh host and is opt-in.
+a stand-in for ssh, the runpod backend against a fake RunPod API, Docker in real containers, web steps in Chromium -
+on Linux and macOS with Python 3.10 and 3.12, and on Windows. `tests/test_live.py` runs the same things on Modal, Colab or a real ssh host and is opt-in.
 The demos in `docs/` are real agent runs.
 
 ## Limits

@@ -60,7 +60,19 @@ file loads, and `testbench schema` adds the installed plug-ins' own descriptions
 | `pricing.modal_cpu_core_per_s`, `pricing.modal_mem_gib_per_s` | built in | |
 | `pricing.colab_units_per_hour` | built in (approximate) | `{CPU: 0.1, T4: 1.8, A100: 5.4, ...}`; check `colab usage` |
 | `pricing.colab_usd_per_unit` | `0.10` | |
-| `sessions.backend` | `local` | where `testbench session start` puts its kernel by default: `local`, `docker`, `ssh`, `kubernetes`, `modal`, `colab` or a plugin's |
+| `pricing.runpod_usd_per_hour` | built in (raised above RunPod's last known rates) | `{H100-SXM: 3.8, ...}` US dollars per hour per GPU; also prices a GPU added under `runpod.gpu_types` |
+| `pricing.runpod_cpu_usd_per_vcpu_hour` | `0.08` | a RunPod pod without a GPU, per vCPU |
+| `runpod.image`, `runpod.python` | `python:3.11-slim`, `python3` | what a RunPod pod runs, and its Python (3.10 or newer) ([runpod.md](runpod.md)) |
+| `runpod.setup`, `runpod.pip` | `pip`, `[]` | `pip`: the pod installs testbench's basics and `pip:` when it starts; `none`: the image has them |
+| `runpod.cloud` | `SECURE` | `SECURE` or `COMMUNITY` |
+| `runpod.disk_gb` | `20` | the pod's container disk |
+| `runpod.cpu_flavor`, `runpod.vcpus` | `cpu3c`, `2` | a pod without a GPU (vCPUs: a power of two) |
+| `runpod.data_centers` | `[]` | RunPod data center ids the pod may run in; empty: anywhere |
+| `runpod.env` | `{}` | plain environment variables for the pod (secrets go in a step's `secrets:`) |
+| `runpod.gpu_types` | `{}` | more of RunPod's GPUs by a short name: `{RTXPRO6000: "NVIDIA RTX PRO 6000 ..."}`, each priced under `pricing.runpod_usd_per_hour` |
+| `runpod.allow_without_remote_stop` | `false` | run a pod that cannot terminate itself, with this machine as its only stop (refused otherwise) |
+| `runpod.api_url`, `runpod.proxy_url` | `https://api.runpod.io/v2`, `https://{pod_id}-{port}.proxy.runpod.net` | RunPod's REST API and HTTP proxy: https on a runpod.io, .ai or .net host only (http on 127.0.0.1 for tests). The key is `RUNPOD_API_KEY`, read by name |
+| `sessions.backend` | `local` | where `testbench session start` puts its kernel by default: `local`, `docker`, `ssh`, `kubernetes`, `runpod`, `modal`, `colab` or a plugin's |
 | `sessions.gpu` | none | default GPU for sessions on that backend |
 | `sessions.idle_minutes` | `10` | a session stops itself after this long without use |
 | `sessions.max_minutes` | `60` | and after this long in any case; its worst-case cost is this many minutes of its hardware (Modal: up to 1440) |
@@ -113,8 +125,8 @@ testbench bounds the work, not the machine: a rented instance that bills while i
 
 ## Backends
 
-A backend is where plans and sessions run. Built in: `local`, `docker`, `ssh`, `kubernetes`, `modal`, `colab`
-([docker.md](docker.md), [kubernetes.md](kubernetes.md)); `testbench doctor` lists every
+A backend is where plans and sessions run. Built in: `local`, `docker`, `ssh`, `kubernetes`, `runpod`, `modal`,
+`colab` ([docker.md](docker.md), [kubernetes.md](kubernetes.md), [runpod.md](runpod.md)); `testbench doctor` lists every
 backend this machine has and whether each is set up. Other backends come from installed packages: a package
 declares an entry point in the `agent_testbench.backends` group that names an instance of
 `agent_testbench.backends.Backend`, and its name can then be used as `backend:` in plans and sessions.
@@ -176,6 +188,7 @@ notebook: run code or cells, look at the values and plots, fix, run again, witho
 | `ssh` | any machine `ssh` reaches (keys, no password) | copied to `<ssh.workdir>/<project>/sessions/NAME/project` | the machine's own watchdog (max minutes + 2, idle minutes + 10) and the supervisor (idle / max minutes) |
 | `docker` | a fresh container on this machine ([docker.md](docker.md)) | copied in with `docker cp` | a watchdog inside the container (max minutes + 2, idle minutes + 10) and the supervisor |
 | `kubernetes` | a Job's pod on your cluster ([kubernetes.md](kubernetes.md)) | copied in with `kubectl exec` | the Job's `activeDeadlineSeconds`, a watchdog in the pod, and the supervisor |
+| `runpod` | a RunPod pod of its own, on the GPU you pick ([runpod.md](runpod.md)) | copied to `/work/project` through RunPod's HTTPS proxy | the pod terminates itself (max minutes + 10, or when its kernel ends), its watchdog (idle minutes + 10), and the supervisor |
 
 ```
 testbench session start [NAME] [--backend B] [--gpu G] [--idle-minutes N] [--max-minutes N] [--secret NAME] [--approve]
@@ -210,9 +223,10 @@ sooner, at `idle_minutes` / `max_minutes`, while this machine is awake.
 ```yaml
 plans:
   <name>:
-    backend: local | docker | ssh | kubernetes | modal | colab   # default local; or a plugin's
+    backend: local | docker | ssh | kubernetes | runpod | modal | colab   # default local; or a plugin's
     gpu: T4                            # modal: T4 L4 A10 L40S A100-40GB A100-80GB H100 H200 B200 B300 RTX-PRO-6000
-                                       #        (append :N for N GPUs, e.g. H100:2); colab: T4 L4 G4 A100 H100
+                                       #        (append :N for N GPUs, e.g. H100:2); colab: T4 L4 G4 A100 H100;
+                                       #        runpod: RTX4090 A100-SXM H100-SXM H200 B200 ... (docs/runpod.md)
     cpu: 4                             # modal only; overrides modal.cpu
     memory_gb: 16                      # modal only
     workdir: inplace | copy            # local default inplace (the project folder); remote always a copy

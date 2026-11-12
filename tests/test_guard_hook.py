@@ -97,6 +97,17 @@ def test_ways_out_of_the_docker_sandbox(G):
     assert G._sandbox({}, {}) == [] and G._sandbox({"docker": None}, {"docker": None}) == []
 
 
+def test_a_pod_without_a_hard_stop_of_its_own_asks(G):
+    on = {"runpod": {"allow_without_remote_stop": True}}
+    assert G._remote_stop({}, on) == G._remote_stop({"runpod": {"allow_without_remote_stop": False}}, on) == \
+        ["runpod.allow_without_remote_stop turned on (a pod that cannot terminate itself would run, with this machine "
+         "as its only stop)"]
+    assert G._remote_stop({"runpod": None}, {"runpod": {"allow_without_remote_stop": "yes"}}), "anything but false"
+    assert G._remote_stop(on, on) == [] and G._remote_stop(on, {}) == [], "already on, or turned off: nothing to ask"
+    assert G._remote_stop({}, {"runpod": 5}) == [] and G._remote_stop({}, {}) == []
+    assert G._limits_changes(dump(), dump(**on)) == G._remote_stop({}, on)
+
+
 def dump(**changes) -> str:
     return yaml.safe_dump({**BASE, **changes})
 

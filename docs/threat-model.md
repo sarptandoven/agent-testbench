@@ -62,6 +62,7 @@ integers too big for a float are not limits, prices or minutes. A limits file or
 refuses every launch.
 
 **Proof**:
+- `test_runpod.py::test_the_budget_refuses_before_any_call_to_runpod` (a plan above max_run_usd: no request reaches RunPod)
 - `test_limits.py::test_machine_limits_cap_a_generous_project`, `test_budget_rules.py::test_the_machine_caps_a_limit_and_never_raises_it`
 - `test_limits.py::test_the_machine_day_limit_counts_every_project`, `test_budget_rules.py::test_the_machine_day_limit_counts_every_project_to_the_cent`, `test_budget_rules.py::test_the_project_day_limit_holds_to_the_cent`, `test_budget_rules.py::test_at_max_run_usd_is_allowed_and_a_cent_over_is_refused`
 - `test_limits.py::test_launches_at_once_cannot_overspend_a_day` (four launches at once, room for one)
@@ -154,7 +155,10 @@ fuzzed in `test_fuzz_guard.py::test_a_way_out_of_the_docker_sandbox_asks`; that 
 **Cannot**: run on a remote machine past its max_minutes, even if this machine goes offline.
 
 **Mechanism**: each backend stops the work on the remote side: a Modal function timeout, a watchdog on the Colab VM,
-the ssh box and in the container, Kubernetes' own `activeDeadlineSeconds`. A watchdog given a limit that is not a
+the ssh box and in the container, Kubernetes' own `activeDeadlineSeconds`, and a RunPod pod's first process, which
+has RunPod terminate the pod at its priced worst case (with the key RunPod gives each pod), when nothing was started
+in it, or once its work is over; a pod that has no way to do that is refused unless the person allows it
+(`runpod.allow_without_remote_stop`, which the guard hook asks about). A watchdog given a limit that is not a
 number stops at once; it wakes at max_minutes whatever check interval the environment asked for
 (TESTBENCH_WATCHDOG_SECONDS, which a run's environment carries into a container or pod, can make it check more
 often, never less, and never stop it).
@@ -163,10 +167,20 @@ often, never less, and never stop it).
 `test_watchdog.py::test_colab_starts_the_watchdog_before_anything_else`, `test_ssh.py::test_a_plan_past_its_limit_is_stopped_from_here`,
 `test_docker.py::test_the_hard_stop_fires_inside_the_container` (Docker), `test_kubernetes.py::test_a_plan_is_a_job_with_kubernetes_own_hard_stop`,
 `test_kubernetes.py::test_kind_kubernetes_ends_the_job_at_its_deadline` (kind), `test_sessions.py::test_sessions_stop_themselves`,
-`test_guardrails.py::test_a_watchdog_with_no_real_limit_stops_at_once`, `test_trust.py::test_the_hard_stop_holds_whatever_the_watchdog_tick_says`.
+`test_guardrails.py::test_a_watchdog_with_no_real_limit_stops_at_once`, `test_trust.py::test_the_hard_stop_holds_whatever_the_watchdog_tick_says`,
+`test_runpod.py::test_the_pod_terminates_itself_at_its_deadline_with_its_own_key` (this machine silent after the
+work started), `test_runpod.py::test_a_pod_nothing_is_started_in_ends_itself`,
+`test_runpod.py::test_the_watchdog_in_the_pod_stops_the_work_before_the_deadline`, `test_runpod.py::test_cancel_terminates_the_pod`,
+`test_runpod.py::test_failures_say_what_to_do_and_a_failed_create_costs_nothing` (a pod that cannot end itself is
+refused), `test_guard_hook.py::test_a_pod_without_a_hard_stop_of_its_own_asks`.
 
-**What is not covered**: a plug-in backend's hard stop is the plug-in's own: the Backend interface asks every
-backend for one ([Backend plugins](plugins.md)), and testbench cannot check that a plug-in keeps it.
+**What is not covered**: if RunPod refuses a pod's own key, the pod ends every process testbench started and its
+first process exits, so the container stops with nothing running (`test_runpod.py::test_a_pod_runpod_will_not_terminate_still_stops_everything_and_exits`),
+but only testbench here (or the person, at runpod.io) can then terminate it; RunPod's own spend limit is the last
+word. testbench was written against RunPod's published API and a fake of it, not a live account
+([what is known](runpod.md#what-is-known-about-runpods-api-and-what-is-not)). A plug-in backend's hard stop is the
+plug-in's own: the Backend interface asks every backend for one ([Backend plugins](plugins.md)), and testbench
+cannot check that a plug-in keeps it.
 
 ## Read or leak a secret
 
@@ -174,8 +188,11 @@ backend for one ([Backend plugins](plugins.md)), and testbench cannot check that
 notification, an export or a PR comment; read one through the dashboard.
 
 **Mechanism**: plans and sessions name secrets (`secrets: [HF_TOKEN]`), and the value comes from the environment,
-a Modal or Kubernetes secret, or Colab. A run's values are never written: when it finishes, every value of a secret
-its plan names (6 characters or more, as this machine's environment holds it) is replaced by `[secret]` in the report
+a Modal or Kubernetes secret, or Colab. A backend's own key (`RUNPOD_API_KEY`) is read by name, goes only to the
+provider's own hosts over https (any other `runpod.api_url` or `proxy_url` is refused, so an edit cannot send it
+elsewhere), never to the pod, and is in no log, state or report; the pod's agent answers only a token made from it.
+A run's values are never written: when it finishes, every value of a secret its plan names (6 characters or more,
+as this machine's environment holds it) is replaced by `[secret]` in the report
 and in every evidence file, before the evidence is hashed - so the dashboard, notifications, exports and the
 Action's comment never see it. Export settings refuse anything that looks like a key or token; a webhook URL is shown
 by scheme and host only. The dashboard serves its pages, reports and step evidence and nothing else (never state.json,
@@ -189,7 +206,10 @@ payloads, the jsonl export, the report, and `testbench verify` still passing), `
 slashes, links to state.json and out of the project), `test_notify.py::test_webhook_env_keeps_the_url_out_of_the_file`,
 `test_notify.py::test_the_guard_lets_notify_edits_through_and_keeps_the_url_secret`, `test_export.py::test_the_export_section_says_what_to_write`,
 `test_integration.py::test_guard_decisions`, `test_secrets_paths.py::test_connect_dry_run_never_prints_the_other_servers_secrets`,
-`test_secrets_paths.py::test_a_loop_try_never_commits_an_untracked_env_file`.
+`test_secrets_paths.py::test_a_loop_try_never_commits_an_untracked_env_file`,
+`test_runpod.py::test_a_plan_runs_in_a_pod_of_its_own_and_the_pod_is_terminated` (the key and a secret in no file under
+.testbench, the key not sent to the pod), `test_runpod.py::test_the_runpod_section_is_checked` (the key goes to no
+other host), `test_runpod.py::test_the_agent_answers_only_with_its_token`.
 
 **What is not covered**: a value this machine never holds (a Modal or Kubernetes secret) cannot be recognized, so if
 the code prints it, it is kept as printed; values under 6 characters are left (they would blank out ordinary words);

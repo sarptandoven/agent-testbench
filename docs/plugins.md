@@ -323,7 +323,7 @@ class Client:
 ### Installing it
 
 `pip install` the package where testbench runs (with uvx: `uvx --with testbench-mock-example agent-testbench ...`).
-For a plan on another machine (docker, ssh, kubernetes, modal), install it there too, the way the plan's other
+For a plan on another machine (docker, ssh, kubernetes, runpod, modal), install it there too, the way the plan's other
 packages are. `testbench plugins` lists it; a plug-in that fails to load is listed with the reason, and a step that
 names it says so.
 

@@ -61,7 +61,8 @@ LAYER_MODULES = (
     # machines: the remote backends, and live sessions on any backend
     "agent_testbench.backends.modal_backend", "agent_testbench.backends.colab_backend",
     "agent_testbench.backends.ssh_backend", "agent_testbench.backends.docker_backend",
-    "agent_testbench.backends.kubernetes_backend", "agent_testbench.sessions", "agent_testbench.session_backends",
+    "agent_testbench.backends.kubernetes_backend", "agent_testbench.backends.runpod_backend", "agent_testbench.sessions",
+    "agent_testbench.session_backends",
     "agent_testbench.kernelkit",
     # kinds of step, and the mock LLM clients a step can run against
     "agent_testbench.notebook", "agent_testbench.web", "agent_testbench.mocks",

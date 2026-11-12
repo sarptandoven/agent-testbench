@@ -21,6 +21,9 @@ from pathlib import Path
 URL = "https://raw.githubusercontent.com/sarptandoven/agent-testbench/main/pricing/catalog.json"
 
 
+SECTIONS = ("modal", "colab", "runpod")              # the catalog's sections of prices, one per backend
+
+
 class PriceError(RuntimeError):
     pass
 
@@ -38,7 +41,7 @@ def cached() -> dict:
         return {}
     if not isinstance(data, dict):
         return {}
-    return {k: v for k, v in data.items() if k not in ("modal", "colab") or isinstance(v, dict)}
+    return {k: v for k, v in data.items() if k not in SECTIONS or isinstance(v, dict)}
 
 
 def _price(v) -> bool:
@@ -114,7 +117,7 @@ def update(url: str = URL) -> list[str]:
         raise PriceError(f"could not fetch the price catalog from {url}: {exc}; the prices in use are unchanged") from None
     if not isinstance(data, dict) or not isinstance(data.get("version"), str):
         raise PriceError(f"{url} is not a price catalog (no version); the prices in use are unchanged")
-    for section in ("modal", "colab"):
+    for section in SECTIONS:
         if section in data and not isinstance(data[section], dict):
             raise PriceError(f"{url}: `{section}` is not a mapping; the prices in use are unchanged")
     data.update(fetched=dt.datetime.now().isoformat(timespec="seconds"), url=url)
@@ -123,9 +126,11 @@ def update(url: str = URL) -> list[str]:
     p.write_text(json.dumps(data, indent=1))
     from .backends.colab_backend import UNITS_PER_HOUR
     from .backends.modal_backend import GPU_PER_S
+    from .backends.runpod_backend import USD_PER_HOUR
     changes = []
     for label, built, fetched in (("Modal GPU $/s", GPU_PER_S, (data.get("modal") or {}).get("gpu_per_s")),
-                                  ("Colab units/h", UNITS_PER_HOUR, (data.get("colab") or {}).get("units_per_hour"))):
+                                  ("Colab units/h", UNITS_PER_HOUR, (data.get("colab") or {}).get("units_per_hour")),
+                                  ("RunPod GPU $/h", USD_PER_HOUR, (data.get("runpod") or {}).get("usd_per_hour"))):
         for name, value in raised(built, fetched).items():
             if name not in built:
                 changes.append(f"{label} {name}: {value:g} (new)")

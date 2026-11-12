@@ -47,6 +47,7 @@ nav:
       - Docker: docker.md
       - ssh: ssh.md
       - Kubernetes: kubernetes.md
+      - RunPod: runpod.md
   - Loops: loops.md
   - "Watch: rerun on change": watch.md
   - Notifications: notify.md

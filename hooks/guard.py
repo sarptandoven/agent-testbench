@@ -4,8 +4,9 @@ session_start MCP tools.
 
 Anywhere, it keeps the limits out of the agent's hands:
   1. an edit of testbench.yaml that raises a budget, lowers a backend's price (ssh/docker usd_per_hour, ...),
-     changes `pricing:` or `guard:`, or loosens the docker sandbox (network: none, run_args, command, a plan
-     leaving it) asks the person first (lowering a budget, or editing plans or `notify:`, does not); so does any
+     changes `pricing:` or `guard:`, loosens the docker sandbox (network: none, run_args, command, a plan
+     leaving it) or lets a RunPod pod run without a hard stop of its own (runpod.allow_without_remote_stop) asks
+     the person first (lowering a budget, or editing plans or `notify:`, does not); so does any
      edit of ~/.testbench/limits.yaml (the limits for every project on this machine) or ~/.testbench/prices.json,
      an edit that sets TESTBENCH_USER_DIR in a settings file (an MCP config's env, an rc file), and one that turns
      hooks off or takes agent-testbench out of Claude Code's settings (.claude/settings.json);
@@ -159,6 +160,15 @@ def _sandbox(old: dict, new: dict) -> list:
     return out
 
 
+def _remote_stop(old: dict, new: dict) -> list:
+    """An edit that lets remote work run with no hard stop on the remote side (only this machine to stop it)."""
+    o, n = old.get("runpod"), new.get("runpod")
+    was = isinstance(o, dict) and o.get("allow_without_remote_stop") is True
+    now = isinstance(n, dict) and n.get("allow_without_remote_stop") not in (None, False)
+    return ["runpod.allow_without_remote_stop turned on (a pod that cannot terminate itself would run, with this "
+            "machine as its only stop)"] if now and not was else []
+
+
 def _limits_changes(before: str, after: str) -> list:
     """What an edit of testbench.yaml would do to the limits: budgets raised, prices or the guard changed."""
     try:
@@ -195,7 +205,7 @@ def _limits_changes(before: str, after: str) -> list:
     for key, what in (("pricing", "the prices that estimates use"), ("guard", "what this hook asks about")):
         if old.get(key) != new.get(key):
             out.append(f"`{key}:` changed ({what})")
-    return out + _sandbox(old, new)
+    return out + _sandbox(old, new) + _remote_stop(old, new)
 
 
 def _is_ledger(path: Path) -> bool:

@@ -42,10 +42,10 @@
       "additionalProperties": false,
       "properties": {
         "backend": {
-          "description": "local, docker, ssh, kubernetes, modal, colab, or an installed plugin's backend (default local)",
+          "description": "local, docker, ssh, kubernetes, runpod, modal, colab, or an installed plugin's backend (default local)",
           "type": "string",
           "anyOf": [
-            {"enum": ["local", "docker", "ssh", "kubernetes", "modal", "colab"]},
+            {"enum": ["local", "docker", "ssh", "kubernetes", "runpod", "modal", "colab"]},
             {"type": "string", "minLength": 1}
           ],
           "default": "local"
@@ -117,6 +117,16 @@
         },
         "colab_usd_per_unit": {
           "description": "US dollars per Colab compute unit (default 0.10)",
+          "type": "number",
+          "minimum": 0
+        },
+        "runpod_usd_per_hour": {
+          "description": "US dollars per hour for each RunPod GPU, e.g. {H100-SXM: 3.8} (and any in runpod.gpu_types)",
+          "type": "object",
+          "additionalProperties": {"type": "number", "minimum": 0}
+        },
+        "runpod_cpu_usd_per_vcpu_hour": {
+          "description": "US dollars per vCPU-hour for a RunPod pod without a GPU",
           "type": "number",
           "minimum": 0
         }
@@ -601,6 +611,93 @@
         }
       }
     },
+    "runpod": {
+      "description": "RunPod: each run and each session a pod of its own, terminated when it ends (docs/runpod.md)",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "description": "The image the pod runs (Python 3.10 or newer), e.g. python:3.11-slim or runpod/pytorch:<tag>",
+          "type": "string",
+          "pattern": "\\S",
+          "default": "python:3.11-slim"
+        },
+        "setup": {
+          "description": "pip (the pod installs testbench's basics and runpod.pip when it starts) or none (the image already has them)",
+          "enum": ["pip", "none"],
+          "default": "pip"
+        },
+        "pip": {
+          "description": "Packages the pod installs (pin them); needs setup: pip",
+          "type": ["array", "null"],
+          "items": {"type": "string"},
+          "default": []
+        },
+        "python": {
+          "description": "The image's Python command (default python3)",
+          "type": "string",
+          "pattern": "\\S",
+          "default": "python3"
+        },
+        "cloud": {
+          "description": "SECURE (RunPod's data centers) or COMMUNITY (cheaper hosts)",
+          "enum": ["SECURE", "COMMUNITY"],
+          "default": "SECURE"
+        },
+        "disk_gb": {
+          "description": "The pod's container disk in GB",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 20
+        },
+        "cpu_flavor": {
+          "description": "The CPU flavor of a pod without a GPU, e.g. cpu3c",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "default": "cpu3c"
+        },
+        "vcpus": {
+          "description": "vCPUs of a pod without a GPU: a power of two",
+          "enum": [1, 2, 4, 8, 16, 32, 64, 128, 256, 512],
+          "default": 2
+        },
+        "data_centers": {
+          "description": "RunPod data center ids the pod may run in, e.g. [US-KS-2]; empty: anywhere",
+          "type": ["array", "null"],
+          "items": {"type": "string", "pattern": "^[A-Za-z0-9-]+$"},
+          "default": []
+        },
+        "env": {
+          "description": "Plain environment variables for the pod (not RUNPOD_* or TESTBENCH_POD*; secrets go in a step's secrets:)",
+          "type": ["object", "null"],
+          "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "not": {"pattern": "^(RUNPOD_|TESTBENCH_POD)"}},
+          "additionalProperties": {"type": ["string", "number"]}
+        },
+        "gpu_types": {
+          "description": "More of RunPod's GPUs by a short name, e.g. {RTXPRO6000: NVIDIA RTX PRO 6000 ...}; price each under pricing: runpod_usd_per_hour",
+          "type": ["object", "null"],
+          "propertyNames": {"pattern": "^[A-Za-z0-9][A-Za-z0-9_.!+-]*$"},
+          "additionalProperties": {"type": "string", "pattern": "\\S"}
+        },
+        "allow_without_remote_stop": {
+          "description": "Run a pod that cannot terminate itself, with testbench on this machine as its only stop (default false: refused)",
+          "type": "boolean",
+          "default": false
+        },
+        "api_url": {
+          "description": "RunPod's REST API (https on a runpod.io, .ai or .net host, or http://127.0.0.1 for tests)",
+          "type": "string",
+          "pattern": "^(https://([A-Za-z0-9-]+\\.)*runpod\\.(io|ai|net)(:[0-9]+)?(/|$)|http://(127\\.[0-9.]+|localhost|\\[::1\\])(:[0-9]+)?(/|$))",
+          "default": "https://api.runpod.io/v2"
+        },
+        "proxy_url": {
+          "description": "How RunPod's HTTP proxy reaches a pod's port, with {pod_id} and {port} in it",
+          "type": "string",
+          "pattern": "^(https://([A-Za-z0-9{}_-]+\\.)*runpod\\.(io|ai|net)(:[0-9]+)?(/|$)|http://(127\\.[0-9.]+|localhost|\\[::1\\])(:[0-9]+)?(/|$)).*\\{pod_id\\}",
+          "default": "https://{pod_id}-{port}.proxy.runpod.net"
+        }
+      }
+    },
     "data": {
       "description": "The data the plans read, by role: a CSV file (or a folder of CSV files) with a time column, and optionally a sealed holdout (docs/trading-data.md)",
       "type": ["object", "null"],
@@ -676,10 +773,10 @@
       "additionalProperties": false,
       "properties": {
         "backend": {
-          "description": "Where it runs: local, docker, ssh, kubernetes, modal, colab, or an installed plugin's backend (default local)",
+          "description": "Where it runs: local, docker, ssh, kubernetes, runpod, modal, colab, or an installed plugin's backend (default local)",
           "type": "string",
           "anyOf": [
-            {"enum": ["local", "docker", "ssh", "kubernetes", "modal", "colab"]},
+            {"enum": ["local", "docker", "ssh", "kubernetes", "runpod", "modal", "colab"]},
             {"type": "string", "minLength": 1}
           ],
           "default": "local"

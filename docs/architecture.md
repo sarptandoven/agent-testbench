@@ -38,7 +38,8 @@ core.verify(run_dir)                           # []: every evidence file still m
 
 **Everything else is a layer**: the ways in (`cli`, `mcp_server`, `api`, `tools`, `connect`, `dashboard`, `ui`,
 `github_action`), the remote backends and live sessions (`backends/modal_backend`, `colab_backend`, `ssh_backend`,
-`docker_backend`, `kubernetes_backend`, `sessions`, `session_backends`, `kernelkit/`), kinds of step (`notebook`,
+`docker_backend`, `kubernetes_backend`, `runpod_backend`, `sessions`, `session_backends`, `kernelkit/`), kinds of
+step (`notebook`,
 `web`, `mocks`), what happens after a run (`notify`, `export`), work built on runs (`loop`, `watch`, `diff`,
 `rescue`) and setting a project up (`scaffold`, `recipes`, `lint`, `selftest`). `core.CORE_MODULES` and
 `core.LAYER_MODULES` are the two lists in code.
