@@ -44,7 +44,7 @@ ok   docker daemon: server 29.9.2
 ```
 
 Each `no` line says what to run to fix it. You only need the backends you will use; `local` always works. The
-[install notes](../README.md#install-notes) say what each backend needs.
+[install notes](../README.md#what-each-machine-needs) say what each backend needs.
 
 ### 3. Let testbench look at the project
 
@@ -155,14 +155,14 @@ In a git repository the report also names the commit it ran; see [proof records]
 
 ### 6. Hand it to your agent
 
-Install the Claude Code plugin or add the MCP server (the commands are in the [quick start](../README.md#quick-start)), then ask in
+Install the Claude Code plugin or add the MCP server (the commands are in [connect your agent](../README.md#connect-your-agent)), then ask in
 plain words: *"get training working and prove it with the tiny-model-local plan"*. The agent works in live
 sessions, proves the result with a plan run, and stays inside the budget in testbench.yaml and
 `~/.testbench/limits.yaml`.
 
 From here:
 
-- Work live in a kernel: [live sessions](../README.md#live-sessions).
+- Work live in a kernel: [live sessions](reference.md#live-sessions).
 - Run the same notebook on a GPU, in a container or on another machine: [backends](backends.md).
 - Let the agent raise a number, keeping only what helps: [loops](loops.md).
 - Check every pull request: [the GitHub Action](github-action.md).

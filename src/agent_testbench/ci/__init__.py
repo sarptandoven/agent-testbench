@@ -19,8 +19,6 @@ from __future__ import annotations
 import os
 import re
 import sys
-import xml.etree.ElementTree as ET
-from importlib import resources
 from pathlib import Path
 
 from .. import __version__
@@ -47,6 +45,7 @@ SET_UP = {      # what the person does once the file is written
 
 
 def _read(name: str) -> str:
+    from importlib import resources               # here, as the XML below: `testbench --help` reads TEMPLATES only
     return (resources.files(__package__) / name).read_text(encoding="utf-8")
 
 
@@ -136,7 +135,8 @@ def _clean(text) -> str:
     return NOT_XML.sub("", str(text if text is not None else ""))
 
 
-def _one_case(name: str, case: str, kind: str, message: str, detail: str = "") -> ET.Element:
+def _one_case(name: str, case: str, kind: str, message: str, detail: str = ""):
+    import xml.etree.ElementTree as ET
     suite = ET.Element("testsuite", name=_clean(name))
     tc = ET.SubElement(suite, "testcase", classname=_clean(name), name=case, time="0.0")
     if kind == "skipped":
@@ -147,7 +147,8 @@ def _one_case(name: str, case: str, kind: str, message: str, detail: str = "") -
     return suite
 
 
-def _suite(entry: dict) -> ET.Element:
+def _suite(entry: dict):
+    import xml.etree.ElementTree as ET
     from .. import report as R, runs
     plan, status, why = entry["plan"], entry.get("status"), entry.get("why") or ""
     run_dir = Path(entry["run_dir"]) if entry.get("run_dir") else None
@@ -172,6 +173,7 @@ def junit(entries: list[dict], message: str | None = None, title: str = "testben
     """JUnit XML for the plans of a `testbench check` or `testbench run`. entries: {plan, status, why, install,
     run_dir} as check reports them. With no entries and a message (nothing to check, no such plan, a testbench.yaml
     that does not load), one error test case says why nothing ran."""
+    import xml.etree.ElementTree as ET
     root = ET.Element("testsuites", name="agent-testbench")
     suites = [_suite(e) for e in entries]
     if not suites:

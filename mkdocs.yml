@@ -23,52 +23,56 @@ watch:
 hooks:
   - docs/hooks.py
 
-nav:
-  - Home: index.md
-  - A five-minute tour: tour.md
-  - Why agent-testbench: why.md
-  - Use cases: use-cases.md
-  - Getting started: getting-started.md
-  - Check it yourself: verify.md
-  - Examples: examples.md
-  - Recipes: recipes.md
-  - Other coding agents: clients.md
-  - VS Code extension: vscode.md
-  - Expectations: expectations.md
-  - Notebooks: notebooks.md
-  - Mock clients (LLMs, brokers): mocks.md
+nav:                                  # a few sections a newcomer can scan; every page is in one of them
+  - Start:
+      - Home: index.md
+      - Getting started: getting-started.md
+      - A five-minute tour: tour.md
+      - Why agent-testbench: why.md
+      - Use cases: use-cases.md
+      - Examples: examples.md
+      - Recipes: recipes.md
+      - "Demo: an agent improves a model": demo-loop.md
+      - "Demo: a failing suite fixed in a Docker sandbox": demo-sandbox.md
+      - "Demo: an agent fixes a planted bug": demo.md
+  - Prove things:
+      - Expectations: expectations.md
+      - Notebooks: notebooks.md
+      - Mock clients (LLMs, brokers): mocks.md
+      - Rescue a notebook: rescue.md
+      - Proof records: proof-records.md
+      - "Share a run: a page, a badge": share.md
+      - "Watch: rerun on change": watch.md
+      - Live dashboard: dashboard.md
+      - "Exports: MLflow, W&B, csv": export.md
+  - Work with agents:
+      - Other coding agents and MCP: clients.md
+      - VS Code extension: vscode.md
+      - Loops: loops.md
+      - Notifications: notify.md
+      - GitHub Action: github-action.md
+      - "Other CI: GitLab, Azure, CircleCI, shell": ci.md
+      - Python API and tools: python-api.md
+  - Machines:
+      - Backends: backends.md
+      - Docker: docker.md
+      - ssh: ssh.md
+      - Kubernetes: kubernetes.md
   - Trading:
       - Trading with agents safely: trading-safely.md
       - Files and metrics: trading.md
       - "Sealed data: holdout, walk-forward, look-ahead": trading-data.md
       - Overfitting statistics: trading-stats.md
-  - Rescue a notebook: rescue.md
-  - Backends:
-      - Overview: backends.md
-      - Docker: docker.md
-      - ssh: ssh.md
-      - Kubernetes: kubernetes.md
-  - Loops: loops.md
-  - "Watch: rerun on change": watch.md
-  - Notifications: notify.md
-  - Proof records: proof-records.md
-  - Threat model: threat-model.md
-  - "Share a run: a page, a badge": share.md
-  - Live dashboard: dashboard.md
-  - "Exports: MLflow, W&B, csv": export.md
-  - CI:
-      - GitHub Action: github-action.md
-      - "GitLab, Azure, CircleCI, shell": ci.md
-  - Python API and tools: python-api.md
-  - "Architecture: core and plug-ins": architecture.md
-  - Plug-ins: plugins.md
-  - Reference: reference.md
-  - FAQ: faq.md
-  - Troubleshooting: troubleshooting.md
-  - Demos:
-      - An agent improves a model: demo-loop.md
-      - A failing suite fixed in a Docker sandbox: demo-sandbox.md
-      - An agent fixes a planted bug: demo.md
+  - Plug-ins:
+      - Plug-ins: plugins.md
+      - "Architecture: core and plug-ins": architecture.md
+  - Trust:
+      - Threat model: threat-model.md
+      - Check it yourself: verify.md
+      - FAQ: faq.md
+  - Reference:
+      - testbench.yaml and commands: reference.md
+      - Troubleshooting: troubleshooting.md
   - Project:
       - Changelog: changelog.md
       - Contributing: contributing.md

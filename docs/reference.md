@@ -60,7 +60,7 @@ file loads, and `testbench schema` adds the installed plug-ins' own descriptions
 | `pricing.modal_cpu_core_per_s`, `pricing.modal_mem_gib_per_s` | built in | |
 | `pricing.colab_units_per_hour` | built in (approximate) | `{CPU: 0.1, T4: 1.8, A100: 5.4, ...}`; check `colab usage` |
 | `pricing.colab_usd_per_unit` | `0.10` | |
-| `sessions.backend` | `local` | where `testbench session start` puts its kernel by default: `local`, `docker`, `ssh`, `kubernetes`, `modal`, `colab` or a plugin's |
+| `sessions.backend` | `local` | where `testbench session start` puts its kernel by default: `local`, `docker`, `ssh`, `kubernetes`, `modal`, `colab` or a plug-in's |
 | `sessions.gpu` | none | default GPU for sessions on that backend |
 | `sessions.idle_minutes` | `10` | a session stops itself after this long without use |
 | `sessions.max_minutes` | `60` | and after this long in any case; its worst-case cost is this many minutes of its hardware (Modal: up to 1440) |
@@ -210,7 +210,7 @@ sooner, at `idle_minutes` / `max_minutes`, while this machine is awake.
 ```yaml
 plans:
   <name>:
-    backend: local | docker | ssh | kubernetes | modal | colab   # default local; or a plugin's
+    backend: local | docker | ssh | kubernetes | modal | colab   # default local; or a plug-in's
     gpu: T4                            # modal: T4 L4 A10 L40S A100-40GB A100-80GB H100 H200 B200 B300 RTX-PRO-6000
                                        #        (append :N for N GPUs, e.g. H100:2); colab: T4 L4 G4 A100 H100
     cpu: 4                             # modal only; overrides modal.cpu
@@ -446,7 +446,7 @@ the default budget) until a testbench.yaml takes over.
 ## Commands
 
 `testbench` alone (or `testbench help`) lists the core: the dozen commands in the first three groups below, with
-the ones to start with. `testbench help --all` lists every command, in the groups of the rest of the table.
+the ones to start with. `testbench help --all` lists every command, in these groups and with the first words of its row.
 `testbench help COMMAND` (or `testbench COMMAND --help`) shows a command's options and examples. Options are spelled
 out in full: `--appr` is not `--approve`. A mistyped command gets the closest one as a whole command line (`testbench
 rnu smoke`: did you mean `testbench run smoke`?), words in the wrong order get the right order (`testbench smoke
@@ -463,61 +463,61 @@ which `loop status` does.
 | command | what it does | exit codes besides 2 |
 |---|---|---|
 | **start** | | |
-| `demo [NAME] [DIR]`, `demo --list` | copy an example project to a new folder and run its free plan | 0 the plan did what the example expects (the `test-suite` and `trading` plans fail on purpose), 1 it did not, 3 still running |
-| `check [--plan NAME]... [--json] [--junit FILE]` | run every plan that is free and needs no approval, and list each other plan with its worst case and `testbench run NAME`; with no testbench.yaml, run the plans `init` would write for what it finds, on this machine, keeping what it found in `.testbench/check.json` (so `report`, `runs`, `verify`, `ui` and `diff` work there); a plan whose tool is missing is skipped with the command that installs it; `--junit` also writes JUnit XML for CI (each run's steps as test cases, a refusal as an error, a paid plan or a missing tool as skipped) | 0 every plan that ran passed, 1 one failed, 2 nothing to check, 3 still running |
-| `doctor` | what this machine can run; each `no` line says what to do | 0, whatever it found |
+| `demo [NAME] [DIR]`, `demo --list` | copy an example project, run its free plan, show what is next (in a new folder, a git repository) | 0 the plan did what the example expects (the `test-suite` and `trading` plans fail on purpose), 1 it did not, 3 still running |
+| `check [--plan NAME]... [--json] [--junit FILE]` | run every free plan here, even with no testbench.yaml: every plan that is free and needs no approval runs, and each other plan is listed with its worst case and `testbench run NAME`; with no testbench.yaml, the plans `init` would write for what it finds run on this machine, and what it found is kept in `.testbench/check.json` (so `report`, `runs`, `verify`, `ui` and `diff` work there); a plan whose tool is missing is skipped with the command that installs it; `--junit` also writes JUnit XML for CI (each run's steps as test cases, a refusal as an error, a paid plan or a missing tool as skipped) | 0 every plan that ran passed, 1 one failed, 2 nothing to check, 3 still running |
+| `doctor` | check what this machine can run, and what to fix: each `no` line says what to do | 0, whatever it found |
 | **prove it with a plan** | | |
-| `plans [--json]` | the plans, their hardware and worst case (and whether each may launch now) | 0 |
-| `estimate PLAN [--approve] [--json]` | a plan's worst case and whether it may launch now | 0 it may (2: it may not) |
+| `plans [--json]` | list the plans, their hardware and worst-case cost (`--json`: and whether each may launch now) | 0 |
+| `estimate PLAN [--approve] [--json]` | price a plan's worst case; say whether it may launch now | 0 it may (2: it may not) |
 | `run PLAN [--wait SECONDS] [--detach] [--approve] [--junit FILE]` | run a plan and print its report (`--junit`: also as JUnit XML, or why it did not start) | 0 passed, 1 failed, 3 still running after `--wait` (and always with `--detach`) |
-| `report [RUN] [--format md\|json\|html\|junit] [-o FILE]` | a run's report | 0, a failed run's report too |
+| `report [RUN] [--format md\|json\|html\|junit] [-o FILE]` | print a run's report: markdown, json, html or junit | 0, a failed run's report too |
 | `report [RUN] --tearsheet [-o FILE]` | only the [tear sheet](trading.md#tear-sheet) of the steps that kept an `equity.csv` among their artifacts: one page, to the run folder's `tearsheet.html` or FILE | 0; 1 no step kept one, or every one was refused (the reason is printed) |
-| `verify [RUN] [--attestation [--repo OWNER/REPO]]` | check the evidence against its recorded sha256 | 0 it matches, 1 it does not (2: it could not be checked) |
+| `verify [RUN] [--attestation [--repo OWNER/REPO]]` | check a run's evidence against its recorded hashes (sha256; `--attestation`: also the signature a CI run gave its report) | 0 it matches, 1 it does not (2: it could not be checked) |
 | `verify --from URL_OR_FOLDER` | check a run `share` published, with no project: every file against its manifest, each evidence file against the sha256 the run recorded | 0 it matches, 1 it does not (2: it could not be checked) |
-| `ui [--open] [--serve [--port N]]` | every run as a page, or the live dashboard | 0 |
+| `ui [--open] [--serve [--port N]]` | show every run as a page, or a live dashboard (--serve) | 0 |
 | **work live, improve in a loop** | | |
 | `session start [NAME] [--backend B] [--gpu G] ...` | start a kernel, inside the budget | 0 |
 | `session list` | sessions, their hardware, uptime and cost | 0 |
 | `session stop [NAME\|--all]` | stop one | 0, also when none was running |
 | `session sync`, `install PKG...`, `shell "CMD"` | copy the project again, pip install, run a shell command | 0; `install`: 1 when pip fails; `shell`: 0 once the command ran (its own exit code is not passed on) |
-| `exec CODE \| -f FILE \| --cells NB[:CELLS]` | run code in the session's kernel | 0 ok, 1 the code raised, 3 interrupted at `--timeout` (the kernel and its variables are kept) |
+| `exec CODE \| -f FILE \| --cells NB[:CELLS]` | run code or notebook cells in a session, see what came back | 0 ok, 1 the code raised, 3 interrupted at `--timeout` (the kernel and its variables are kept) |
 | `loop start PLAN --metric FILE:KEY --budget-usd N` | start a loop and run the baseline | 0 the baseline passed, 1 it did not (the loop still started), 3 still running |
 | `loop try "WHAT"` | commit the edits as a try and run the plan | 0 kept, 1 reverted, 3 still running |
 | `loop status [--json]`, `loop stop` | the tries so far (`--json`: as data, read-only); the report | 0; `status`: 3 while a try runs |
-| **set up** (the rest: `testbench help --all`) | | |
-| `init [--recipe NAME] [--add] [--force]` | write testbench.yaml (a plan for each thing it finds) and AGENTS.md | 0 |
-| `recipes [NAME]` | ready plans for a goal, with their worst case; or print one | 0 |
-| `schema` | print the JSON Schema of testbench.yaml (for editor autocomplete; `init` points the file at it) | 0 |
-| `connect CLIENT... [--user] [--dry-run]`, `connect --list` | register the MCP server in a client's config and write AGENTS.md | 0 |
-| `ci [--for gitlab\|azure\|circleci\|shell] [--plan NAME]... [-o FILE] [--force]` | a CI job that installs this version, runs `testbench check` (or `testbench run` for each `--plan`), publishes JUnit and keeps the runs; no `--for`: the templates ([ci.md](ci.md)) | 0 (2: an unknown CI or plan, or `-o` names a file that is there) |
-| `selftest [--keep]` | check the main promises hold on this machine, in a temporary folder (a minute or so, local and free) | 0 they all held, 1 one did not |
-| `mcp [--http]` | serve the commands as MCP tools, with resources (plans, runs, reports, evidence, the loop, notes) and prompts ([clients.md](clients.md#resources-and-prompts)) | 0 when it stops |
-| `plugins [--json]` | each kind of plug-in: its built-ins, what is installed and from which package, what is broken and why ([plugins.md](plugins.md)) | 0 |
-| `plugin test TARGET\|--installed [--kind KIND]` | the conformance kit: check plug-ins keep their kind's contract; TARGET is `module:attr` or an installed package's name | 0 they all do, 1 one does not |
+| **set up** | | |
+| `init [--recipe NAME] [--add] [--force]` | write testbench.yaml and AGENTS.md for this project: a plan for each thing it finds, or a recipe's | 0 |
+| `recipes [NAME]` | list ready plans for a goal, each with its worst-case cost; or print one | 0 |
+| `schema` | print testbench.yaml's JSON Schema, for editor autocomplete (`init` points the file at it) | 0 |
+| `connect CLIENT... [--user] [--dry-run]`, `connect --list` | set up Claude Code, Cursor, VS Code, Codex or Gemini to use it: the MCP server in the client's config, and AGENTS.md | 0 |
+| `ci [--for gitlab\|azure\|circleci\|shell] [--plan NAME]... [-o FILE] [--force]` | write a CI job for GitLab, Azure, CircleCI or a shell script: it installs this version, runs `testbench check` (or `testbench run` for each `--plan`), publishes JUnit and keeps the runs; no `--for`: the templates ([ci.md](ci.md)) | 0 (2: an unknown CI or plan, or `-o` names a file that is there) |
+| `selftest [--keep]` | check the main promises hold on this machine, in a minute: in a temporary folder, local and free | 0 they all held, 1 one did not |
+| `mcp [--http]` | serve these commands as MCP tools, with resources (plans, runs, reports, evidence, the loop, notes) and prompts ([clients.md](clients.md#resources-and-prompts)) | 0 when it stops |
+| `plugins [--json]` | list the kinds of plug-in: built in, installed, broken and why (and from which package; [plugins.md](plugins.md)) | 0 |
+| `plugin test TARGET\|--installed [--kind KIND]` | check a plug-in keeps its kind's contract (the conformance kit); TARGET is `module:attr` or an installed package's name | 0 they all do, 1 one does not |
 | **runs** | | |
-| `wait [RUN] [--timeout SECONDS]` | follow a run (`--wait` is the same as `--timeout`) | 0 passed, 1 failed, 3 still running |
-| `status [RUN]` | one line about a run | 0 passed, 1 failed, cancelled, error or lost, 3 still running |
-| `runs [-n N] [--json]` | recent runs | 0 |
+| `wait [RUN] [--timeout SECONDS]` | follow a run until it ends (`--wait` is the same as `--timeout`) | 0 passed, 1 failed, 3 still running |
+| `status [RUN]` | print one line about a run | 0 passed, 1 failed, cancelled, error or lost, 3 still running |
+| `runs [-n N] [--json]` | list recent runs (`--json`: each with its folder) | 0 |
 | `cancel [RUN]` | stop a run, here and on its remote machine | 0, also when it had already ended (the message says how to read it instead) |
-| `watch PLAN [--max-runs N]` | run a free plan again on every change | 0 stopped, or the last of `--max-runs` passed; 1 it did not |
+| `watch PLAN [--max-runs N]` | run a free plan again whenever the files change | 0 stopped, or the last of `--max-runs` passed; 1 it did not |
 | **proof** | | |
-| `share [RUN] --to DEST [--dry-run] [--yes] [--keep-paths]` | publish a run's proof as a static page others open and check, in DEST/RUN/: a folder, `git:BRANCH/FOLDER` (committed, never pushed) or `s3://BUCKET/PREFIX` (the aws CLI); lists every file first and needs a person's yes ([share.md](share.md)) | 0 published or listed, 1 it failed or the evidence changed |
-| `badge [PLAN] [-o SVG] [--link URL]` | a README badge of the plan's latest run: checks passed, failed, or no runs | 0 |
-| `diff [A B \| PLAN \| RUN] [--json]` | what changed between two runs | 0 |
-| `history PLAN [-n N] [--json]` | a plan's runs over time | 0 |
-| `export [RUN\|all] [--to mlflow\|wandb\|csv\|jsonl]` | a run in a tracker or a file | 0, 1 a target failed |
-| `numbers [READER [PATH...]] [--opt KEY=VALUE] [--json]` | the named numbers a metric reader (json, csv, junit, trading or an installed one) finds in evidence files, to write rules with; no READER: the readers and the files each reads ([metric readers](plugins.md#metrics)) | 0 (2: a file is missing or refused) |
+| `diff [A B \| PLAN \| RUN] [--json]` | show what changed between two runs | 0 |
+| `history PLAN [-n N] [--json]` | show a plan's runs over time, with the numbers its checks found | 0 |
+| `share [RUN] --to DEST [--dry-run] [--yes] [--keep-paths]` | publish a run's proof as a page anyone can open and check, in DEST/RUN/: a folder, `git:BRANCH/FOLDER` (committed, never pushed) or `s3://BUCKET/PREFIX` (the aws CLI); lists every file first and needs a person's yes ([share.md](share.md)) | 0 published or listed, 1 it failed or the evidence changed |
+| `badge [PLAN] [-o SVG] [--link URL]` | draw a README badge (SVG) of a plan's latest run: checks passed, failed, or no runs | 0 |
+| `export [RUN\|all] [--to mlflow\|wandb\|csv\|jsonl]` | send a run to MLflow, W&B, csv or jsonl | 0, 1 a target failed |
+| `numbers [READER [PATH...]] [--opt KEY=VALUE] [--json]` | list the named numbers a reader finds in evidence files (json, csv, junit, trading or an installed [metric reader](plugins.md#metrics)), to write rules with; no READER: the readers and the files each reads | 0 (2: a file is missing or refused) |
 | **sessions and notifications** | | |
-| `files ls\|get\|put PATH...` | files on the session's machine | 0 |
-| `notify test` | one test message to the `notify:` webhook | 0 accepted, 1 refused by the service |
+| `files ls\|get\|put PATH...` | list, get and put files on a session's machine | 0 |
+| `notify test` | send a test message to the notify: webhook | 0 accepted, 1 refused by the service |
 | **money** | | |
-| `spend [-n N] [--modal] [--json]` | what runs and sessions have cost (`--json`: today against the day limits) | 0 |
-| `prices [--update]` | the prices behind every estimate | 0 |
+| `spend [-n N] [--modal] [--json]` | show what runs and sessions have cost (`--json`: today against the day limits) | 0 |
+| `prices [--update]` | list the prices behind every estimate (`--update`: fetch the price catalog) | 0 |
 | **notebooks and the lab notebook** | | |
-| `lint NOTEBOOK... [--strict]` | Colab and headless pitfalls | 0; with `--strict`, 1 when anything is found |
-| `rescue NOTEBOOK [--fix OUT] [--no-run]` | why a notebook does not run, and what to do | 0 it ran, 1 it failed or ran out of time (`--no-run`: something blocks it) |
-| `nb split\|build\|fields` | a notebook as plain cell files | 0 |
-| `note TEXT` | a line in `.testbench/NOTES.md` | 0 |
+| `lint NOTEBOOK... [--strict]` | check notebooks for Colab and headless pitfalls | 0; with `--strict`, 1 when anything is found |
+| `rescue NOTEBOOK [--fix OUT] [--no-run]` | find why a notebook does not run, and what to do | 0 it ran, 1 it failed or ran out of time (`--no-run`: something blocks it) |
+| `nb split\|build\|fields` | split a notebook into cell files, build it back, list its fields | 0 |
+| `note TEXT` | add a line to the lab notebook (.testbench/NOTES.md) | 0 |
 
 ## Exit codes
 

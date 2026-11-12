@@ -1,11 +1,18 @@
 """The command line as a newcomer or an agent meets it: help with examples, mistakes that say what to type instead,
 and exit codes that mean the same everywhere (0 passed or done, 1 failed, 2 refused or bad input, 3 still running)."""
+import re
 import shlex
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 from agent_testbench import cli as CLI
+from agent_testbench.core import CORE_MODULES
 from conftest import cli, make_notebook, write_config
+
+REPO = Path(__file__).resolve().parents[1]
 
 
 def tb(capsys, *args) -> tuple[int, str]:
@@ -134,12 +141,11 @@ def test_no_command_shows_the_core_commands_in_groups(tmp_path):
     assert r.returncode == 2 and "Traceback" not in r.stderr, r.stderr
     assert r.stdout == cli(tmp_path, "--help", env=wide).stdout == cli(tmp_path, "help", env=wide).stdout
     top = CLI._subcommands(CLI.build_parser()).choices
-    line = {n: s for names in CLI.GROUPS.values() for n, s in names.items()}
-    core = [n for names in CLI.CORE.values() for n in names if n in top]
-    for title, names in CLI.CORE.items():
+    core = [n for title in CLI.CORE for n in CLI.GROUPS[title]]
+    for title in CLI.CORE:
         assert f"\n  {title}\n" in r.stdout
-    for name in core:
-        assert f"    {name:<9} {line[name]}" in r.stdout, name
+        for name, line in CLI.GROUPS[title].items():
+            assert f"    {name:<9} {line}" in r.stdout, name
     for name in set(top) - set(core):
         assert f"\n    {name} " not in r.stdout, f"{name} is not a core command: only `help --all` lists it"
     assert f"\n{len(top) - len(core)} more, for setup, money, notebooks and the rest: testbench help --all\n" \
@@ -168,10 +174,11 @@ def test_help_all_lists_every_command_in_its_group(tmp_path):
 
 
 def test_help_lists_only_commands_the_parser_has(monkeypatch, capsys):
-    """CORE may name a command another change adds (it is skipped until then), and a command GROUPS lacks still
-    shows under `other` in `help --all`."""
-    monkeypatch.setitem(CLI.CORE, "start", ("demo", "no-such-command", "doctor"))
-    monkeypatch.setitem(CLI.CORE, "nothing here yet", ("no-such-command",))
+    """A group may name a command the parser lacks (it is left out, and so is a group left empty), and a command
+    GROUPS lacks still shows under `other` in `help --all`."""
+    monkeypatch.setitem(CLI.GROUPS, "start", {**CLI.GROUPS["start"], "no-such-command": "nothing"})
+    monkeypatch.setitem(CLI.GROUPS, "nothing here yet", {"no-such-command": "nothing"})
+    monkeypatch.setattr(CLI, "CORE", (*CLI.CORE, "nothing here yet"))
     monkeypatch.setitem(CLI.GROUPS, "proof", {k: v for k, v in CLI.GROUPS["proof"].items() if k != "history"})
     code, core = tb(capsys, "--help")
     assert code == 0 and "no-such-command" not in core and "nothing here yet" not in core
@@ -186,9 +193,98 @@ def test_every_command_is_in_one_group_with_a_short_line():
     assert sorted(grouped) == sorted(top), "a new command needs a line in cli.GROUPS"
     assert all(len(f"    {n:<9} {line}") <= 78 for names in CLI.GROUPS.values() for n, line in names.items()), \
         "one line each in an 80-column terminal"
-    core = [n for names in CLI.CORE.values() for n in names]
-    assert len(core) == len(set(core)) <= 12 and set(core) - set(top) <= {"check"}, \
-        "the core is a dozen commands the parser has (check: until `testbench check` lands)"
+    assert list(CLI.GROUPS)[:len(CLI.CORE)] == list(CLI.CORE), "the core groups come first in `help --all` too"
+    core = [n for title in CLI.CORE for n in CLI.GROUPS[title]]
+    assert len(core) <= 12, "the core is a dozen commands"
+
+
+def _section(path: Path, heading: str) -> str:
+    """The part of a Markdown file under `## heading`, up to the next `## ` heading."""
+    text = path.read_text(encoding="utf-8")
+    start = text.index(f"\n## {heading}\n")
+    end = text.find("\n## ", start + 1)
+    return text[start:end if end > 0 else None]
+
+
+def _cells(row: str) -> list[str]:
+    """A Markdown table row's cells (`\\|` inside one is a pipe, not a border)."""
+    return [c.strip() for c in re.split(r"(?<!\\)\|", row.strip())[1:-1]]
+
+
+def _words(cell: str) -> list[str]:
+    """The words of a cell's code spans: `session sync`, `install PKG...` -> session, sync, install, PKG..."""
+    return [w for span in re.findall(r"`([^`]+)`", cell) for w in re.split(r"\s+|\\\|", span) if w]
+
+
+def test_reference_lists_every_command_in_its_group_with_its_line():
+    """docs/reference.md#commands: the groups of `testbench help --all`, in its order (a bold row each), and under each
+    its commands, in its order. A command's first row says what it does in the line `help --all` shows, then more; a
+    command documented as a row per subcommand (session, loop) names every subcommand instead."""
+    top = CLI._subcommands(CLI.build_parser()).choices
+    titles, rows = [], {}
+    for line in _section(REPO / "docs" / "reference.md", "Commands").splitlines():
+        if not line.startswith("| ") or set(line) <= set("|-: "):
+            continue
+        cells = _cells(line)
+        if bold := re.fullmatch(r"\*\*(.+)\*\*", cells[0]):
+            titles.append(bold.group(1))
+        elif titles:                                       # not the header row
+            rows.setdefault(titles[-1], {}).setdefault(_words(cells[0])[0], []).append(cells)
+    assert titles == list(CLI.GROUPS), (f"docs/reference.md#commands has the groups {titles}, `testbench help --all` "
+                                        f"{list(CLI.GROUPS)}: a bold row (| **group** | | |) for each, in that order")
+    for title, names in CLI.GROUPS.items():
+        found = list(rows.get(title, {}))
+        assert found == list(names), (f"under **{title}**, docs/reference.md#commands has rows for {found}; "
+                                      f"cli.GROUPS has {list(names)}: a row for each, in that order")
+        for name, line in names.items():
+            first = rows[title][name]
+            subs = CLI._subcommands(top[name])
+            if subs and len(first) > 1:
+                missing = set(subs.choices) - {w for cells in first for w in _words(cells[0])}
+                assert not missing, f"docs/reference.md#commands has no row for `testbench {name}` {sorted(missing)}"
+                continue
+            line = re.sub(rf"^{name} \w+: ", "", line)          # `plugin test: check ...` is the plugin test row's
+            assert first[0][1].startswith(line), (
+                f"docs/reference.md#commands: the row for `{name}` says what it does in the words `testbench help "
+                f"--all` uses ({line!r}), then more; it says {first[0][1]!r}")
+
+
+def test_readme_shows_the_core_with_their_lines_and_the_rest_by_group():
+    """README.md#commands: the core as `testbench --help` shows it (each group, each command and its line), then the
+    rest of `testbench help --all`'s groups and their commands."""
+    section = _section(REPO / "README.md", "Commands")
+    assert re.findall(r"^\| \*\*(.+?)\*\* \|", section, re.M) == list(CLI.CORE), \
+        f"README.md#commands: a bold row for each group of cli.CORE, in order: {list(CLI.CORE)}"
+    core = re.findall(r"^\| `testbench ([\w-]+)` \| (.+?) \|$", section, re.M)
+    want = [(name, line) for title in CLI.CORE for name, line in CLI.GROUPS[title].items()]
+    assert core == want, ("README.md#commands lists the core commands as `testbench --help` does, in its words: "
+                          f"| `testbench NAME` | LINE |, in this order: {want}")
+    rest = {group: [w.split()[0] for w in re.findall(r"`([^`]+)`", cell)]
+            for group, cell in re.findall(r"^\| ([a-z][a-z ,]*) \| (.+) \|$", section, re.M)}
+    want = {title: list(names) for title, names in CLI.GROUPS.items() if title not in CLI.CORE}
+    assert rest == want, f"README.md#commands lists the other groups as | group | `name`, `name` |, these: {want}"
+
+
+# `testbench --version` and `--help` load the standard library, cli and little else: 97 to 105 modules on Python 3.10
+# to 3.13 on Linux, up to 128 on 3.14 (counted with -X importtime, the interpreter's own included). The names are the
+# check; the count is a backstop: PyYAML and the core add about 70 (`testbench plans` loads 172), nbformat about 150.
+MAX_START_MODULES = 150
+HEAVY = ("yaml", "nbformat", "nbclient", "jupyter_client", "ipykernel", "IPython", "mcp", "modal", "playwright",
+         "numpy", "pandas")
+
+
+@pytest.mark.parametrize("args", [["--version"], ["--help"]])
+def test_version_and_help_load_no_yaml_notebooks_or_core(tmp_path, args):
+    r = subprocess.run([sys.executable, "-X", "importtime", "-m", "agent_testbench", *args], cwd=tmp_path,
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr
+    loaded = [line.rsplit("|", 1)[1].strip() for line in r.stderr.splitlines() if line.startswith("import time:")]
+    loaded = [m for m in loaded if m != "imported package"]
+    slow = sorted(m for m in loaded if m.split(".")[0] in HEAVY or m in CORE_MODULES[1:]
+                  or m in ("agent_testbench.notebook", "agent_testbench.lint"))
+    assert not slow, (f"`testbench {args[0]}` imports {slow}, which only some commands need: import it inside the "
+                      "command that uses it (the modules cli.py names at its top are cli._Later)")
+    assert len(loaded) <= MAX_START_MODULES, f"`testbench {args[0]}` imports {len(loaded)} modules: {loaded}"
 
 
 def test_every_command_has_examples_that_parse():

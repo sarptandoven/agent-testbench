@@ -1,8 +1,22 @@
 # Loops
 
-<!-- The first part is README.md's "Loops", and "How a loop goes" is docs/reference.md's "Loops": edit them there.
-     The sections after those are this page's own. -->
---8<-- "README.md#loops"
+<!-- "How a loop goes" is docs/reference.md's "Loops": edit it there. The rest is this page's own. -->
+
+```bash
+testbench loop start smoke --metric outputs/metrics.json:accuracy --budget-usd 5 --max-hours 8
+testbench loop try "lower the learning rate to 3e-4"     # commit, run, keep or revert
+testbench loop status | stop
+```
+
+The loop works on a branch of its own. A try is kept only when its run passes and the metric beats the best so
+far; otherwise the branch goes back to the best commit, keeping edits made meanwhile. `--metric` is a number a json
+check reads (`FILE:KEY`) or any check's number (`check:val_loss`). One budget covers every run of the loop, approved
+once; each run is still checked against the per-run and daily limits. The report lists each kept change, what it
+moved and the run that proves it; merging is yours to decide.
+
+Left to run, a loop stops itself ([stopping rules](#stopping-rules)), tells you when it ends or waits for your yes
+([notifications](#notifications)), and over a trading strategy says whether its best try is better than luck
+([is the best try luck?](#is-the-best-try-luck)).
 
 ## How a loop goes
 
