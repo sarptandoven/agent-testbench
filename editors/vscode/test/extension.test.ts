@@ -205,7 +205,8 @@ test('"Approve and run" runs it with --approve once, and follows it to its end',
   await registered.get(COMMANDS.runPlan)!('asks');
   const runs = calls().filter((c) => c[0] === 'run');
   assert.deepEqual(runs, [['run', '--approve', '--detach', '--', 'asks']]);
-  assert.deepEqual(calls().at(-1), ['wait', '--timeout', '86400', '--', '20261112-120000-asks']);
+  // the status bar may refresh today's spend (spend --json) at any moment: look at the waits, not the last call
+  assert.deepEqual(calls().filter((c) => c[0] === 'wait').at(-1), ['wait', '--timeout', '86400', '--', '20261112-120000-asks']);
   assert.ok(shown.some((s) => s.message === 'Testbench: plan asks passed (run 20261112-120000-asks).'), shown.map((s) => s.message).join('\n'));
 });
 
