@@ -241,10 +241,10 @@ def test_cancel_deletes_the_job(tmp_path, fake, monkeypatch):
     plan = {"steps": [dict(cfg["plans"]["cpu"]["steps"][0])]}
     fake.scenario(probe=_probe(tmp_path, plan, done=False), probe_done=_probe(tmp_path, plan))
     run = runs.launch(root, cfg, "cpu", foreground=False)       # a driver in the background
-    for _ in range(400):
-        if fake.execs("w|gz"):
-            break
+    deadline = time.time() + 90                                 # a loaded machine starts the driver slowly
+    while not fake.execs("w|gz") and time.time() < deadline:
         time.sleep(0.05)
+    assert fake.execs("w|gz"), "the driver never reached the pod's work within 90 s"
     assert "cancelled" in runs.cancel(run)
     assert runs.read_state(run)["status"] == "cancelled"
     assert fake.execs("os.kill(1, signal.SIGINT)"), "the executor in the pod is interrupted, so it writes its report"
