@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 - not yet released
+## 0.2.0 - 2026-11-12
 
 - `testbench selftest`: ten checks of the main promises in a temporary folder, local and free, in under a minute:
   a plan passes, a broken change fails with the reason, evidence is fingerprinted, costs are refused or asked about

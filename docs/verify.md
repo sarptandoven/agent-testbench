@@ -4,11 +4,11 @@ Enough to see that 0.2.0 works on your machine before it is released. Everything
 
 ## 1. Install the branch (1 minute)
 
-0.2.0 is not on PyPI yet, so install it from the pull request's branch, in a fresh virtualenv:
+Until 0.2.0 is on PyPI, install it from `main`, in a fresh virtualenv:
 
 ```bash
 python -m venv tb && . tb/bin/activate          # Windows: tb\Scripts\activate
-pip install "agent-testbench[all] @ git+https://github.com/sarptandoven/agent-testbench@claude/modest-hypatia-p9ib7h"
+pip install "agent-testbench[all] @ git+https://github.com/sarptandoven/agent-testbench@main"
 testbench --version                             # agent-testbench 0.2.0
 ```
 
@@ -50,10 +50,10 @@ The dashboard shows the run, the plan's trend line and today's spend against the
 
 ## 4. An agent uses it (2 minutes, optional)
 
-With Claude Code, from a clone of the branch:
+With Claude Code, from a clone of the repository:
 
 ```bash
-git clone -b claude/modest-hypatia-p9ib7h https://github.com/sarptandoven/agent-testbench
+git clone https://github.com/sarptandoven/agent-testbench
 testbench demo test-suite          # a pytest suite with a planted bug: its plan fails
 cd test-suite && claude --plugin-dir ../agent-testbench
 ```
@@ -62,4 +62,4 @@ Ask: *"The tests plan fails. Use agent-testbench to find out why, fix it, and pr
 plan, read the report, change one line in `textstats`, run the plan again until it passes, and name the run that
 proves it (`testbench verify` checks that run's evidence).
 
-If all of that holds, the PR is ready to merge; `docs/publishing.md` lists the release steps after that.
+If all of that holds, 0.2.0 is ready to publish; `docs/publishing.md` lists the release steps.
