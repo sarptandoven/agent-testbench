@@ -133,7 +133,7 @@ What each part reads from the two reports:
 | Cost and time | the estimated cost and the minutes of each |
 | Code | the commit and uncommitted changes (their hash) of each; when both commits are in the repository, how far apart they are and `git diff --stat` between them, for the project's folder. Uncommitted changes are hashed, not kept, so only their being different can be told |
 | Data | with [`data:`](trading-data.md), each role: whether the file changed between the runs (sha256, rows, last time) or the steps saw other rows of the same file (a backtest against the holdout's run); left out without `data:` |
-| Where it ran | backend, GPU, Python, platform, machine, and the packages that changed version (runs from before testbench recorded versions say only whether the package set differs) |
+| Where it ran | backend, GPU, Python, platform, machine, the packages that changed version (runs from before testbench recorded versions say only whether the package set differs), and each step that ran on another interpreter (its Python, the kernel's, node, go or cargo) |
 
 `--json` gives the same as data: `verdict`, `fixed`, `broke`, `still_failing` (those three are the report's own
 `delta`), `steps`, `numbers` (each with `a`, `b`, `delta`, `wants`, `change`), `checks`, `evidence`, `cost_usd`,

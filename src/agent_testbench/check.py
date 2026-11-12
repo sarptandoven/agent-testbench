@@ -51,17 +51,8 @@ def _install(tool: str) -> tuple[str, str]:
 def _commands(line: str) -> list[list[str]]:
     """The words of each simple command in a shell line (leading VAR=value assignments dropped); what does not
     split cleanly is left out, and the run itself says what is wrong with it."""
-    out = []
-    for part in re.split(r"&&|\|\||[;|\n]", line or ""):
-        try:
-            words = shlex.split(part, comments=True)
-        except ValueError:
-            continue
-        while words and re.fullmatch(r"[A-Za-z_]\w*=.*", words[0]):
-            words = words[1:]
-        if words:
-            out.append(words)
-    return out
+    from .executor import commands
+    return commands(line)
 
 
 def _imports(python: str, module: str) -> bool:
@@ -103,7 +94,7 @@ def _notebook_needs(notebook: Path, root: Path) -> tuple[str, str] | None:
                and not (p["notebook_installs"] and p["notebook_installs"] <= p["cells"][0])]
     if not missing:
         return None
-    python, guess = rescue.kernel_python(), [p["import"] for p in missing if not p["sure"]]
+    python, guess = rescue.kernel_python(root), [p["import"] for p in missing if not p["sure"]]
     return (f"{notebook.name} imports {', '.join(p['import'] for p in missing)}, which the Python its kernel runs "
             f"({python}) does not have" + (f" (the pip name of {', '.join(guess)} is a guess)" if guess else ""),
             _pip(python, list(dict.fromkeys(p["pip"] for p in missing if p["pip"]))))
@@ -279,7 +270,9 @@ def _next(mode: str | None, entries: list, why: str | None, fill_in: bool = True
         return (f"`{me} init` keeps these plans in testbench.yaml (the same names, so their history goes on)"
                 + (" and marks where to add the checks that mean \"working\" (the FILL IN lines)." if fill_in else
                    ", with an AGENTS.md that tells your coding agent how to prove its changes."))
-    return f"`{me} ui --open` shows every run as a page, with its evidence."
+    run = passed[0]["run"]                              # passed with a testbench.yaml: show the proof
+    return (f"show the proof: `{me} report {run} --format html` writes it as one page; "
+            f"`{me} share {run} --to ./public --dry-run` lists what publishing it would put out.")
 
 
 def _entry(name: str, what: str, plan: dict) -> dict:

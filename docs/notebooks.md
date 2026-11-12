@@ -138,7 +138,12 @@ Its limits, where it differs from jupytext:
 
 A notebook runs on the kernel its kernelspec names (`metadata.kernelspec.name`, or in a `.py` the `kernelspec:`
 of the jupytext header), when that kernel is installed where the step runs: `jupyter kernelspec list` shows
-what is. A notebook with no kernelspec runs on `python3`, the Python that runs testbench.
+what is. A notebook with no kernelspec runs on `python3`, the Python that runs testbench - except from uvx, `uv
+tool` or pipx, whose environment holds none of the project's packages: there `python3` runs on the project's own
+virtualenv (an activated one, else `.venv` or `venv`) when it has ipykernel, checked by running its Python with
+`-c "import ipykernel"`. Without it, the kernel stays on testbench's Python and the step's log says how to put
+ipykernel in the virtualenv. The log's first line names the Python the kernel ran on, and report.json records it
+(the step's `runtime`).
 
 - **Another Python kernel** (a virtualenv or conda kernel), when installed, is used as it is: its own Python,
   its own packages, and its `env` from kernel.json. When it is not installed - a kernel on the author's machine

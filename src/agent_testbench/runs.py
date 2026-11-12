@@ -125,9 +125,12 @@ def launch(root: Path, cfg: dict, plan_name: str, approve: bool = False, foregro
     if any("deterministic" in (s.get("expect") or {}) for s in plan["steps"]):     # each such step is given the
         from . import repro                                                        # hashes of the run it compares with
         plan = repro.with_reference(root, plan_name, plan, source, sealed["data"] if sealed else None)
+    down = preflight(cfg, plan["backend"], f"plan {plan_name}", f"testbench run {plan_name}")
     with budget.launching():
         opened, refused = (dataseal.holdout(root, cfg, plan_name) if sealed and sealed["opening"] else (None, None))
         ok, message, est = (False, refused, {}) if refused else budget.check_launch(cfg, plan_name, approve)
+        if ok and down:                                # money first; then a backend that could only fail
+            ok, refused = False, down
         if ok:
             stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
             run_dir = runs_dir(root) / f"{stamp}-{plan_name}"
@@ -160,6 +163,19 @@ def launch(root: Path, cfg: dict, plan_name: str, approve: bool = False, foregro
     proc = spawn([sys.executable, "-m", "agent_testbench.driver", str(run_dir)], cwd=root, log_path=run_dir / "driver.log")
     write_state(run_dir, driver_pid=proc.pid)
     return run_dir
+
+
+def preflight(cfg: dict, backend: str, what: str, again: str) -> str:
+    """A refusal when the backend cannot start work here now (Backend.preflight: Docker not running), else ''."""
+    from . import backends
+    try:
+        why = backends.get(backend).preflight(cfg)
+    except Exception:                                  # a plug-in's check that broke: the run itself will say more
+        why = ""
+    if not why:
+        return ""
+    return (f"Refused: {what} runs on the {backend} backend, which cannot start work here now. {why}; then "
+            f"`{again}` again. Nothing was started or recorded.")
 
 
 def _gitignore(root: Path) -> None:

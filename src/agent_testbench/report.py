@@ -10,6 +10,7 @@ import datetime as dt
 import json
 import math
 import re
+import sys
 from pathlib import Path
 
 from .config import counted
@@ -69,8 +70,14 @@ def missing_module(step: dict, report: dict | None = None) -> str | None:
     if exe:
         return (f"`{mod}` is not installed for the Python this step ran ({exe}): `{exe} -m pip install {pip}`{guess}, "
                 "then run the plan again")
-    from .executor import tool_environment
-    tool = tool_environment() if step.get("kind") == "notebook" and (report or {}).get("backend") == "local" else None
+    from .executor import _norm, tool_environment
+    local_notebook = step.get("kind") == "notebook" and (report or {}).get("backend") == "local"
+    kernel = ((step.get("runtime") or {}).get("python") or {}).get("path") if local_notebook else None
+    if kernel and _norm(kernel) != _norm(sys.executable):          # the project's virtualenv ran the kernel
+        from .check import _pip
+        return (f"`{mod.split('.')[0]}` is not installed for the kernel's Python ({kernel}): `{_pip(kernel, [pip])}`"
+                f"{guess}, then run the plan again")
+    tool = tool_environment() if local_notebook else None
     if tool:
         how = (f"`uvx --with {pip} agent-testbench run {(report or {}).get('plan')}` runs the plan with it" if tool == "uvx"
                else f"`uv tool install --force --with {pip} agent-testbench` adds it" if tool == "uv tool"
@@ -80,6 +87,70 @@ def missing_module(step: dict, report: dict | None = None) -> str | None:
     where = "the kernel's Python" if step.get("kind") == "notebook" else "the Python this step ran"
     return (f"`{mod.split('.')[0]}` is not installed for {where}: install it there (`python -m pip install {pip}` in "
             f"the environment the step uses, e.g. the project's virtualenv){guess}, then run the plan again")
+
+
+RUNTIME_TOOLS = ("node", "go", "cargo")
+RAN_ON_SHOWN = 5                                     # groups of steps named before "and N more"
+
+
+def _runtime_parts(rt, code: bool = False) -> tuple[str, str]:
+    """(its Python, the rest: another kernel, node, go, cargo) in words, '' for what it did not record."""
+    if not isinstance(rt, dict):
+        return "", ""
+    py, rest = rt.get("python"), [f"kernel {rt['kernel']}"] if rt.get("kernel") not in (None, "", "python3") else []
+    for tool in RUNTIME_TOOLS:
+        t = rt.get(tool)
+        if isinstance(t, dict) and t.get("path"):
+            rest.append(f"{tool} {t.get('version') or '(it did not say its version)'}")
+    if not (isinstance(py, dict) and py.get("path")):
+        return "", ", ".join(rest)
+    path = f"`{py['path']}`" if code else py["path"]
+    return f"Python {py.get('version') or '(it did not say its version)'} ({path})", ", ".join(rest)
+
+
+def runtime_text(rt, code: bool = False) -> str:
+    """What a step ran on (its `runtime`) in words: 'Python 3.12.1 (/p/.venv/bin/python), node v20.11.1'; '' when it
+    was not recorded (a run from an older testbench, a step that never started). code: paths in backticks."""
+    return ", ".join(p for p in _runtime_parts(rt, code) if p)
+
+
+def _grouped(pairs) -> list[tuple[str, list[str]]]:
+    """[(text, the step names with it)] in step order; a name once (a walk-forward plan runs each step per window)."""
+    groups: dict = {}
+    for name, text in pairs:
+        if text and name not in (names := groups.setdefault(text, [])):
+            names.append(name)
+    return list(groups.items())
+
+
+def _named(groups: list) -> str:
+    shown = [f"{', '.join(names)}: {text}" for text, names in groups[:RAN_ON_SHOWN]]
+    return "; ".join(shown) + (f"; and {len(groups) - RAN_ON_SHOWN} more" if len(groups) > RAN_ON_SHOWN else "")
+
+
+def ran_on_text(r: dict, code: bool = False) -> str:
+    """What the steps ran on: their one Python, then the steps that also used node, go or cargo; or each step's
+    when they ran on different Pythons. '' when no step recorded it."""
+    steps = [(str(s.get("name")), _runtime_parts(s.get("runtime"), code)) for s in r.get("steps") or []
+             if isinstance(s, dict) and runtime_text(s.get("runtime"))]
+    pythons = {py for _, (py, _) in steps}
+    if len(pythons) == 1 and "" not in pythons:
+        extra = _grouped((name, rest) for name, (_, rest) in steps)
+        everyone = len(extra) == 1 and len(extra[0][1]) == len({name for name, _ in steps})
+        return _line(pythons.pop() + (f", {extra[0][0]}" if everyone else
+                                      f"; {_named([(f'also {t}', n) for t, n in extra])}" if extra else ""))
+    groups = _grouped((name, ", ".join(p for p in parts if p)) for name, parts in steps)
+    return _line(groups[0][0] if len(groups) == 1 else _named(groups))
+
+
+def ran_on_line(r: dict, code: bool = False) -> str:
+    """The interpreters the steps ran on, in one line: what a `run:` step's `python` meant (the project's virtualenv,
+    from uvx), the kernel's Python, node, go, cargo. '' when no step recorded it."""
+    text = ran_on_text(r, code)
+    if not text:
+        return ""
+    many = len({str(s.get("name")) for s in r.get("steps") or [] if isinstance(s, dict)}) > 1
+    return f"{'The steps' if many else 'The step'} ran on {text}."
 
 
 def _encodable(text: str) -> str:
@@ -165,6 +236,8 @@ def render(report: dict, run_dir: Path | None = None) -> str:
                   + (f"; Python {env['python']} on {env.get('machine', '?')}" if env.get("python") else "")
                   + (f"; evidence sha256 `{r['evidence_sha256'][:16]}` (`testbench verify` checks it)"
                      if r.get("evidence_sha256") else "") + "."]
+    if ran_on_line(r):
+        lines += [ran_on_line(r, code=True)]
     lines += [""]
     if holdout_line(r):
         lines += [holdout_line(r), ""]
@@ -385,7 +458,7 @@ CSS = """
 "Segoe UI",sans-serif}main{max-width:980px;margin:0 auto;padding:24px 16px 64px}h1{font-size:22px;margin:0 0 4px}
 h2{font-size:16px;margin:28px 0 8px}a{color:var(--link)}.muted{color:var(--muted)}.facts{display:grid;
 grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 16px;margin:16px 0}.facts div{background:var(--card);
-border:1px solid var(--line);border-radius:8px;padding:8px 10px}.facts b{display:block;font-size:12px;color:var(--muted);
+border:1px solid var(--line);border-radius:8px;padding:8px 10px;overflow-wrap:anywhere}.facts b{display:block;font-size:12px;color:var(--muted);
 font-weight:500}table{border-collapse:collapse;width:100%;background:var(--card)}td,th{border:1px solid var(--line);
 padding:6px 8px;text-align:left;vertical-align:top}th{font-weight:600;font-size:13px}pre{background:var(--code);
 padding:10px;border-radius:6px;overflow-x:auto;font-size:13px;white-space:pre-wrap;word-break:break-word}
@@ -437,6 +510,7 @@ def html_body(report: dict, run_dir: Path, published: set | None = None) -> str:
              ("worst case", f"${r['worst_case_usd']:.2f}" if isinstance(r.get("worst_case_usd"), (int, float)) else "-"),
              ("code", (src.get("commit", "")[:12] + (" + uncommitted changes" if src.get("dirty") else "")) if src else "not in git"),
              ("python", f"{env.get('python', '?')} on {env.get('machine', '?')}" if env else "-"),
+             *([("steps ran on", ran_on_text(r))] if ran_on_text(r) else []),
              ("evidence", f"{counted(len(r['evidence']), 'file')}, sha256 {r['evidence_sha256'][:12]}" if r.get("evidence_sha256")
               else "not recorded (an older run)")]
     out = [f"<h1><span class='badge {e(r['status'])}'>{e(ICON.get(r['status'], r['status'].upper()))}</span> plan "

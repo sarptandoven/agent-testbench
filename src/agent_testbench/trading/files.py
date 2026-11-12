@@ -177,7 +177,8 @@ def _is_pandas(obj) -> bool:
 
 def _csv_rows(path: Path, name: str, kind: str):
     if path.is_dir():                                  # open() says PermissionError for a folder on Windows
-        raise TradingFileError(f"{name} is a folder; give the path of the CSV file in it")
+        raise TradingFileError(f"{name} is a folder; give the path of the CSV file in it (`python -m "
+                               f"agent_testbench.trading.files --check {name}` says what each CSV file there needs)")
     try:
         with open(path, newline="", encoding="utf-8-sig") as f:
             reader = csv.reader(f)
@@ -475,3 +476,246 @@ def _text(v) -> str:
     if isinstance(v, float):
         return repr(v)
     return str(v)
+
+
+# ---- a backtest's own files: what to rename or add to reach the standard format ----------------------------------
+#
+#     python -m agent_testbench.trading.files --check out
+#
+# reads every CSV file in a folder the way a person would - which one is the equity curve, which the fills, which the
+# decisions - and says, file by file, what to rename and what to add; a file that already reads is said to. Exit 0
+# when every file reads and none is missing, 1 when something needs changing, 2 when there is nothing to read.
+
+SIGNALS = "signals.csv"
+SYNONYMS = {       # names backtests give the standard columns, lowercase
+    "time": ("date", "datetime", "timestamp", "day", "dt", "ts", "date_time", "bar_time", "time_stamp", "index",
+             "period", "bar"),
+    "symbol": ("ticker", "asset", "instrument", "code", "pair", "coin", "sym", "security", "contract", "stock"),
+    "side": ("direction", "action", "buy_sell", "order_side", "trade_side", "trade_type", "type"),
+    "quantity": ("qty", "size", "shares", "amount", "units", "volume", "contracts", "filled_qty", "position_size",
+                 "lots", "filled"),
+    "price": ("fill_price", "exec_price", "execution_price", "avg_price", "average_price", "px", "trade_price",
+              "filled_price", "avg_fill_price"),
+    "fee": ("fees", "commission", "commissions", "cost", "costs", "transaction_cost", "transaction_costs",
+            "fee_paid", "trading_fee", "trading_fees"),
+    "equity": ("value", "portfolio_value", "total_value", "balance", "nav", "account_value", "net_liquidation",
+               "capital", "portfolio", "total", "equity_curve", "net_worth", "account"),
+    "benchmark": ("buy_and_hold", "buy_hold", "bh", "hold", "benchmark_equity", "benchmark_value"),
+    "close": ("adj_close", "adjclose", "adj close", "close_price", "last", "price"),
+    "cash": ("free_cash", "cash_balance"),
+    "position_value": ("positions_value", "holdings", "holdings_value", "market_value", "exposure"),
+}
+BY_NAME = (("equity", ("equity", "portfolio", "balance", "nav", "value", "account")),
+           ("trades", ("trade", "fill", "order", "transaction", "execution")),
+           ("signals", ("signal", "decision", "position", "prediction", "forecast")),
+           ("prices", ("price", "ohlc", "bar", "quote", "candle", "close")))
+WHAT = {"equity": "the equity curve", "trades": "the fills", "signals": "the decisions", "prices": "prices"}
+ADD = {
+    "time": "add `time`: when each row happened, as ISO 8601 (2024-01-02, or 2024-01-02T15:30:00)",
+    "symbol": "add `symbol`: the instrument of each row (the same value on every row is fine for one instrument)",
+    "side": "add `side`: buy or sell for each fill (opening a short is a sell, covering it a buy)",
+    "quantity": "add `quantity`: each fill's size, without a sign (shares, contracts, coins)",
+    "price": "add `price`: each fill's price, slippage included",
+    "fee": ("add `fee`: each fill's commissions and fees in the account currency, 0 when none were charged (a "
+            "`strategy:` check with costs: required fails a backtest that charged nothing)"),
+    "equity": "add `equity`: the account's whole value (cash plus open positions) at each bar",
+    "close": "add `close`: each row's close price",
+}
+SIDE_WORDS = {"long": "buy", "short": "sell", "b": "buy", "s": "sell", "1": "buy", "-1": "sell", "bought": "buy",
+              "sold": "sell", "+1": "buy", "entry": "?", "exit": "?", "open": "?", "close": "?"}
+
+
+def check_folder(folder) -> tuple[int, list[str]]:
+    """(exit code, lines): each CSV file in folder (or one folder down when it holds none) - which standard file it
+    looks like, and what to rename or add for it to read as one - then the standard files that are missing."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        what = "a file, not a folder" if folder.exists() else "not there"
+        return 2, [f"{folder} is {what}: give the folder the backtest writes its CSV files to (e.g. out)"]
+    files = sorted(folder.glob("*.csv")) or sorted(folder.glob("*/*.csv"))
+    if not files:
+        return 2, [f"{folder} holds no CSV files: run the backtest first, then check the folder it writes to (the "
+                   "standard files are equity.csv, trades.csv and signals.csv; docs/trading.md#the-files)"]
+    found: dict[str, list] = {}
+    lines, changes = [], 0
+    for f in files:
+        kind, todo, ok = _check_file(f, folder)
+        found.setdefault(kind, []).append(f)
+        rel = f.relative_to(folder).as_posix()
+        if ok:
+            lines.append(f"ok   {rel}: {ok}")
+        elif todo:
+            changes += len(todo)
+            lines.append(f"FIX  {rel}" + (f", which looks like {WHAT[kind]}:" if kind else ":"))
+            lines += [f"     - {t}" for t in todo]
+        else:
+            lines.append(f"--   {rel}: not one of the standard files, by its name or its columns (left as it is)")
+    for kind, name, why in (("equity", "equity.csv", "time, equity at each bar, and benchmark (buy and hold) for "
+                                                     "`beats: buy_and_hold`: what `strategy:` grades"),
+                            ("trades", "trades.csv", "time, symbol, side, quantity, price, fee - one row per fill, "
+                                                     "next to equity.csv"),
+                            ("signals", SIGNALS, "time, symbol, then a column per decision - what the lookahead plan "
+                                                 "compares across reruns; write the signal's number, not only the "
+                                                 "position it gives")):
+        if kind not in found:
+            changes += 1
+            lines.append(f"ADD  {name}: no file here looks like {WHAT[kind]}; write {name} - {why}")
+    if not changes:
+        head = (f"{folder}: every file reads in testbench's standard format. `testbench numbers trading "
+                f"{(folder / 'equity.csv').as_posix()}` shows the numbers testbench computes from them.")
+    else:
+        head = (f"{folder}: {changes} change{'s' * (changes != 1)} to reach testbench's standard format "
+                "(docs/trading.md#the-files; agent_testbench.trading.files has writers that check each row):")
+    return (0 if not changes else 1), [head] + lines
+
+
+def _check_file(path: Path, folder: Path) -> tuple[str | None, list[str], str]:
+    """(the standard file it looks like, what to change, '' or what it reads as when nothing needs changing)."""
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            rows = [r for r in csv.reader(f) if any(c.strip() for c in r)]
+    except (OSError, UnicodeDecodeError, csv.Error) as exc:
+        return None, [f"it cannot be read as UTF-8 CSV ({type(exc).__name__}: {str(exc)[:200]}); save it as UTF-8, "
+                      "comma-separated"], ""
+    if not rows:
+        return None, ["it is empty; its first line is the header"], ""
+    header, body = rows[0], rows[1:51]                    # the first 50 rows tell how the file is written
+    cols = [c.strip().lower() for c in header]
+    kind = _kind(path.stem.lower(), cols)
+    if kind is None:
+        return None, [], ""
+    todo = []
+    standard = SIGNALS if kind == "signals" else FILE[kind]
+    if path.name.lower() != standard and kind != "prices":
+        todo.append(f"name it {standard}" + (" (testbench reads trades.csv next to equity.csv)" if kind != "signals"
+                                             else " (or name it in the lookahead plan's output:)"))
+    todo += _signal_advice(header, body) if kind == "signals" else _column_advice(kind, header, body)
+    if todo:
+        return kind, todo, ""
+    if kind == "signals":
+        return kind, [], (f"{WHAT[kind]}: time, symbol and {len(cols) - 2} decision column"
+                          f"{'s' * (len(cols) != 3)} ({', '.join(cols[2:][:5])}), {len(rows) - 1} rows")
+    try:
+        records = _read(kind, path, path.relative_to(folder).as_posix())
+    except TradingFileError as exc:
+        return kind, [str(p) for p in exc.problems[:MAX_PROBLEMS]], ""
+    if kind == "equity" and len(records) < 2:
+        return kind, [f"it has {len(records)} row; the numbers need at least 2 (a start and an end), one row per bar"], ""
+    day = lambda t: t.date().isoformat() if t.tzinfo is None and t.time() == dt.time() else t.isoformat()  # noqa: E731
+    span = f", {day(records[0].time)} to {day(records[-1].time)}" if records else ""
+    hint = ("; it has no benchmark column, so `beats: buy_and_hold` reads closes from prices.csv next to it"
+            if kind == "equity" and "benchmark" not in cols else "")
+    return kind, [], f"reads as testbench's {FILE[kind]}: {len(records)} row{'s' * (len(records) != 1)}{span}{hint}"
+
+
+def _kind(stem: str, cols: list[str]) -> str | None:
+    for kind, words in BY_NAME:
+        if any(w in stem for w in words):
+            return kind
+    has = lambda key: key in cols or any(s in cols for s in SYNONYMS[key])          # noqa: E731
+    if has("side") or (has("quantity") and has("price")):
+        return "trades"
+    if "equity" in cols or has("equity"):
+        return "equity"
+    if "close" in cols or "open" in cols:
+        return "prices"
+    return None
+
+
+def _renames(kind: str, cols: list[str], wanted: tuple = ()) -> dict:
+    """{standard column: the column of this file that holds it}, for the standard columns it lacks."""
+    out, known = {}, wanted or REQUIRED[kind] + OPTIONAL[kind]
+    for need in known:
+        if need in cols:
+            continue
+        alt = next((c for c in cols if c in SYNONYMS.get(need, ()) and c not in out.values() and c not in known),
+                   None)
+        if need == "time" and alt is None and "" in cols:
+            alt = ""                                       # pandas' unnamed index
+        if alt is not None:
+            out[need] = alt
+    return out
+
+
+def _column(cols: list[str], body: list, name: str) -> list[str]:
+    i = cols.index(name)
+    return [r[i].strip() for r in body if i < len(r) and r[i].strip()]
+
+
+def _shown(header: list[str], col: str) -> str:
+    """A column as the file writes it (`Date`, not date), or the unnamed one."""
+    if col == "":
+        return "the unnamed first column"
+    cols = [c.strip().lower() for c in header]
+    return f"`{header[cols.index(col)].strip()}`"
+
+
+def _common_advice(header: list[str], body: list, wanted: tuple, kind: str) -> tuple[list[str], dict]:
+    """The renames, the standard columns to add, and the first time that is not ISO 8601; with the renames found."""
+    cols = [c.strip().lower() for c in header]
+    renames = _renames(kind, cols, wanted)
+    todo = [f"name the unnamed first column `{need}` (pandas writes its index without a name: "
+            f"df.to_csv(path, index_label='{need}'))" if alt == "" else f"rename column {_shown(header, alt)} to "
+            f"`{need}`" for need, alt in renames.items()]
+    time_col = "time" if "time" in cols else renames.get("time")
+    if time_col is not None:                              # the times as written: ISO 8601, or what to write
+        for v in _column(cols, body, time_col)[:20]:
+            try:
+                _time(v)
+            except _Bad as exc:
+                todo.append(f"{_shown(header, time_col)}: {exc}")
+                break
+    return todo, renames
+
+
+def _column_advice(kind: str, header: list[str], body: list) -> list[str]:
+    cols = [c.strip().lower() for c in header]
+    todo, renames = _common_advice(header, body, REQUIRED[kind] + OPTIONAL[kind], kind)
+    signed = False
+    if kind == "trades" and "side" not in cols and "side" not in renames:
+        qty = "quantity" if "quantity" in cols else renames.get("quantity")
+        signed = bool(qty) and any(v.startswith("-") for v in _column(cols, body, qty))
+        if signed:
+            todo.append(f"add `side`: buy where {_shown(header, qty)} is above 0 and sell where it is below, then "
+                        "write the quantity without its sign")
+    for need in REQUIRED[kind]:
+        if need not in cols and need not in renames and not (need == "side" and signed):
+            todo.append(ADD[need] + (". It has `returns`: equity is the starting cash times the running product "
+                                     "of (1 + returns)" if need == "equity" and "returns" in cols else ""))
+    side_col = "side" if "side" in cols else renames.get("side")
+    if kind == "trades" and side_col:
+        odd = sorted({v for v in _column(cols, body, side_col) if v.lower() not in SIDES})
+        if odd:
+            to = {v: SIDE_WORDS.get(v.lower()) for v in odd[:4]}
+            words = ", ".join(f"{v!r} as {w}" if w and w != "?" else repr(v) for v, w in to.items())
+            todo.append(f"{_shown(header, side_col)} holds {words}: write buy or sell on every row (opening a short "
+                        "is a sell, covering it a buy)")
+    return todo
+
+
+def _signal_advice(header: list[str], body: list) -> list[str]:
+    cols = [c.strip().lower() for c in header]
+    todo, renames = _common_advice(header, body, ("time", "symbol"), "signals")
+    todo += [ADD[need] for need in ("time", "symbol") if need not in cols and need not in renames]
+    if not [c for c in cols if c not in ("time", "symbol") and c not in renames.values()]:
+        todo.append("add a column per decision after time and symbol: the signal's number (not only the position "
+                    "it gives - a number changes on every peek ahead, a 0 or 1 only when it flips)")
+    return todo
+
+
+def main(argv=None) -> int:
+    import argparse
+    ap = argparse.ArgumentParser(prog="python -m agent_testbench.trading.files",
+                                 description="Say what a backtest's own CSV files need to read as testbench's standard "
+                                             "trading files (equity.csv, trades.csv, signals.csv): what to rename and "
+                                             "what to add. Exit 0 every file reads, 1 something to change, 2 nothing "
+                                             "to read.")
+    ap.add_argument("--check", required=True, metavar="FOLDER", help="the folder the backtest writes its files to")
+    a = ap.parse_args(argv)
+    code, lines = check_folder(a.check)
+    print("\n".join(lines))
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

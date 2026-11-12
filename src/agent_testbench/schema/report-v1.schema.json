@@ -221,6 +221,17 @@
           "artifacts": {"type": "array", "items": {"type": "string"}},
           "downloads": {"type": "array", "items": {"type": "string"}},
           "stdout_tail": {"type": "string"},
+          "runtime": {
+            "type": "object",
+            "description": "what the step ran on, found where it ran and the way the step finds it (its PATH and folder): the Python its command's `python` resolves to (or the one it names, python3.11, .venv/bin/python) - from uvx, uv tool or pipx the project's own; for a notebook the kernel and the Python it ran on; node, go or cargo when the command uses them. testbench diff names a change between runs",
+            "properties": {
+              "kernel": {"type": "string", "description": "a notebook step: the kernel it ran on"},
+              "python": {"$ref": "#/$defs/interpreter"},
+              "node": {"$ref": "#/$defs/interpreter"},
+              "go": {"$ref": "#/$defs/interpreter"},
+              "cargo": {"$ref": "#/$defs/interpreter"}
+            }
+          },
           "web": {"type": "object"},
           "gpu": {
             "type": ["object", "null"],
@@ -233,6 +244,14 @@
     }
   },
   "$defs": {
+    "interpreter": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": {"type": "string", "description": "the program, as the step's PATH resolved it"},
+        "version": {"type": ["string", "null"], "description": "what it says its version is (3.12.1, v20.11.1, 1.22.1); null when it did not say"}
+      }
+    },
     "fingerprint": {
       "type": "object",
       "description": "rows of a data file: their size, sha256, count and first and last time",

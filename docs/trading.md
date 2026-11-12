@@ -189,6 +189,27 @@ out/trades.csv: 3 problems
 out/equity.csv, line 1 (the header): no `time` column. The column with no name may hold the times (pandas writes an unnamed index that way): name it, e.g. df.to_csv(path, index_label='time'). equity.csv needs time, equity (optional: cash, position_value, benchmark); found: equity
 ```
 
+A backtest that writes files of its own (a `portfolio.csv` with a `Date` and a `Value`, an `orders.csv` with signed
+sizes and a `Commission`) gets the whole list for a folder at once, file by file - which standard file each looks like, what to
+rename, what to add - and then the standard files that are missing (exit 0 every file reads, 1 something to change):
+
+```
+$ python -m agent_testbench.trading.files --check out
+out: 10 changes to reach testbench's standard format (docs/trading.md#the-files; agent_testbench.trading.files has writers that check each row):
+FIX  orders.csv, which looks like the fills:
+     - name it trades.csv (testbench reads trades.csv next to equity.csv)
+     - rename column `Date` to `time`
+     - rename column `Size` to `quantity`
+     - rename column `Commission` to `fee`
+     - add `side`: buy where `Size` is above 0 and sell where it is below, then write the quantity without its sign
+FIX  portfolio.csv, which looks like the equity curve:
+     - name it equity.csv (testbench reads trades.csv next to equity.csv)
+     - rename column `Date` to `time`
+     - rename column `Value` to `equity`
+     - `Date`: '01/02/2024' is not an ISO 8601 time; write year-month-day first, e.g. 2024-01-02, 2024-01-02T15:30:00 or 2024-01-02T15:30:00Z
+ADD  signals.csv: no file here looks like the decisions; write signals.csv - time, symbol, then a column per decision - what the lookahead plan compares across reruns; write the signal's number, not only the position it gives
+```
+
 ## The numbers
 
 `compute()` and the command line return every one of these keys, always, in this order; a number that is not

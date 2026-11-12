@@ -287,6 +287,16 @@ def test_version_and_help_load_no_yaml_notebooks_or_core(tmp_path, args):
     assert len(loaded) <= MAX_START_MODULES, f"`testbench {args[0]}` imports {len(loaded)} modules: {loaded}"
 
 
+def test_plugin_test_help_names_every_kind():
+    """`plugin test --kind` lists the kinds as written in cli.py (so making the parser loads no core module, and
+    Python 3.14's argparse, which expands help as options are added, has nothing left to fill in): the same as
+    plugins.KINDS."""
+    from agent_testbench.plugins import KINDS
+    assert CLI.PLUGIN_KINDS.split(", ") == list(KINDS)
+    text = CLI.commands(CLI.build_parser())["plugin test"].format_help()
+    assert " ".join(f"test it as this kind: {CLI.PLUGIN_KINDS}".split()) in " ".join(text.split())
+
+
 def test_every_command_has_examples_that_parse():
     ap = CLI.build_parser()
     found = CLI.commands(ap)

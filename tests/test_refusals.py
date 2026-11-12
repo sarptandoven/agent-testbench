@@ -5,6 +5,7 @@ row names the fix it must find, not just any command."""
 import copy
 import hashlib
 import shlex
+import sys
 
 import pytest
 
@@ -21,6 +22,9 @@ SCORED = {"project": "scoring", "plans": {"score": {"steps": [
     {"name": "score", "run": "python score.py", "max_minutes": 1,
      "expect": {"json": {"metrics.json": {"score": ">= 0"}}}}]}}}
 LOOP = "loop start score --metric metrics.json:score --budget-usd 0"
+DAEMON_DOWN = "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?"
+# a docker CLI whose daemon is not running: it says so and exits 1, whatever it is asked
+DOCKER_DOWN = [sys.executable, "-c", f"import sys; sys.stderr.write({DAEMON_DOWN!r}); sys.exit(1)"]
 
 
 def make(tmp_path, monkeypatch, machine, kind: str):
@@ -28,6 +32,10 @@ def make(tmp_path, monkeypatch, machine, kind: str):
     root = tmp_path / "p"
     root.mkdir()
     if kind == "none":
+        return root
+    if kind == "docker-down":                            # free docker plans, on a machine whose Docker is stopped
+        write_config(root, {"project": "p", "docker": {"command": DOCKER_DOWN},
+                            "plans": {"box": {"backend": "docker", "steps": [STEP]}}})
         return root
     if kind in ("git", "dirty", "nogit"):
         (root / "score.py").write_text(SCORER)
@@ -138,6 +146,13 @@ REFUSALS = [
      "`testbench session start gpu-1`"),
     ("priced", "session start long --backend modal --max-minutes 2000", 2,      # refused here: nothing reaches Modal
      ["a modal session can last at most 24 hours"], "`testbench session start long --backend modal --max-minutes 1440`"),
+    # the machine: a backend that could only fail is refused before a run or session is recorded
+    ("docker-down", "run box", 2, ["Refused: plan box runs on the docker backend", "Docker is installed but not running "
+                                   "here: start it (Docker Desktop, or `sudo systemctl start docker` on Linux)",
+                                   "Nothing was started or recorded."], "`testbench run box`"),
+    ("docker-down", "session start s1 --backend docker", 2, ["Refused: session s1 runs on the docker backend",
+                                                             "Docker is installed but not running here: start it"],
+     "`testbench session start s1 --backend docker`"),
     # loops
     ("nogit", LOOP, 2, ["this folder is not in a git repository", "`git init`"], f"`testbench {LOOP}`"),
     ("dirty", LOOP, 2, ["uncommitted changes, which a revert could lose", "?? scratch.py", "`git stash -u`"],
@@ -203,3 +218,48 @@ def test_approval_is_a_persons_yes_never_the_agents(tmp_path, monkeypatch, capsy
         said = text.split("Needs approval:", 1)[1]
         assert "Ask a person; only they approve it, with `testbench " in said and "--approve`" in said, text
         assert "rerun with --approve" not in said and "you may approve" not in said.lower(), text
+
+
+def test_a_stopped_docker_is_refused_before_anything_is_recorded(tmp_path, monkeypatch, capsys, machine_limits):
+    """Docker installed, its daemon stopped: `run` and `session start` say so and how to start it (exit 2) before a
+    run or session folder, a ledger line or the machine's ledger is written - not a run that errors after starting.
+    Money is still the first question: a plan over the budget hears that."""
+    root = make(tmp_path, monkeypatch, machine_limits, "docker-down")
+    monkeypatch.chdir(root)
+    for args in ("run box", "run box --foreground", "session start s1 --backend docker"):
+        with pytest.raises(SystemExit) as ex:
+            CLI.main(shlex.split(args))
+        out = capsys.readouterr()
+        text = out.out + out.err
+        assert ex.value.code == 2 and "Docker is installed but not running here" in text, (args, text)
+        assert "Traceback" not in text, text
+    assert not (root / ".testbench").exists(), "no run folder, session folder or ledger in the project"
+    assert not (machine_limits / "ledger.jsonl").exists(), "and nothing on this machine's ledger"
+    over = {"project": "p", "budget": {"max_run_usd": 1}, "docker": {"command": DOCKER_DOWN, "usd_per_hour": 60},
+            "plans": {"box": {"backend": "docker", "steps": [{**STEP, "max_minutes": 30}]}}}
+    write_config(root, over)
+    with pytest.raises(SystemExit):
+        CLI.main(["run", "box"])
+    text = capsys.readouterr().out
+    assert text.startswith("Refused: plan box could cost up to") and "Docker" not in text, text
+
+
+@pytest.mark.parametrize("says, code, finding", [
+    (DAEMON_DOWN, 1, "Docker is installed but not running here: start it"),
+    ("Got permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock", 1,
+     "Docker is running, but this user may not use it (permission denied on its socket): add yourself to the docker "
+     "group (`sudo usermod -aG docker $USER`, then log in again)"),
+    ("error: something else went wrong", 3, "`"),
+    (None, 0, ""),
+])
+def test_the_docker_preflight_says_what_is_wrong(says, code, finding):
+    from agent_testbench.backends import docker_backend as D
+    script = f"import sys; sys.stderr.write({says!r}); sys.exit({code})" if says else "print('27.3.1')"
+    said = D.backend.preflight({"docker": {"command": [sys.executable, "-c", script]}})
+    assert said.startswith(finding) and (said == "") == (says is None), said
+    if code == 3:
+        assert "info` did not work (exit 3: error: something else went wrong); check with `testbench doctor`" in said
+    gone = D.backend.preflight({"docker": {"command": ["no-such-docker-cli-here"]}})
+    assert gone.startswith("Docker is not installed here (no `no-such-docker-cli-here` command): install it"), gone
+    silent = D.backend.preflight({"docker": {"command": [sys.executable, "-c", "import sys; sys.exit(0)"]}})
+    assert silent.startswith("`"), "a docker info that names no server version: its daemon did not answer"

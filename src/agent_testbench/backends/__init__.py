@@ -109,6 +109,12 @@ class Backend:
         """(what, ok, detail) lines for `testbench doctor`: is this machine set up to use the backend?"""
         return []
 
+    def preflight(self, cfg: dict) -> str:
+        """Why work cannot start on this backend here and now, and the fix, in plain words ('' when it can): asked
+        just before a run or session is started (once the budget allows it), before its folder or a ledger line is
+        written, so a launch that could only fail is refused instead (exit 2, nothing recorded). Quick: seconds."""
+        return ""
+
     def prices(self, cfg: dict) -> list[str]:
         """Lines for `testbench prices`: what this backend charges for, and where each price comes from."""
         return []

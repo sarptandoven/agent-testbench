@@ -12,8 +12,12 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
+import shutil
+import sys
 import time
+import warnings
 from pathlib import Path
 
 import nbformat
@@ -38,6 +42,13 @@ class ParamError(NotebookError):
     pass
 
 
+try:                                                   # nbformat 5.1.4 and later warn about cells without ids
+    from nbformat.warnings import MissingIDFieldWarning
+except ImportError:                                    # older: they do not
+    class MissingIDFieldWarning(Warning):
+        pass
+
+
 # ---- reading ----------------------------------------------------------------------------------------------
 
 def plain_python(path: str | Path) -> str | None:
@@ -57,7 +68,9 @@ def read(path: str | Path):
     from_percent."""
     p = Path(path)
     if p.suffix.lower() != ".py":
-        return nbformat.read(str(p), as_version=4)
+        with warnings.catch_warnings():                # a notebook saved without cell ids gets them, without a word
+            warnings.simplefilter("ignore", MissingIDFieldWarning)
+            return nbformat.read(str(p), as_version=4)
     problem = plain_python(p)
     if problem:
         raise NotebookError(problem)
@@ -224,6 +237,30 @@ def kernel(nb) -> tuple[str, str, str | None]:
                         f"installed on this machine. Install {how}. Then `jupyter kernelspec list` should show "
                         f"{name}. Kernels installed here: {', '.join(sorted(installed)) or 'none'}. (For a remote "
                         "backend, install it in the machine's image or setup.)")
+
+
+def kernel_executable(name: str, env: dict) -> str | None:
+    """The program a kernel starts (a Python kernel's Python), found as jupyter_client finds it: `python`, `python3`
+    or `python3.N` in a kernelspec is the Python running testbench, another name is looked up on the kernel's PATH."""
+    from jupyter_client.kernelspec import KernelSpecManager
+    try:
+        argv = KernelSpecManager().get_kernel_spec(name).argv
+    except Exception:
+        return None
+    exe = argv[0] if argv else None
+    major, minor = sys.version_info[:2]
+    if exe in ("python", f"python{major}", f"python{major}.{minor}"):
+        return sys.executable
+    if exe and not os.path.isabs(exe):
+        return shutil.which(exe, path=env.get("PATH")) or exe
+    return exe
+
+
+def project_kernel(python: str):
+    """A kernel spec that starts an IPython kernel on another Python (a project's virtualenv, with ipykernel)."""
+    from jupyter_client.kernelspec import KernelSpec
+    return KernelSpec(argv=[python, "-m", "ipykernel_launcher", "-f", "{connection_file}"],
+                      display_name="Python 3 (the project's virtualenv)", language="python", env={}, metadata={})
 
 
 # ---- parameters -------------------------------------------------------------------------------------------
@@ -434,10 +471,14 @@ del _u, _o, _s, _t, _d, _g, _c, _n, _load
 
 
 def run(nb_path: str | Path, *, params: dict, cells: list[int] | None, deadline: float, env: dict,
-        workdir: str | Path, out_dir: str | Path, live_log: Path | None = None, shim: str | Path | None = None) -> dict:
+        workdir: str | Path, out_dir: str | Path, live_log: Path | None = None, shim: str | Path | None = None,
+        python: str | None = None, python_note: str = "") -> dict:
     """Execute a notebook's code cells in one kernel; stop at the first error or when the deadline passes.
 
-    Returns {"status": "passed"|"failed"|"timeout", "cells": [...], "error": {...}|None, "images": [...]}.
+    python: the Python a python3 kernel runs on instead of testbench's own - a project's virtualenv that has
+    ipykernel (executor.kernel_python); python_note: why it is not, for the log. Returns {"status":
+    "passed"|"failed"|"timeout", "cells": [...], "error": {...}|None, "images": [...], "kernel": its name,
+    "python": the Python it ran on (None for a kernel in another language)}.
     """
     from nbclient import NotebookClient
     from nbclient.exceptions import CellExecutionError, CellTimeoutError, DeadKernelError
@@ -454,8 +495,25 @@ def run(nb_path: str | Path, *, params: dict, cells: list[int] | None, deadline:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     log = open(live_log, "a", buffering=1) if live_log else None
+    spec = project_kernel(python) if python and kernel_name == "python3" else None
+    exe = python if spec else kernel_executable(kernel_name, env) if lang == "python" else None
+    if spec and note:
+        note = note.replace("(the Python that runs testbench)", "(the project's Python)")
 
     class Client(NotebookClient):
+        def create_kernel_manager(self):                         # the project's Python: a kernel spec of its own
+            if spec is None:
+                return super().create_kernel_manager()
+            from jupyter_client.kernelspec import KernelSpecManager
+
+            class OneSpec(KernelSpecManager):
+                def get_kernel_spec(self, kernel_name):
+                    return spec
+
+            self.km = self.kernel_manager_class(kernel_name=self.kernel_name, kernel_spec_manager=OneSpec(),
+                                                config=self.config)
+            return self.km
+
         def process_message(self, msg, cell, cell_index):       # stream printed text as it happens
             content = msg.get("content", {})
             if log and msg.get("msg_type") == "stream":
@@ -464,12 +522,19 @@ def run(nb_path: str | Path, *, params: dict, cells: list[int] | None, deadline:
                 log.write(_clean("\n".join(content.get("traceback", []))) + "\n")
             return super().process_message(msg, cell, cell_index)
 
-    if log and (note or kernel_name != "python3"):
-        log.write(f"[testbench] {note or f'kernel {kernel_name} ({lang})'}\n")
+    if log:                                                     # which kernel, on which Python, and why
+        if note or kernel_name != "python3":
+            log.write(f"[testbench] {note or f'kernel {kernel_name} ({lang})'}\n")
+        if spec:
+            log.write(f"[testbench] the kernel runs on the project's Python: {python}\n")
+        elif python_note and kernel_name == "python3":
+            log.write(f"[testbench] {python_note}\n")
+        elif exe:
+            log.write(f"[testbench] the kernel runs on the Python {exe}\n")
     client = Client(nb, kernel_name=kernel_name, allow_errors=False, timeout=None,
                     resources={"metadata": {"path": str(workdir)}})
     result = {"status": "passed", "cells": [], "error": None, "images": [], "code_cells": len(code_idx),
-              "kernel": kernel_name}
+              "kernel": kernel_name, "python": exe}
     try:
         with client.setup_kernel(env=env):              # env is the kernel's whole environment
             if shim and lang == "python":

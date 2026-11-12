@@ -477,6 +477,44 @@ def mock_files(plans) -> list[tuple[str, str, str, dict]]:
     return out
 
 
+STARTERS = HERE / "starters"        # starters/RECIPE/FILE: a file a built-in recipe's commands run, to start from
+
+
+def starters(recipe: dict, root: Path) -> list[tuple[str, Path, str]]:
+    """The starter files a recipe ships for the files its plans' commands run (`python backtest.py`) that the project
+    does not have: [(file name, the starter, the command that names it)]. Only the built-in recipes have starters."""
+    folder = STARTERS / str(recipe.get("name") or "")
+    if not folder.is_dir():
+        return []
+    from ..executor import commands
+    runs = [str(step.get("run")) for name, plan in (recipe.get("plans") or {}).items()
+            for step in (C.long_form(name, plan).get("steps") or []) if isinstance(step, dict) and step.get("run")]
+    out = []
+    for f in sorted(p for p in folder.iterdir() if p.is_file()):
+        named = next((line for line in runs if any(f.name in words for words in commands(line))), None)
+        if named and not (Path(root) / f.name).exists() and f.name not in [n for n, _, _ in out]:
+            out.append((f.name, f, named))
+    return out
+
+
+def write_starters(recipes: list[dict], root: Path) -> list[str]:
+    """Write each recipe's starter files the project does not have (never over a file: one made meanwhile is left
+    as it is); lines for the person, saying what was written and why."""
+    told = []
+    for r in recipes:
+        for name, src, command in starters(r, root):
+            try:
+                with open(Path(root) / name, "x", encoding="utf-8", newline="") as f:
+                    f.write(src.read_text(encoding="utf-8"))
+            except FileExistsError:
+                continue
+            doc = src.read_text(encoding="utf-8").split('"""')       # its docstring's first line, after the colon
+            about = doc[1].strip().splitlines()[0].split(": ", 1)[-1].rstrip(".") if len(doc) > 2 else ""
+            told.append(f"Wrote {name}, a starter for `{command}` (the plans run it, and there was no {name} here)"
+                        + (f": {about}" if about else "") + ". Its docstring says what it reads and writes.")
+    return told
+
+
 def check(text: str, root: Path) -> dict:
     """The config `text` loads as; a RecipeError saying why when it would not load, so nothing broken is written."""
     try:

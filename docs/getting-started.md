@@ -26,9 +26,10 @@ proof record, so `testbench report`, `verify`, `runs`, `ui` and `diff` already w
 `.testbench/` (the run, and `check.json`: what it found). A failing plan prints its report - the cell, the line, the
 check it missed; a plan that needs something this machine lacks (Node.js, Go, cargo-nextest, pytest, Chromium, a
 package the notebook imports) is skipped with the command that installs it. With `uvx agent-testbench check`
-nothing is installed at all; the notebook's kernel then runs in uvx's own environment, so `check` names the
-packages to add (`uvx --with scikit-learn --with matplotlib agent-testbench check`). Exit codes: 0 every plan that
-ran passed, 1 one failed, 2 nothing to check.
+nothing is installed at all: `run:` steps use the project's own Python (its `.venv`), and so does the notebook's
+kernel when that `.venv` has ipykernel; otherwise the kernel runs in uvx's own environment, so `check` names the
+packages to add (`uvx --with scikit-learn --with matplotlib agent-testbench check`). Each report says which Python
+every step ran on. Exit codes: 0 every plan that ran passed, 1 one failed, 2 nothing to check.
 
 ### 2. See what this machine can run
 
