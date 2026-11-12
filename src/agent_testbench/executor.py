@@ -242,6 +242,7 @@ def execute_plan(plan: dict, *, project_dir: str | Path, run_dir: str | Path, wo
                 "PATH": step_path(project)}
     stop_reason = None
     seal, seen, steps = None, {}, plan["steps"]                 # data: cut in the run's copy (dataseal.py)
+    look = None                                                 # lookahead: the reruns on data cut earlier
 
     def save():
         (run_dir / "report.json").write_text(json.dumps(report, indent=1, default=str))
@@ -256,22 +257,40 @@ def execute_plan(plan: dict, *, project_dir: str | Path, run_dir: str | Path, wo
             try:
                 report["data"] = seal.begin()
                 base_env.update(seal.env())
-            except dataseal.DataError as exc:
+                if plan.get("lookahead"):
+                    reruns = dataseal.Lookahead(plan, workdir, run_dir)
+                    try:
+                        reruns.begin(seal.seen)
+                    except BaseException:
+                        reruns.close()
+                        raise
+                    look = reruns
+            except (dataseal.DataError, OSError) as exc:
                 report["status"], stop_reason, steps = "error", f"its data could not be prepared: {exc}", []
         for i, step in enumerate(steps, 1):
+            if look:                                            # the next rerun: the copy put back, the data cut
+                try:
+                    why = look.switch(step.get("lookahead") or 0)
+                except (OSError, ValueError) as exc:            # DataError is a ValueError
+                    report["status"], why = "error", f"a look-ahead rerun could not be prepared: {exc}"
+                if why:
+                    stop_reason = why
+                    break
             _event(run_dir, event="step_start", step=step["name"], index=i)
             save()
             mark = len(sampler.samples)
             step_dir = run_dir / "steps" / f"{i:02d}-{slug(step['name'])}"
             if seal:                                            # what the step's data files hold, as evidence
-                seen[step.get("window")] = data = seal.window(step["window"]) if step.get("window") else seal.seen
+                seen[step.get("window")] = data = (seal.window(step["window"]) if step.get("window")
+                                                   else look.seen if look else seal.seen)
                 step_dir.mkdir(parents=True, exist_ok=True)
                 (step_dir / "data.json").write_text(json.dumps(data, indent=1))
             result = run_step(step, project=project, workdir=workdir, step_dir=step_dir,
                               base_env=base_env, gpu=lambda: sampler.reading(mark), run_started=report["started"])
             result["dir"] = f"steps/{i:02d}-{slug(step['name'])}"
-            if step.get("window"):
-                result["window"] = step["window"]
+            for key in ("window", "lookahead"):
+                if step.get(key):
+                    result[key] = step[key]
             report["steps"].append(result)
             _event(run_dir, event="step_end", step=step["name"], index=i, status=result["status"], minutes=result["minutes"])
             save()
@@ -287,10 +306,30 @@ def execute_plan(plan: dict, *, project_dir: str | Path, run_dir: str | Path, wo
             seal.close()
             if seal.windows:                                    # a line per walk-forward window
                 report["windows"] = dataseal.windows_report(plan, report["steps"], seen)
+        if look:                                                # the decisions compared, and the verdict
+            try:
+                report["lookahead"] = look.finish(report["steps"])
+            except Exception as exc:                            # never lose the report over it: say so
+                report["lookahead"] = {"verdict": "not checked", "ok": False, "finding": "look-ahead not checked: "
+                                       f"comparing the decisions failed: {type(exc).__name__}: {str(exc)[:500]}"}
+            finally:
+                look.close()
+        if plan.get("model_cutoff"):                            # results on data the model may already know
+            from . import dataseal
+            try:
+                report["model_cutoff"] = dataseal.cutoff_record(plan, report)
+            except (ValueError, TypeError, KeyError) as exc:          # unknown is a failure only with require_after
+                strict = bool((plan["model_cutoff"] or {}).get("require_after"))
+                report["model_cutoff"] = {"level": "failed" if strict else "warning", "ok": not strict,
+                                          "finding": "model_cutoff could not be compared with this run's data: "
+                                                     f"{type(exc).__name__}: {exc}"}
         if report["status"] not in ("cancelled", "error"):
             ran = report["steps"]
             report["status"] = "passed" if ran and len(ran) == len(plan["steps"]) and all(s["status"] == "passed" for s in ran) \
                 else "failed"
+            if any(isinstance(report.get(k), dict) and not report[k].get("ok", True)
+                   for k in ("lookahead", "model_cutoff")):
+                report["status"] = "failed"
         report["stopped_because"] = stop_reason
         report["finished"] = time.time()
         report["minutes"] = round((report["finished"] - report["started"]) / 60, 2)

@@ -20,6 +20,13 @@ It works in three places:
 A row is cut by its own time, so files whose rows are not in time order (several symbols) are cut right. Times are
 ISO 8601, as in the trading files. A cut without a zone is compared with each time as it is written (its wall
 clock); with a zone, with zoned times as instants.
+
+Two more checks on a strategy live here. A plan's `lookahead:` runs its steps once, then again on the data cut at
+earlier times (cut_lookahead, at launch; plan.json holds a copy of the steps per rerun, so the worst case and every
+hard stop count them), each rerun from the copy of the project as it was before the first step (Lookahead, in the
+executor), and fails when a decision dated before a cut differs from the plan's own run. A plan's `model_cutoff:`
+(the training cutoff of the model a strategy asks, as the person states it) marks the test periods that start after
+it and warns about the rest (cutoff_record, at the end of the run).
 """
 from __future__ import annotations
 
@@ -32,8 +39,11 @@ import csv
 import datetime as dt
 import hashlib
 import json
+import math
+import os
 import re
 import shutil
+import stat
 import tempfile
 from pathlib import Path, PurePosixPath
 
@@ -43,6 +53,12 @@ ROLE = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,40}")
 ROLE_KEYS = ("path", "time", "holdout_from")
 TIME_NAMES = ("time", "date", "timestamp", "datetime")
 WALK_KEYS = ("data", "train", "test", "step", "anchored", "start")
+LOOKAHEAD_KEYS = ("data", "output", "cuts")
+CUTOFF_KEYS = ("date", "require_after")
+CUTS, MAX_CUTS = 4, 20                                 # look-ahead reruns: the default, and the most a plan may ask
+WARMUP = 0.2                                           # no look-ahead cut leaves fewer than this share of the rows
+REL_TOL, ABS_TOL = 1e-9, 1e-12                         # decision numbers this close are the same decision
+LOOKAHEAD_EXAMPLE = "{data: prices, output: out/signals.csv, cuts: 4}"
 DURATION = re.compile(r"([1-9][0-9]{0,4})\s*(d|w|mo|y)")
 UNITS = {"d": "day", "w": "week", "mo": "month", "y": "year"}
 MAX_WINDOWS = 200
@@ -156,10 +172,27 @@ def check_plan(where: str, plan: dict, data: dict) -> None:
         if holdout:
             raise ConfigError(f"`{where}`: a plan opens the holdout (holdout:) or walks forward through the rows "
                               "before it (walk_forward:), not both; make them two plans")
-    cut = (bool(sealed) and not holdout) or wf is not None
+    la = plan.get("lookahead")
+    if la is not None:
+        plan["lookahead"] = la = _lookahead(where, la, data)
+        runs = counted(1 + la["cuts"], "time")
+        if holdout:
+            raise ConfigError(f"`{where}`: lookahead: runs the steps {runs}, and this plan opens the holdout "
+                              f"(holdout:), so it would open the sealed rows {runs}, each counted. Check for "
+                              "look-ahead on a plan that does not open the holdout (the rows before the seal show it "
+                              "just as well): take lookahead: out of this plan, and put it on a copy of it without "
+                              "holdout:")
+        if wf is not None:
+            raise ConfigError(f"`{where}`: a plan walks forward (walk_forward:) or checks for look-ahead "
+                              f"(lookahead:), not both: every window would run {runs}. The strategy's code is the "
+                              "same in every window, so check it once: put lookahead: on a plan of its own with the "
+                              "same steps and no walk_forward:")
+    if plan.get("model_cutoff") is not None:
+        plan["model_cutoff"] = _cutoff(where, plan["model_cutoff"], data)
+    cut = (bool(sealed) and not holdout) or wf is not None or la is not None
     if cut:
         if plan.get("workdir") == "inplace":
-            what = "walk-forward windows" if wf else "the sealed data"
+            what = "walk-forward windows" if wf else "the data of each look-ahead rerun" if la else "the sealed data"
             raise ConfigError(f"`{where}.workdir` is inplace, but this plan's steps see {what} cut to the rows they "
                               "may read, which is done only in a copy of the project, never in your files; remove "
                               "`workdir: inplace` (the plan runs in a copy)")
@@ -200,6 +233,69 @@ def _walk(where: str, wf, data: dict) -> dict:
     out["anchored"] = anchored
     out["start"] = None if wf.get("start") is None else _when(f"{at}.start", wf["start"], "2020-01-01")
     return out
+
+
+def _lookahead(where: str, la, data: dict) -> dict:
+    """lookahead: {data, output, cuts}: run the steps, then rerun them `cuts` times on the data cut earlier, and
+    compare the decisions dated before each cut."""
+    at = f"{where}.lookahead"
+    if not isinstance(la, dict):
+        raise ConfigError(f"`{at}` is {{data, output, cuts}}: the steps run once, then again on the data cut at "
+                          f"earlier times, and the decisions they wrote are compared, e.g. {LOOKAHEAD_EXAMPLE}")
+    for key in la:
+        if key not in LOOKAHEAD_KEYS:
+            raise ConfigError(f"`{at}` has no {key!r}{near(key, LOOKAHEAD_KEYS)}; use {', '.join(LOOKAHEAD_KEYS)}, "
+                              f"e.g. {LOOKAHEAD_EXAMPLE}")
+    if not data:
+        raise ConfigError(f"`{at}` cuts a data file by its time column; name the data first, under `data:`, e.g. "
+                          f"{EXAMPLE}")
+    role = la.get("data")
+    if role is None and len(data) == 1:
+        role = next(iter(data))
+    if role not in data:
+        raise ConfigError(f"`{at}.data` names the data to cut: one of {', '.join(data)}"
+                          + (f"; there is no {role!r}{near(role, data)}" if role is not None else ""))
+    output = la.get("output")
+    text = output.strip().replace("\\", "/") if isinstance(output, str) else ""
+    p = PurePosixPath(text)
+    if not text or p.is_absolute() or re.match(r"[A-Za-z]:", text) or ".." in p.parts or not p.parts \
+            or p.parts[0] == ".testbench" or any(c in text for c in "*?["):
+        raise ConfigError(f"`{at}.output` is {output!r}; name the file the steps write the strategy's decisions to, "
+                          "relative to the project, e.g. out/signals.csv: a CSV file with a time column, a symbol "
+                          "column and one column per decision")
+    cuts = la.get("cuts", CUTS)
+    if not (number(cuts, positive=True) and float(cuts).is_integer() and float(cuts) <= MAX_CUTS):
+        raise ConfigError(f"`{at}.cuts` is {cuts!r}; it is how many times the steps run again on data cut earlier, "
+                          f"a whole number from 1 to {MAX_CUTS} (default {CUTS}); each rerun adds the steps' "
+                          "max_minutes to the worst case")
+    return {"data": role, "output": p.as_posix(), "cuts": int(cuts)}
+
+
+def _cutoff(where: str, mc, data: dict) -> dict:
+    """model_cutoff: a date, or {date, require_after}: the last day the model the strategy asks may know."""
+    at = f"{where}.model_cutoff"
+    example = "model_cutoff: 2024-10-01, or model_cutoff: {date: 2024-10-01, require_after: true}"
+    if isinstance(mc, dict):
+        for key in mc:
+            if key not in CUTOFF_KEYS:
+                raise ConfigError(f"`{at}` has no {key!r}{near(key, CUTOFF_KEYS)}; use {', '.join(CUTOFF_KEYS)}, "
+                                  f"e.g. {example}")
+        if mc.get("date") is None:
+            raise ConfigError(f"`{at}.date` is the training cutoff of the model the strategy asks (the last day it "
+                              f"may know), e.g. {example}")
+        after = mc.get("require_after", False)
+        if not isinstance(after, bool):
+            raise ConfigError(f"`{at}.require_after` is true (a run with no test period after the cutoff fails) or "
+                              "false (it gets a warning, the default)")
+        date = _when(f"{at}.date", mc["date"], "2024-10-01")
+    elif isinstance(mc, (str, dt.date)):
+        date, after = _when(at, mc, "2024-10-01"), False
+    else:
+        raise ConfigError(f"`{at}` is the training cutoff of the model the strategy asks, e.g. {example}")
+    if not data:
+        raise ConfigError(f"`{at}` is compared with the dates of the data the plan reads, which testbench knows only "
+                          f"from `data:`; name the data there, e.g. data: {EXAMPLE}")
+    return {"date": date, "require_after": after}
 
 
 def check_plans(plans: dict) -> None:
@@ -525,6 +621,47 @@ def window_count(cfg: dict, plan_name: str) -> int:
     return len(windows_of(cfg, plan_name)) or 1
 
 
+# ---- look-ahead: the steps again on data cut earlier, and their decisions compared ------------------------------
+
+def _from_seconds(s: float, sample: dt.datetime) -> dt.datetime:
+    """A time from _seconds() back, written the way sample is (zoned times come back in UTC)."""
+    t = EPOCH + dt.timedelta(seconds=s)
+    return t if sample.tzinfo else t.replace(tzinfo=None)
+
+
+def cut_lookahead(la: dict, found: dict, where: str = "lookahead") -> list[dict]:
+    """Where a look-ahead plan's reruns cut its data, from the rows it sees (those before the seal): `cuts` times
+    spread evenly from the time that keeps the first 20% of the rows to the last time (whose rerun lacks only the
+    last rows), each at a time of a row, so the same data always gives the same cuts. [{k, n, before, rows}]: the
+    rerun sees the `rows` rows before `before`."""
+    times, kept = found["times"], found["kept"]
+    need = math.ceil(len(times) * WARMUP)
+    eligible, last = [], None                          # (time, rows before it) for each time that keeps enough rows
+    for i, t in enumerate(times):
+        if t != last:
+            if i and i >= need:
+                eligible.append((t, i))
+            last = t
+    n = la["cuts"]
+    if len(eligible) < n:
+        span = (f"{kept['path']} has {counted(kept['rows'], 'row')}"
+                + (f" from {_text(kept['first'])} to {_text(kept['last'])}" if kept["rows"] else "")
+                + (f" before the seal at {_text(found['cut'])}" if found.get("cut") is not None else ""))
+        raise DataError(f"`{where}`: {span}; a look-ahead rerun keeps at least the first {WARMUP:.0%} of them and "
+                        f"cuts at the time of a row, which leaves {counted(len(eligible), 'time')} to cut at, fewer "
+                        f"than cuts: {n}. Lower {where}.cuts to {max(1, len(eligible))}, or use more data")
+    picks = [eligible[len(eligible) * j // n - 1] for j in range(1, n + 1)]
+    return [{"k": j, "n": n, "before": _text(_from_seconds(t, kept["first"])), "rows": rows}
+            for j, (t, rows) in enumerate(picks, 1)]
+
+
+def _crash_checks(expect: dict) -> dict:
+    """A rerun's checks: only whether it ran (exit code, notebook errors); the plan's own run is the one graded, and
+    a rerun on less data may well miss a number the full run makes. (Nor does a rerun keep artifacts: the evidence
+    of the claim is the plan's own run's, and its decisions are kept apart, in steps/lookahead/.)"""
+    return {k: v for k, v in (expect or {}).items() if k in ("exit_code", "no_errors")}
+
+
 # ---- launch: the plan as it will run, and the record of its data -------------------------------------------------
 
 def prepare(root: Path, cfg: dict, plan_name: str) -> dict | None:
@@ -556,8 +693,17 @@ def prepare(root: Path, cfg: dict, plan_name: str) -> dict | None:
         if spec["holdout_from"] and not found["sealed"]["rows"]:
             record[role]["note"] = (f"no row is at or after holdout_from {spec['holdout_from']} yet (the last is "
                                     f"{_text(found['file']['last'])}), so nothing is sealed")
-        view[role] = {"path": spec["path"], "time": spec["time"], "cut": cut}
+        view[role] = {"path": spec["path"], "time": spec["time"], "cut": cut, "holdout_from": spec["holdout_from"]}
     plan["data"] = view
+    la = plan.get("lookahead")
+    if la:                                             # the plan's own run, then a copy of the steps per cut
+        found = scan(Path(root), la["data"], data[la["data"]], cfg.get("exclude"))
+        at = cut_lookahead(la, found, f"plans.{plan_name}.lookahead")
+        plan["lookahead"] = {**la, "first": _text(found["kept"]["first"]), "last": _text(found["kept"]["last"]),
+                             "rows": found["kept"]["rows"], "at": at}
+        plan["steps"] = list(plan["steps"]) + [
+            {**copy.deepcopy(s), "name": f"{s['name']} (look-ahead cut {c['k']}/{c['n']})", "artifacts": [],
+             "expect": _crash_checks(s.get("expect")), "lookahead": c["k"]} for c in at for s in plan["steps"]]
     if wf:
         windows = windows_of(cfg, plan_name)
         plan["walk_forward"] = {**wf, "windows": windows}
@@ -745,6 +891,383 @@ def windows_report(plan: dict, steps: list[dict], seen: dict) -> list[dict]:
         out.append({**{k: v for k, v in w.items()}, "window": f"{w['k']}/{w['n']}", "status": status,
                     "steps": [s["name"] for s in ran], "data": seen.get(w["k"])})
     return out
+
+
+def _unlink(p: Path) -> None:
+    try:
+        p.unlink()
+    except PermissionError:                            # a read-only file: Windows will not delete it otherwise
+        os.chmod(p, stat.S_IWRITE)
+        p.unlink()
+
+
+def _mounts(folder, names) -> list[str]:
+    """copytree's ignore: a filesystem mounted in the copy (a notebook may mount a drive there, as Colab's
+    /content/drive) is not the project's, so it is never copied or deleted."""
+    return [n for n in names if os.path.ismount(os.path.join(folder, n))]
+
+
+def _remove(p: Path) -> None:
+    """Delete a file or folder of the run's copy: a link is removed, never followed, and a mounted filesystem in it is
+    left alone (so is the folder that holds it)."""
+    if p.is_symlink() or not p.is_dir():
+        _unlink(p)
+        return
+    if os.path.ismount(p):
+        return
+    folders = []
+    for top, names, files in os.walk(p):
+        folders.append(top)
+        for n in files + [n for n in names if os.path.islink(os.path.join(top, n))]:
+            _unlink(Path(top, n))
+        names[:] = [n for n in names if not os.path.islink(os.path.join(top, n)) and n not in _mounts(top, [n])]
+    for folder in reversed(folders):
+        with contextlib.suppress(OSError):             # it still holds a mounted filesystem
+            os.rmdir(folder)
+
+
+def _copy(src: Path, dest: Path) -> None:
+    if src.is_dir() and not src.is_symlink():
+        shutil.copytree(src, dest, symlinks=True, ignore=_mounts, dirs_exist_ok=True)
+    else:
+        shutil.copy2(src, dest, follow_symlinks=False)
+
+
+class Lookahead:
+    """A look-ahead plan's reruns in the run's copy of the project. The plan's own steps run first; before each
+    rerun, the output they wrote is kept as evidence (steps/lookahead/), the copy is put back as it was before the
+    first step (nothing a run wrote - a cached model, an old output - reaches the next) and the role's files are cut
+    to the rows before the rerun's cut. finish() compares the decisions and says what was found."""
+
+    def __init__(self, plan: dict, workdir: Path, run_dir: Path):
+        self.plan, self.spec = plan, plan["lookahead"]
+        self.role = plan["data"][self.spec["data"]]
+        self.workdir, self.run_dir = Path(workdir), Path(run_dir)
+        self.at = {c["k"]: c for c in self.spec["at"]}
+        self.keep_dir = self.run_dir / "steps" / "lookahead"
+        self.current, self.kept, self.problem = 0, {}, None
+        self.snapshot: Path | None = None
+        self.seen: dict = {}
+
+    def _top(self) -> list[Path]:
+        """The copy's own entries: not the one that holds the run's folder, nor testbench's own (on colab they are in
+        /content with the project)."""
+        run = self.run_dir.resolve()
+        return [p for p in sorted(self.workdir.iterdir()) if not p.name.startswith(".testbench")
+                and not run.is_relative_to(p.resolve()) and not os.path.ismount(p)]
+
+    def begin(self, seen: dict) -> None:
+        """Before the first step, with the seal cut: no old output, and the copy kept as the reruns start from it."""
+        if self.plan.get("workdir") != "copy":
+            raise DataError("this plan's look-ahead reruns would cut its data and put back files in the project "
+                            "folder itself; they run only in a copy of the project (workdir: copy, which "
+                            "testbench.yaml sets for a plan with lookahead:). Launch it with `testbench run`")
+        self.seen = seen
+        out = self.workdir / self.spec["output"]
+        if out.is_file() or out.is_symlink():
+            out.unlink()
+        self.snapshot = Path(tempfile.mkdtemp(prefix="testbench-lookahead-"))
+        for p in self._top():
+            _copy(p, self.snapshot / p.name)
+
+    def _keep(self, group: int) -> None:
+        if group in self.kept:
+            return
+        src = self.workdir / self.spec["output"]
+        name = "full" if group == 0 else f"cut-{group}"
+        dest = self.keep_dir / f"{name}{PurePosixPath(self.spec['output']).suffix or '.csv'}"
+        if src.is_file():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dest)
+            self.kept[group] = dest
+        else:
+            self.kept[group] = None
+
+    def switch(self, group: int) -> str | None:
+        """Ready the copy for the steps of `group` (0: the plan's own run, k: rerun k); a reason to stop when the
+        plan's own run left nothing to compare."""
+        if group == self.current:
+            return None
+        self._keep(self.current)
+        if self.current == 0:                           # nothing to compare with: no rerun runs
+            _, why = self._read(0)
+            if why:
+                self.problem = why
+                return why
+        for p in self._top():                           # the copy as it was before the first step
+            _remove(p)
+        for p in sorted(self.snapshot.iterdir()):
+            _copy(p, self.workdir / p.name)
+        out = self.workdir / self.spec["output"]
+        if out.is_file() or out.is_symlink():
+            out.unlink()
+        cut, role, r = _parse(self.at[group]["before"]), self.spec["data"], self.role
+        parts = []
+        for rel, p in _files(self.workdir / r["path"], r["path"], role):
+            found = _pass(p, f"{r['path']}/{rel}" if rel else r["path"], role, r.get("time"), cut, out=p)
+            parts.append((rel, found["kept"]))
+        self.seen = {**self.seen, role: _plain(_combined(r["path"], parts))}
+        self.current = group
+        return None
+
+    def _read(self, group: int) -> tuple[dict | None, str | None]:
+        path = self.kept.get(group)
+        where = "the plan's own run" if group == 0 else self._rerun(group)
+        if path is None:
+            return None, (f"look-ahead not checked: {where} wrote no {self.spec['output']}, the file lookahead.output "
+                          "names, so there is nothing to compare. Have the steps write the strategy's decisions there "
+                          "(a CSV file with a time column, a symbol column when there are several, and one column per "
+                          "decision), even when there are none (the header alone), or fix lookahead.output")
+        try:
+            return _decisions(path, self.spec["output"]), None
+        except DataError as exc:
+            return None, f"look-ahead not checked: {self.spec['output']} from {where} cannot be read: {exc}"
+
+    def _rerun(self, k: int) -> str:
+        return f"the rerun with data before {self.at[k]['before']} (cut {k}/{self.at[k]['n']})"
+
+    def finish(self, steps: list[dict]) -> dict:
+        """report.json's `lookahead`: each rerun, the rows compared, and the verdict with its finding."""
+        self._keep(self.current)
+        n = self.spec["cuts"]
+        per = len(self.plan["steps"]) // (1 + n)
+        full_ran = [s for s in steps if not s.get("lookahead")]
+        full, why = self._read(0) if len(full_ran) == per else (None, None)
+        out = {"data": self.spec["data"], "output": self.spec["output"], "cuts": n, "first": self.spec.get("first"),
+               "last": self.spec.get("last"), "rows": self.spec.get("rows"),
+               "tolerance": {"relative": REL_TOL, "absolute": ABS_TOL},
+               "full": {"output": self._evidence(0), "decisions": len(full["rows"]) if full is not None else None},
+               "runs": [], "rows_compared": 0, "verdict": "not checked", "ok": False, "finding": why or self.problem}
+        firsts, crash = [], None
+        for k, c in sorted(self.at.items()):
+            ran = [s for s in steps if s.get("lookahead") == k]
+            run = {"k": k, "n": c["n"], "before": c["before"], "data_rows": c["rows"], "status": "skipped",
+                   "rows_compared": 0, "differences": 0, "first_difference": None, "output": self._evidence(k)}
+            bad = next((s for s in ran if s.get("status") != "passed"), None)
+            if bad:
+                run["status"] = "crashed"
+                run["detail"] = crash_text = self._crash(k, bad)
+                crash = crash or crash_text
+            elif ran and len(ran) < per:                # cancelled in the middle of it
+                run["status"] = "incomplete"
+            elif ran and full is not None:
+                rows, problem = self._read(k)
+                if problem:
+                    run.update(status="crashed", detail=problem)
+                    crash = crash or problem
+                else:
+                    compared, diffs = compare_decisions(full, rows, _parse(c["before"]))
+                    run.update(status="different" if diffs else "same", rows_compared=compared,
+                               differences=len(diffs), first_difference=diffs[0] if diffs else None)
+                    out["rows_compared"] += compared
+                    if diffs:
+                        firsts.append((diffs[0]["order"], k, diffs[0]))
+            if run["first_difference"]:
+                run["first_difference"] = {key: v for key, v in run["first_difference"].items() if key != "order"}
+            out["runs"].append(run)
+        if firsts:
+            _, k, d = min(firsts, key=lambda x: (x[0], x[1]))
+            out.update(verdict="look-ahead", finding=self._found(d, k))
+        elif crash:
+            out.update(verdict="crashed", finding=crash)
+        elif full is not None and all(r["status"] == "same" for r in out["runs"]):
+            out.update(verdict="clean", ok=True, finding=(
+                f"look-ahead: none found - {counted(n, 'rerun')} with the data cut at "
+                f"{', '.join(c['before'] for c in self.spec['at'])} decided every one of the "
+                f"{out['rows_compared']} rows dated before its cut as the plan's own run did"))
+        elif not out["finding"]:
+            out["finding"] = ("look-ahead not checked: the plan stopped before every rerun had run and been compared"
+                              if full is not None else "look-ahead not checked: the plan's own run stopped before its "
+                              "last step, so no rerun ran")
+        return out
+
+    def _evidence(self, group: int) -> str | None:
+        path = self.kept.get(group)
+        return path.relative_to(self.run_dir).as_posix() if path else None
+
+    def _crash(self, k: int, bad: dict) -> str:
+        err = bad.get("error") or {}
+        failed = [c["detail"] for c in bad.get("expectations") or [] if not c.get("ok")]
+        what = ("ran past its max_minutes" if bad.get("status") == "timeout" else f"failed: {failed[0]}" if failed
+                else f"failed: {err.get('ename')}: {str(err.get('evalue'))[:200]}" if err else str(bad.get("status")))
+        log = f" (its log: {bad['dir']}/log.txt)" if bad.get("dir") else ""
+        return (f"look-ahead not checked: {self._rerun(k)} crashed - step `{bad['name']}` {what}{log}. That is a "
+                f"crash, not look-ahead: make the steps run on less data (this rerun had "
+                f"{counted(self.at[k]['rows'], 'row')}), then run the plan again")
+
+    def _found(self, d: dict, k: int) -> str:
+        """The first difference in words: AAPL at 2024-03-04 was `1` with data up to ... but `0` with data before
+        ... - the strategy used rows after 2024-03-04 to decide it."""
+        who = f"{d['symbol']} at {d['time']}" if d.get("symbol") else f"the decision at {d['time']}"
+        if d.get("column") and d.get("columns", 1) > 1:
+            who += f" ({d['column']})"
+
+        def side(which: str) -> str:
+            value = d.get(which)
+            if d.get("missing") == which:
+                return "had no row"
+            if value is None:
+                return "had a row" if d.get("missing") else "had no value"
+            text = str(value)
+            return f"was `{text if len(text) <= 40 else text[:37] + '...'}`"
+        return (f"look-ahead: {who} {side('full')} with data up to {self.spec.get('last')} but {side('cut')} with "
+                f"data before {self.at[k]['before']} - the strategy used rows after {d['time']} to decide it")
+
+    def close(self) -> None:
+        if self.snapshot:
+            shutil.rmtree(self.snapshot, ignore_errors=True)
+            self.snapshot = None
+
+
+def _decisions(path: Path, name: str) -> dict:
+    """A decisions file: {columns, rows: {(time, symbol, nth): {t, time, symbol, values: {column: text}}}}. The time
+    column is the first of time, date, timestamp, datetime; `symbol` is optional; every other named column is a
+    decision."""
+    try:
+        text = Path(path).read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise DataError(f"it is not UTF-8 text ({exc.reason}); write it as UTF-8 CSV") from None
+    rows = [r for r in csv.reader(text.splitlines())]
+    header_at = next((i for i, r in enumerate(rows) if any(c.strip() for c in r)), None)
+    if header_at is None:
+        raise DataError("it is empty; its first line is the header: time, symbol and one column per decision")
+    header = [c.strip() for c in rows[header_at]]
+    lower = [c.lower() for c in header]
+    at = next((lower.index(n) for n in TIME_NAMES if n in lower), None)
+    if at is None:
+        raise DataError(f"line {header_at + 1} (the header) has no time column (looked for {', '.join(TIME_NAMES)}; "
+                        f"found: {', '.join(c for c in header if c) or 'nothing'})")
+    sym = lower.index("symbol") if "symbol" in lower else None
+    cols = [(i, c) for i, c in enumerate(header) if c and i not in (at, sym)]
+    if not cols:
+        raise DataError(f"line {header_at + 1} (the header) has no decision column: besides {header[at]}"
+                        + (" and symbol" if sym is not None else "") + ", add one column per decision, e.g. signal")
+    out, count = {}, {}
+    for n, r in enumerate(rows[header_at + 1:], header_at + 2):
+        if not any(c.strip() for c in r):
+            continue
+        cell = r[at].strip() if at < len(r) else ""
+        try:
+            t = _parse(cell)
+        except ValueError as exc:
+            raise DataError(f"line {n}, column `{header[at]}`: {exc}") from None
+        symbol = (r[sym].strip() if sym < len(r) else "") if sym is not None else None
+        base = (_seconds(t), symbol or "")
+        count[base] = count.get(base, -1) + 1
+        out[base + (count[base],)] = {"t": t, "time": cell, "symbol": symbol,
+                                      "values": {c: (r[i].strip() if i < len(r) else None) for i, c in cols}}
+    return {"columns": [c for _, c in cols], "rows": out}
+
+
+def same_decision(a, b) -> bool:
+    """Two decision values are the same when their text is, or both are numbers within REL_TOL of each other
+    (ABS_TOL near 0), or both are NaN."""
+    if a is None or b is None:
+        return a is None and b is None
+    if a == b:
+        return True
+    try:
+        x, y = float(a), float(b)
+    except ValueError:
+        return False
+    return (math.isnan(x) and math.isnan(y)) or math.isclose(x, y, rel_tol=REL_TOL, abs_tol=ABS_TOL)
+
+
+def compare_decisions(full: dict, cut: dict, before: dt.datetime) -> tuple[int, list[dict]]:
+    """(rows compared, differences) between the decisions of the plan's own run and a rerun's, over the rows dated
+    before the rerun's cut: a row in one and not the other is a difference too. Differences come earliest first."""
+    columns = list(dict.fromkeys(full["columns"] + cut["columns"]))
+    keys = sorted({k for side in (full, cut) for k, r in side["rows"].items() if _before(r["t"], before)})
+    diffs = []
+    for key in keys:
+        a, b = full["rows"].get(key), cut["rows"].get(key)
+        row = a or b
+        base = {"time": row["time"], "symbol": row["symbol"], "columns": len(columns), "order": key}
+        if a is None or b is None:
+            one = len(columns) == 1
+            diffs.append({**base, "column": columns[0] if one else None, "missing": "full" if a is None else "cut",
+                          "full": a["values"].get(columns[0]) if a and one else None,
+                          "cut": b["values"].get(columns[0]) if b and one else None})
+            continue
+        for col in columns:
+            va, vb = a["values"].get(col), b["values"].get(col)
+            if not same_decision(va, vb):
+                diffs.append({**base, "column": col, "full": va, "cut": vb})
+                break
+    return len(keys), diffs
+
+
+# ---- model_cutoff: results on data a model may have been trained on ----------------------------------------------
+
+def _span(texts) -> list[dt.datetime]:
+    out = []
+    for text in texts:
+        try:
+            out.append(_parse(text))
+        except (ValueError, TypeError):
+            pass
+    return sorted(out, key=_seconds)
+
+
+def _windows_named(ws: list[dict]) -> str:
+    return f"window {ws[0]['window']}" if len(ws) == 1 else f"windows {ws[0]['window']} to {ws[-1]['window']}"
+
+
+def cutoff_record(plan: dict, report: dict) -> dict | None:
+    """report.json's `model_cutoff` for a plan with model_cutoff: whether its test periods - each walk-forward window's
+    test, the holdout's rows for the plan that opens it, else every row the steps saw - start after the last day the
+    model may know (a date: that whole day; a time: that instant), with the warning (or, with require_after and no
+    period after it, the failure) in words. Windows get after_cutoff: true when they count. None without one."""
+    mc = plan.get("model_cutoff")
+    if not isinstance(mc, dict) or not mc.get("date"):
+        return None
+    date, require = mc["date"], bool(mc.get("require_after"))
+    c = _parse(date)
+    edge = c + (dt.timedelta(days=1) if re.fullmatch(r"\d{4}-\d\d-\d\d", date) else dt.timedelta(microseconds=1))
+    after = lambda t: not _before(t, edge)                                                       # noqa: E731
+    data = [d for d in (report.get("data") or {}).values() if isinstance(d, dict)]
+    firsts, lasts = _span(d.get("first") for d in data), _span(d.get("last") for d in data)
+    windows = [w for w in report.get("windows") or [] if isinstance(w, dict) and w.get("test_start")]
+    tail = "only windows after the cutoff, or a forward paper record, count as evidence"
+    if windows:
+        for w in windows:
+            w["after_cutoff"] = after(_parse(w["test_start"]))
+        before, counting = [w for w in windows if not w["after_cutoff"]], [w for w in windows if w["after_cutoff"]]
+        periods = [{"what": f"window {w['window']}", "start": w["test_start"], "end": w["test_end"],
+                    "after_cutoff": w["after_cutoff"]} for w in windows]
+        if not before:
+            level, text = "ok", (f"model cutoff {date}: every window tests on data after it (from "
+                                 f"{counting[0]['test_start']}), which the model cannot have been trained on")
+        else:
+            level = "failed" if require and not counting else "warning"
+            text = (f"results on {_windows_named(before)} (test periods from {before[0]['test_start']} to "
+                    f"{before[-1]['test_end']}) may use what the model already knew (model_cutoff {date}); only "
+                    f"windows after the cutoff ({_windows_named(counting) if counting else 'none'} here), or a "
+                    "forward paper record, count as evidence")
+    else:
+        if not firsts or not lasts:
+            return None
+        start, last = firsts[0], lasts[-1]
+        holdout = _span(r.get("holdout_from") for r in (plan.get("data") or {}).values() if isinstance(r, dict))
+        if plan.get("holdout") and holdout:
+            start = holdout[0]
+        what = "the holdout" if plan.get("holdout") and holdout else "data"
+        periods = [{"what": what, "start": _text(start), "end": _text(last), "after_cutoff": after(start)}]
+        if after(start):
+            level, text = "ok", (f"model cutoff {date}: the results here are on data from {_text(start)} on, after "
+                                 "it, which the model cannot have been trained on")
+        else:
+            level = "failed" if require else "warning"
+            text = (f"results on data up to {_text(last)} may use what the model already knew (model_cutoff {date}); "
+                    f"{tail}" if not after(last) else
+                    f"results on {what} from {_text(start)} to {_text(last)} include days up to model_cutoff {date}, "
+                    f"which the model may already know; {tail}")
+    if level == "failed":
+        text += (" - and model_cutoff.require_after is true, so with no test period here starting after the cutoff "
+                 "this run fails. Test on rows after it (newer data, or walk-forward windows that start after it), "
+                 "or keep a forward paper record")
+    return {"date": date, "require_after": require, "level": level, "ok": level != "failed", "finding": text,
+            "periods": periods}
 
 
 def sealed_view(cfg: dict) -> dict:

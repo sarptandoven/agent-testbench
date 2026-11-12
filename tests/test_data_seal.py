@@ -383,10 +383,12 @@ def test_the_sealed_backtest_example_tunes_walks_forward_and_opens_the_holdout_o
     shipped = (root / "data" / "prices.csv").read_bytes()
     subprocess.run([sys.executable, "make_prices.py"], cwd=root, check=True, timeout=60)
     assert (root / "data" / "prices.csv").read_bytes() == shipped, "make_prices.py writes the file that ships"
-    for plan in ("backtest", "walk-forward", "holdout"):
+    for plan in ("backtest", "walk-forward", "lookahead", "holdout"):
         r = cli(root, "run", plan, "--foreground")
         assert r.returncode == 0 and f"# PASS - plan `{plan}`" in r.stdout, r.stdout + r.stderr
     assert "## Walk-forward: 7 windows, 7 passed" in (runs.all_runs(root)[1] / "report.md").read_text()
+    look = (runs.all_runs(root)[2] / "report.md").read_text()
+    assert "## Look-ahead: none found (4 reruns, " in look and "**FAIL**" not in look
     assert "this run is the first to open it" in r.stdout and "the whole file, the sealed rows from" in r.stdout
     r = cli(root, "run", "holdout", "--foreground")
     assert r.returncode == 2 and "plans.holdout.holdout.max_opens is 1" in r.stdout

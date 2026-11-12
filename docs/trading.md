@@ -57,8 +57,10 @@ reader's message in its log.
 Numbers testbench computes can still come from a strategy tuned on the very rows they grade. testbench.yaml's `data:`
 names the price files the plans read and seals the latest rows (`holdout_from`): every plan but the one that opens
 the holdout sees the file cut before them, each opening is counted (and `max_opens` refuses more), a
-`walk_forward:` plan runs window by window with no row from the future, and every report records the sha256 of the
-data its steps saw, which `testbench verify` and `testbench diff` compare: [Sealed data](trading-data.md).
+`walk_forward:` plan runs window by window with no row from the future, a `lookahead:` plan reruns the steps on the
+data cut earlier and fails when a decision changes with rows after its day, `model_cutoff:` flags results on data a
+language model the strategy asks may already know, and every report records the sha256 of the data its steps saw,
+which `testbench verify` and `testbench diff` compare: [Sealed data](trading-data.md).
 
 ## The files
 

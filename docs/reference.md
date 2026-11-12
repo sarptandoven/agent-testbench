@@ -216,6 +216,8 @@ plans:
     description: what this plan proves
     holdout: true | {max_opens: 1}     # this plan opens the sealed rows of data: (one plan may); counted, max refused
     walk_forward: {data: prices, train: 24mo, test: 6mo, step: 6mo, anchored: false, start: 2020-01-01}
+    lookahead: {data: prices, output: out/signals.csv, cuts: 4}   # rerun on data cut earlier; compare decisions
+    model_cutoff: 2024-10-01 | {date: 2024-10-01, require_after: true}   # the LLM's training cutoff (your statement)
     steps: [...]
 ```
 
@@ -228,7 +230,13 @@ plan with `holdout:` sees every row, and its reports say how many times they wer
 runs the steps once per window (lengths: a whole number and `d`, `w`, `mo` or `y`; `step` defaults to `test`), each
 with only the rows before its test end and `TESTBENCH_WINDOW`, `TESTBENCH_TRAIN_START` / `_END`,
 `TESTBENCH_TEST_START` / `_END`; its worst case is the steps' minutes times the windows, cut from the data at launch
-(fewer than 2 windows is refused there, exit 2).
+(fewer than 2 windows is refused there, exit 2). `lookahead:` ([look-ahead](trading-data.md#look-ahead)) runs the
+steps once, then `cuts` more times (default 4, at most 20) with the role's data cut at earlier times (never in the
+first 20% of rows), each from a fresh copy of the project, and fails the plan when a decision in `output` (a CSV
+file: time, symbol, decision columns) dated before a cut differs from the plan's own run; its worst case is the
+steps' minutes times 1 + `cuts`, and it is refused at load with `holdout:` or `walk_forward:`. `model_cutoff:`
+([model cutoff](trading-data.md#model-cutoff)) warns in every report whose test periods start on or before that day
+(each walk-forward window is marked), and with `require_after: true` fails a run with no test period after it.
 
 Short forms, for plans that run on this machine (`backend: local`) with the default `max_minutes`. Each is read
 as the long form it stands for, so runs, estimates, reports and plan.json are the same as if it were written out:
@@ -381,7 +389,9 @@ testbench loop stop
 | `worst_case_usd`, `approved`, `remote_stop` | the bound checked before launch, whether a person approved it, and the hard stop on the remote side |
 | `data` | with `data:` in testbench.yaml, each role: `path`, `view` (`sealed`, `full`, `windows`), the `bytes`, `sha256`, `rows`, `first` and `last` time of what the steps saw, the whole `file` at launch and the `sealed` rows' (each step folder's `data.json` holds what its data was, as evidence) |
 | `holdout` | a run of the plan that opens the holdout: `opened_before` (earlier openings of these sealed rows), `max_opens`, the `first` and `last` of them |
-| `windows` | a walk-forward plan: each window's dates, train and test rows, outcome and data |
+| `windows` | a walk-forward plan: each window's dates, train and test rows, outcome and data (and `after_cutoff` with `model_cutoff:`) |
+| `lookahead` | a plan with `lookahead:`: the data's `first` and `last`, each rerun's cut (`before`), `data_rows`, `status`, `rows_compared`, `differences` and `first_difference`, the `verdict` (`clean`, `look-ahead`, `crashed`, `not checked`), `ok` and the `finding` in words |
+| `model_cutoff` | a plan with `model_cutoff:`: the `date`, `require_after`, the test `periods` and whether each is after it, the `level` (`ok`, `warning`, `failed`) and the `finding` in words |
 
 ```
 testbench verify [RUN]                     # exit 0: every evidence file matches; 1: what changed, went missing or was added
@@ -415,6 +425,7 @@ report.html       the report as one page with the evidence images (`testbench re
 driver.log        the background driver's own output
 steps/NN-name/    log.txt, result.json, executed.ipynb, cellNN_imageK.png, downloads/, artifacts/, screenshots,
                   data.json (with data:, what the step's data files held)
+steps/lookahead/  with lookahead:, the decisions each run wrote: full.csv, cut-1.csv, ...
 work/             on local, the copy of the project a `workdir: copy` plan runs in (sealed files cut)
 ```
 

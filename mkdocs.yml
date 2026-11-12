@@ -38,7 +38,7 @@ nav:
   - Mock clients (LLMs, brokers): mocks.md
   - Trading:
       - Files and metrics: trading.md
-      - "Sealed data: holdout, walk-forward": trading-data.md
+      - "Sealed data: holdout, walk-forward, look-ahead": trading-data.md
       - Overfitting statistics: trading-stats.md
   - Rescue a notebook: rescue.md
   - Backends:

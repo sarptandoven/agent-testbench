@@ -732,6 +732,33 @@
             "start": {"description": "When the first train period starts (default: the first row's day, or month for lengths in mo or y)", "type": "string", "pattern": "^\\d{4}-\\d\\d-\\d\\d([Tt ]\\d\\d:\\d\\d(:\\d\\d([.,]\\d{1,9})?)? ?([Zz]|[+-]\\d\\d(:?\\d\\d)?)?)?$"}
           }
         },
+        "lookahead": {
+          "description": "Catch a strategy that uses tomorrow's data today: run the steps, rerun them on the data cut earlier, and compare the decisions dated before each cut",
+          "type": ["object", "null"],
+          "required": ["output"],
+          "additionalProperties": false,
+          "properties": {
+            "data": {"description": "The data role to cut (default: the only one)", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,40}$"},
+            "output": {"description": "The CSV file the steps write the decisions to: a time column, a symbol column and one column per decision", "$ref": "#/$defs/data_path"},
+            "cuts": {"description": "How many reruns on data cut earlier (default 4); each adds the steps' max_minutes to the worst case", "type": "integer", "minimum": 1, "maximum": 20}
+          }
+        },
+        "model_cutoff": {
+          "description": "The training cutoff of the model the strategy asks (your statement): results on data up to it get a warning",
+          "anyOf": [
+            {"description": "The last day the model may know, e.g. 2024-10-01", "type": "string", "pattern": "^\\d{4}-\\d\\d-\\d\\d([Tt ]\\d\\d:\\d\\d(:\\d\\d([.,]\\d{1,9})?)? ?([Zz]|[+-]\\d\\d(:?\\d\\d)?)?)?$"},
+            {
+              "type": "object",
+              "required": ["date"],
+              "additionalProperties": false,
+              "properties": {
+                "date": {"description": "The last day the model may know, e.g. 2024-10-01", "type": "string", "pattern": "^\\d{4}-\\d\\d-\\d\\d([Tt ]\\d\\d:\\d\\d(:\\d\\d([.,]\\d{1,9})?)? ?([Zz]|[+-]\\d\\d(:?\\d\\d)?)?)?$"},
+                "require_after": {"description": "true: a run with no test period after the cutoff fails (default false: a warning)", "type": "boolean"}
+              }
+            },
+            {"type": "null"}
+          ]
+        },
         "steps": {
           "description": "The steps, run in order; a plan stops at the first that fails unless it has continue_on_failure",
           "type": "array",

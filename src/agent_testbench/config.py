@@ -31,7 +31,7 @@ DEFAULTS = {
     "sessions": {"backend": "local", "gpu": None, "idle_minutes": 10, "max_minutes": 60, "secrets": []},
 }
 PLAN_DEFAULTS = {"backend": "local", "gpu": None, "workdir": None, "description": ""}
-PLAN_DATA_KEYS = ("holdout", "walk_forward")           # a plan's keys for the data seal (dataseal.py), when written
+PLAN_DATA_KEYS = ("holdout", "walk_forward", "lookahead", "model_cutoff")   # the data seal's (dataseal.py) keys
 STEP_DEFAULTS = {"max_minutes": 10, "params": {}, "env": {}, "secrets": [], "pythonpath": [], "artifacts": [],
                  "expect": {}, "uploads": [], "cells": None, "colab_shim": True, "continue_on_failure": False,
                  "mocks": {}}
@@ -489,7 +489,7 @@ def _plan(name: str, plan: dict, root: Path, data: dict | None = None) -> dict:
     plan = {**PLAN_DEFAULTS, **plan}
     check_hardware(where, plan["backend"], plan.get("gpu"))
     if data or any(k in plan for k in PLAN_DATA_KEYS):
-        from . import dataseal                           # holdout:, walk_forward:, and a copy when data is cut
+        from . import dataseal                           # holdout:, walk_forward:, lookahead:, model_cutoff:, a copy
         dataseal.check_plan(where, plan, data or {})
     from . import backends as B
     plan["workdir"] = plan["workdir"] or ("copy" if B.get(plan["backend"]).remote else "inplace")

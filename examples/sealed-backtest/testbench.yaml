@@ -1,6 +1,7 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/sarptandoven/agent-testbench/main/src/agent_testbench/schema/testbench.schema.json
 # A strategy an agent found is a claim. Tune it on `backtest` and `walk-forward`, which never see the sealed last
-# quarter; `holdout` opens it, once (docs/trading-data.md).
+# quarter; `lookahead` checks it never uses tomorrow's data today; `holdout` opens the quarter, once
+# (docs/trading-data.md).
 project: sealed-backtest
 data:
   prices:
@@ -36,6 +37,14 @@ plans:
         expect:
           json:
             out/metrics.json: {bars: ">= 100", max_drawdown: ">= -0.3"}
+
+  lookahead:
+    description: does any decision change when the future is cut away? Four reruns on data cut earlier
+    lookahead: {data: prices, output: out/signals.csv, cuts: 4}
+    steps:
+      - name: backtest
+        run: python backtest.py
+        max_minutes: 2
 
   holdout:
     description: once, on the sealed last quarter - a second opening is refused
