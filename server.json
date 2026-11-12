@@ -8,18 +8,18 @@
     "url": "https://github.com/sarptandoven/agent-testbench",
     "source": "github"
   },
-  "version": "0.2.0",
+  "version": "0.3.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "agent-testbench",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {
           "type": "named",
           "name": "--with",
-          "value": "agent-testbench[all]==0.2.0",
+          "value": "agent-testbench[all]==0.3.0",
           "description": "The MCP server, Modal and web steps are the package's `all` extra; this puts them in the uvx environment."
         }
       ],

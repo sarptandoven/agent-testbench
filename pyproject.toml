@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-testbench"
-version = "0.2.0"
+version = "0.3.0"
 description = "A test bench your coding agent operates: live kernels and proved runs on your machine, Docker, ssh, Modal GPUs or Colab, inside a budget."
 dynamic = ["readme"]                    # README.md, with its relative links made absolute for PyPI (below)
 license = "MIT"

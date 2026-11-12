@@ -1,5 +1,91 @@
 # Changelog
 
+## 0.3.0 - not yet released
+
+Phase 3: one command to start, a small core with everything else as plug-ins, and a trading pack that will not call
+a strategy good until it survives costs, look-ahead, an untouched holdout and the number of tries it took.
+
+**Start in a minute**
+- `testbench check` (and `uvx agent-testbench check`): a first proven result with no config. It runs the plans `init`
+  would write for what it finds, here and for free, as ordinary runs with proof records; with a testbench.yaml it
+  runs every free plan and lists the paid ones with their worst case. A plan whose tool is missing is skipped with
+  the command that installs it. Also the MCP tool `check_project` and `Testbench.check()`. From uvx, uv tool or
+  pipx a step's `python` is the project's, not testbench's own.
+- testbench.yaml can be short: `plans: {tests: "pytest -q"}` is a whole plan, a list of commands runs them in order,
+  any step can be a plain command, and `project:` defaults to the folder's name. A JSON Schema (`testbench schema`)
+  gives editors autocomplete; `init` writes the line that points VS Code's YAML extension at it.
+- `testbench --help` shows a dozen core commands in three groups (`help --all` lists every one), and every refusal
+  (exit 2) says what was refused, why, and the exact command or testbench.yaml field that fixes it
+  (tests/test_refusals.py).
+- `agent_testbench.core`: a small core (load, estimate, launch, wait, report, verify) that imports no layer and no
+  optional package; importing it loads 121 modules instead of 269 (tests/test_core_boundary.py, docs/architecture.md).
+
+**Plug-ins for everything**
+- One registry (`plugins.py`) for seven kinds: backends, checks, mocks, export sinks, notifiers, recipes and metric
+  readers. Built-ins sit in the same table; a broken plug-in is reported and breaks only what uses it.
+  `testbench plugins` lists them; `testbench plugin test PACKAGE|module:attr|--installed` (and
+  `plugins.assert_conforms`) checks one against its kind's contract; every built-in keeps its contract.
+- Every `expect:` check is a plug-in, as are the mock SDKs (`StrictAPI` now runs where the step's Python lacks
+  agent-testbench), export sinks, notifiers (new: `desktop`, a notification on this machine's screen), recipes (a
+  recipe that sets budget:, pricing: or guard: never loads) and metric readers (`json`, `csv`, `junit`, `trading`;
+  `testbench numbers READER [PATH]`). An example package for each kind is in `examples/plugins/`.
+
+**Trading**
+- Standard files (`trades.csv`, `equity.csv`, `prices.csv`) and testbench's own numbers from them
+  (`agent_testbench.trading.metrics`): returns, CAGR, Sharpe, Sortino, drawdowns, Calmar, FIFO round trips, fees,
+  turnover, exposure, a buy-and-hold benchmark. Checked against vectorbt and backtrader's own numbers.
+- `strategy:` and `numbers:` expectations: rules on testbench's numbers, never the strategy's. Costs must be modelled,
+  at least `min_trades` round trips are needed, and `beats: buy_and_hold` needs a benchmark.
+- The data seal: `data:` names a strategy's data; `holdout_from` seals the latest rows from every plan but the one
+  marked `holdout:` (each opening counted, `max_opens: 1` refuses a second); `walk_forward:` runs the steps once per
+  window with only the rows before its test end; every run records the sha256, rows and time range its steps saw,
+  and `verify` / `diff` catch a changed data file.
+- `lookahead:` reruns a plan on data cut at earlier times and fails it when a past decision changes ("AAPL at
+  2024-03-04 was `1` with data up to ... but `0` with data before ..."). `model_cutoff:` warns about results a model
+  may have seen in training. The worst case and every hard stop count every rerun and window.
+- Overfitting statistics from the papers, standard library only (`trading.stats`): probabilistic and deflated Sharpe
+  ratios, minimum track record and backtest length, PBO by CSCV, Benjamini-Hochberg. `testbench loop` over a
+  strategy reports "best of N tries: deflated Sharpe ... (probability the true Sharpe is above 0)" and PBO in every
+  try, status, report and notification; `--min-deflated-sharpe` keeps a lucky try from meeting the target.
+- A tear sheet made by testbench from the standard files: headline numbers with plain definitions, growth against
+  buy and hold, drawdowns, monthly returns, trades, caveats - in HTML reports, `testbench ui`, the dashboard and
+  `testbench report --tearsheet`.
+- Strict mock brokers: `mocks: [alpaca]`, `[ccxt]` or `[ib_async]` fill orders from a prices file with fees and
+  slippage, refuse a live account unless `allow_live: true`, and count orders, fills and fees for `mock_calls:`.
+
+**For everyone**
+- A VS Code extension (`editors/vscode`): plans, runs and the open loop, the HTML report, today's spend in the status
+  bar, offline autocomplete; a plan that needs approval runs only after a person clicks "Approve and run" in a
+  dialog showing its worst case. `plans`, `runs`, `spend` and `loop status` have `--json` forms.
+- `testbench share RUN --to DEST` publishes a run's proof as a static page (a folder, a branch to push, S3): it lists
+  every file first, needs a person's yes, never publishes state, keys or secret values, and scrubs this machine's
+  paths. `testbench verify --from URL_OR_FOLDER` checks a published copy anywhere. `testbench badge` writes a README
+  badge.
+- Accessibility: scoped table headers, alt text naming the step and file, a visible focus ring, tested contrast in
+  light and dark, and a dashboard that keeps keyboard focus across updates.
+
+**Integrations**
+- MCP resources (`testbench://plans`, `runs`, a run's report, report.json and evidence, the loop, the notes, the
+  schema) under the dashboard's rules, and prompts (`prove-this-change`, `find-why-this-fails`, `tune-with-a-loop`,
+  `check-a-strategy`).
+- `testbench ci --for gitlab|azure|circleci|shell` writes a CI job (pinned version, JUnit the CI shows, runs kept,
+  every refusal a failure, never an approval); `check` and `run` take `--junit FILE`.
+- `tools.for_openai_agents()`, `for_langchain()` and `for_claude_agent_sdk()`: the MCP tools as each framework's own
+  tool objects through one call path; the model is never offered an approval flag.
+
+**Trust**
+- docs/threat-model.md: who can do what, what each cannot, how, and the test that proves it.
+- The guard hook reads commands with their quoting taken off: `--approve` in quotes, with backslashes, in a variable,
+  through xargs, `bash -c`, a subshell, an option before the subcommand, or Python's `approve=True` asks the person;
+  so do edits that move the limits (TESTBENCH_USER_DIR) or turn hooks off, and `testbench share`.
+- MCP: when the client can ask the person, the person is always asked - `approved_by_person=true` no longer skips
+  that question; the HTTP server checks Host and Origin with mcp 1.x too; every argument stays a value.
+- A secret's value printed by the code becomes `[secret]` in the report and evidence before they are hashed.
+- Watchdog and supervisor intervals cannot be stretched or broken from the environment; results from a Colab VM
+  unpack only inside the run folder on every Python.
+- Fuzz tests (configs, short forms, budgets, the guard, MCP arguments, the dashboard; `TESTBENCH_FUZZ_EXAMPLES=N`)
+  and mutation testing of budget.py and the guard hook (`tools/mutate.py`, 98.4% of mutants killed).
+
 ## 0.2.0 - 2026-11-12
 
 - `testbench selftest`: ten checks of the main promises in a temporary folder, local and free, in under a minute:
