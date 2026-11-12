@@ -41,6 +41,7 @@ nav:                                  # a few sections a newcomer can scan; ever
       - Mock clients (LLMs, brokers): mocks.md
       - Rescue a notebook: rescue.md
       - Proof records: proof-records.md
+      - Reproducibility: reproducibility.md
       - "Share a run: a page, a badge": share.md
       - "Watch: rerun on change": watch.md
       - Live dashboard: dashboard.md

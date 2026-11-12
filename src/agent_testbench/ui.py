@@ -118,6 +118,31 @@ def build(root: Path, cfg: dict) -> Path:
             except (ValueError, TypeError, KeyError, AttributeError, IndexError, OSError):
                 body.append(f"<li><b>{e(p.parent.name)}</b>: its state.json cannot be read</li>")
         body.append("</ul>")
+    from .repro import VERDICT, all_repros               # testbench repro: the same plan, the same evidence?
+    repros = all_repros(root)
+    if repros:
+        body.append("<h2>Reproducibility</h2><ul>")
+        for d in reversed(repros):
+            rid = str(d.get("id"))
+            try:
+                if d.get("error"):
+                    raise ValueError(d["error"])
+                folder = root / ".testbench" / "repro" / rid
+                md = folder / "repro.md"
+                link = ""
+                if md.is_file():
+                    (folder / "report.html").write_text(R.page(f"repro {rid}", f"<pre>{e(md.read_text())}</pre>"))
+                    link = f" &middot; <a href='../repro/{e(rid)}/report.html'>report</a>"
+                o, ids = d["outputs"], [str(r.get("run_id")) for r in d["runs"]]
+                verdict = VERDICT.get(d["verdict"], str(d["verdict"]))
+                cls = "passed" if d.get("reproduced") else "failed"
+                body.append(f"<li><b>{e(rid)}</b>: <span class={cls}>{e(verdict)}</span>, "
+                            f"{e(', '.join(map(str, d['plans'])))}, {len(ids)} runs ({e(', '.join(ids))}): "
+                            f"{int(o['identical'])} outputs identical, {int(o['differs'])} differ, {int(o['missing'])} "
+                            f"missing{link}</li>")
+            except (ValueError, TypeError, KeyError, AttributeError, IndexError, OSError):
+                body.append(f"<li><b>{e(rid)}</b>: its repro.json cannot be read</li>")
+        body.append("</ul>")
     sessions = (root / ".testbench" / "sessions")
     found = sorted(d for d in sessions.iterdir() if (d / "state.json").exists()) if sessions.exists() else []
     if found:

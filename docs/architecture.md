@@ -75,7 +75,7 @@ The built-in machines other than this one are layers that plug in the same way: 
 
 **Everything else is a layer**: kinds of step (`notebook`, `web`, `mocks`), what happens after a run (`notify`,
 `export`), a run's proof for others (`share`, `badge`), work built on runs (`check`, `loop`, `watch`, `diff`,
-`rescue`) and setting a project up (`scaffold`, `recipes`, `lint`, `selftest`). `core.CORE_MODULES` and
+`repro`, `rescue`) and setting a project up (`scaffold`, `recipes`, `lint`, `selftest`). `core.CORE_MODULES` and
 `core.LAYER_MODULES` are the two lists in code.
 
 **The trading pack** is plug-ins of those kinds plus one layer, not a product of its own:

@@ -80,6 +80,16 @@ a strategy good until it survives costs, look-ahead, an untouched holdout and th
 - `tools.for_openai_agents()`, `for_langchain()` and `for_claude_agent_sdk()`: the MCP tools as each framework's own
   tool objects through one call path; the model is never offered an approval flag.
 
+**Machines and reproducibility**
+- `backend: runpod`: plans and live sessions in a RunPod pod of their own (REST API v2), any image with Python,
+  every GPU priced (raised above RunPod's last known rates). Each pod terminates itself through RunPod's API with
+  the key RunPod gives every pod - at its priced worst case, when nothing started, or once its work is done; a pod
+  that cannot is refused unless `runpod.allow_without_remote_stop: true`. Tested only against a fake RunPod.
+- `testbench repro PLAN [--times N] [--on BACKEND]`: runs a plan again (the total worst case checked and approved
+  once) and says which evidence files are the same and why the others are not - times, paths, ids, order,
+  encoding, rounding, a random seed not fixed, the platform. `--compare` does it for existing runs and shared
+  bundles. New `deterministic:` expectation: files that must match the last passing run on the same code and data.
+
 **Polish**
 - `testbench --version` and `--help` start about three times faster (about 60 ms); the CLI loads config,
   budget, reports and notebooks only for commands that use them (a test keeps it so).

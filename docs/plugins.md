@@ -113,7 +113,7 @@ All six built-in backends keep it (a test checks).
 
 ## Checks
 
-Every kind of check under a step's `expect:` is a plug-in of kind `checks`, the fifteen built-ins of
+Every kind of check under a step's `expect:` is a plug-in of kind `checks`, the sixteen built-ins of
 [Expectations](expectations.md) included: they sit in the same registry a package adds to (`strategy:` is the
 trading pack's, registered by name and imported when checks are first used). So a check from a package
 works exactly like a built-in. testbench refuses a malformed value when `testbench.yaml` loads, before anything runs.

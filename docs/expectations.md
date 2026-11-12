@@ -39,6 +39,7 @@ expect:
   gpu: {busy_pct: ">= 50", max_mem_mib: "<= 15000"}
   image:
     plots/loss.png: {like: golden/loss.png, max_diff: 0.02}
+  deterministic: [out/model.json, "out/*.csv"]    # byte for byte what the last passing run on this code made
   duration: {minutes: "<= 5"}
   mock_calls:                           # steps with mocks: [anthropic, openai], [alpaca], [ccxt], [ib_async]
     anthropic: {calls: "<= 5", output_tokens: "<= 2000"}
@@ -395,6 +396,35 @@ image:
 Make the golden image from a run you have looked at and trust (copy it from the run's `artifacts/`), and commit
 it. Fonts and anti-aliasing differ between machines, so leave a little room (0.01 to 0.03) for plots with text.
 An image last written before the run started fails, like an old JUnit report.
+
+## deterministic
+
+Files that must be byte for byte the same in every run of the plan on the same code and data: a model the training
+writes from a fixed seed, a report a script renders, a table of results. Each file is compared with the same file in
+the latest passing run of the plan on the same commit, with the same uncommitted changes (and, with
+[`data:`](trading-data.md), the same data).
+
+```yaml
+deterministic: [out/model.json, "out/*.csv"]     # paths or globs, inside the folder the step runs in
+```
+
+```
+- step: deterministic out/model.json - 1 file, nothing to compare with yet: no earlier passing run of plan train on this code (commit 224f448a6c23). Kept as evidence, so the next run on this code is compared with this one
+- step: deterministic out/model.json - 1 file identical to run 20261112-105811-train's
+- expected deterministic out/model.json: out/model.json differs from run 20261112-105811-train's: 1 key differs, numbers by up to 57.1%: n: 3 -> 7 (57.1%) - results that are not the same: numbers differ by more than a little
+- expected deterministic out/table.csv: out/table.csv differs from run 20261112-105811-train's: 2 rows of 40 differ (row 3, 9), in loss; numbers by up to 4.3e-09 relative; row 3 loss: 0.488000000 -> 0.488000001 - numbers that differ in their last digits: floating-point rounding (the order of a sum, threads)
+```
+
+The first run on new code passes and says so: there is nothing to compare with yet. Its files are kept as evidence
+(as if they were in `artifacts:`), so it is the next run's reference; a run that fails is never one. A file that
+differs is read as [`testbench repro`](reproducibility.md#how-a-difference-is-read) reads it - the first line, the
+keys, rows or pixels that differ - with the reason when it can tell (times, paths, order, a seed not fixed, the
+platform), and the runs' Python and platform when they differ. A file missing now that the reference made fails too.
+
+The comparison happens where the step runs. On this machine it reads the reference's copy; on a remote machine it
+compares sha256 and says `testbench repro --compare` reads both copies. Code outside git has no commit to match, so
+it always has nothing to compare with. Numbers that may differ in their last digits (on another platform, or with
+threads) belong in a [`json:`](#json) rule with a tolerance (`"~= 0.93 +- 0.001"`), not here.
 
 ## duration
 

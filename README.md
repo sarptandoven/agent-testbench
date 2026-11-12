@@ -65,8 +65,9 @@ $ testbench run smoke                  # after a bad edit to the data cell (abri
 ```
 
 Its report is a proof record: the commit it ran, where it ran, and the sha256 of every evidence file.
-`testbench verify` checks the evidence later, `testbench diff` says what changed between two runs, and
-`testbench share` publishes a run as a page anyone can check. Steps run notebooks, shell commands or web pages in
+`testbench verify` checks the evidence later, `testbench diff` says what changed between two runs, `testbench
+repro` runs a plan again and says which evidence is the same and why the rest is not, and `testbench share`
+publishes a run as a page anyone can check. Steps run notebooks, shell commands or web pages in
 headless Chromium; `mocks: [openai, anthropic]` tests an LLM app against strict mock SDKs (no key, no network), and
 `testbench rescue nb.ipynb` says why a notebook no longer runs. Read on: [expectations](docs/expectations.md),
 [proof records](docs/proof-records.md), [notebooks](docs/notebooks.md), [mock clients](docs/mocks.md).
@@ -241,7 +242,7 @@ session (`--backend`), so the same notebook can be proved for free here, then on
 |---|---|
 | set up | `init`, `recipes`, `schema`, `connect`, `ci`, `selftest`, `mcp`, `plugins`, `plugin test` |
 | runs | `wait`, `status`, `runs`, `cancel`, `watch` |
-| proof | `diff`, `history`, `share`, `badge`, `export`, `numbers` |
+| proof | `diff`, `repro`, `history`, `share`, `badge`, `export`, `numbers` |
 | sessions and notifications | `files`, `notify test` |
 | money | `spend`, `prices` |
 | notebooks and the lab notebook | `lint`, `rescue`, `nb`, `note` |

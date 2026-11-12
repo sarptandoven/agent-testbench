@@ -441,6 +441,7 @@ def render(d: dict) -> str:
                   f"{ev['same']} the same."]
         for label in ("changed", "added", "removed"):
             lines += [f"- {label}: `{p}`" for p in _some(ev[label])]
+        lines += _repro_hint(d)
     else:
         lines += ["Not compared: a run from before testbench recorded evidence hashes."]
     cost, mins = d["cost_usd"], d["minutes"]
@@ -461,6 +462,19 @@ def render(d: dict) -> str:
         lines += ["", "## Data", "", *_data_lines(d["data"])]
     lines += ["", "## Where it ran", "", *_where(d)]
     return R._encodable("\n".join(lines).rstrip() + "\n")
+
+
+def _repro_hint(d: dict) -> list[str]:
+    """Two runs of one plan on the same code and data whose outputs differ: testbench repro says how and why."""
+    from .repro import group_of
+    ev, a, b = d["evidence"], d["a"], d["b"]
+    outputs = [p for p in ev["changed"] + ev["added"] + ev["removed"] if group_of(p) == "output"]
+    if a["plan"] != b["plan"] or not d["code"]["same"] or not d["code"]["a"] or (d.get("data") or {}).get("changed") \
+            or not outputs:
+        return []
+    return ["", f"Both ran the same code{' and data' if (d.get('data') or {}).get('recorded') else ''}, yet "
+                f"{len(outputs)} of their outputs differ: `testbench repro --compare {a['run_id']} {b['run_id']}` "
+                "says how each differs and why (times, paths, ordering, a random seed, the platform)."]
 
 
 def _where(d: dict) -> list[str]:

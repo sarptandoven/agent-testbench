@@ -41,6 +41,7 @@ testbench plans                  # what may run, on what hardware, worst-case co
 testbench run smoke              # prints the report; long runs: testbench wait <run>
 testbench report                 # failing cell and line, missed expectations, evidence, what changed
 testbench diff smoke             # its last two runs: each number old -> new (better or worse), checks flipped, code
+testbench repro smoke            # run it twice: are the outputs the same, and if not, why (times, order, a seed)
 ```
 
 Explore to find and fix the problem; prove with a plan before you say it works. A session is not proof -

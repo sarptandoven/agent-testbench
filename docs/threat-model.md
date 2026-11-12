@@ -54,7 +54,8 @@ agent as another user, or `sudo chown root ~/.testbench/limits.yaml && sudo chmo
 today's total above max_day_usd (the project's, or this machine's for every project together).
 
 **Mechanism**: every launch goes through `budget.check` (`runs.launch`, `sessions.start`, `loop`, `watch`, `check`,
-`api`, `core`). The worst case is the hardware's rate times the sum of the steps' max_minutes plus start-up; each limit
+`repro`, `api`, `core`). A repro (a plan run N times) is checked as a whole before its first run: each run against
+max_run_usd, the total against the day limits and, above ask_above_usd, the total approved once (`budget.check_together`). The worst case is the hardware's rate times the sum of the steps' max_minutes plus start-up; each limit
 is the project's, capped by `~/.testbench/limits.yaml`, which a project can lower but never raise. Running work counts
 at its worst case until it finishes. A machine-wide lock is held from the check to the ledger entry, so two launches
 at once cannot both fit into room for one. Every number goes through `config.number`: NaN, infinity, true/false and
@@ -69,6 +70,7 @@ refuses every launch.
 - `test_units.py::test_prices_and_worst_case`, `test_budget_rules.py::test_a_worst_case_is_rounded_to_a_hundredth_of_a_cent`
 - `test_guardrails.py::test_a_budget_that_is_not_a_number_is_refused`, `test_guardrails.py::test_minutes_and_prices_that_are_not_numbers_are_refused`, `test_guardrails.py::test_the_check_fails_closed_on_numbers_that_are_not_numbers`, `test_budget_rules.py::test_anything_that_is_not_a_number_is_refused_unpriced`, `test_trust.py::test_a_number_too_big_for_a_float_is_no_limit`
 - `test_limits.py::test_a_broken_limits_file_refuses_everything`, `test_guardrails.py::test_machine_limits_and_ledgers_that_are_not_numbers_refuse_everything`, `test_budget_rules.py::test_a_ledger_line_testbench_did_not_write_refuses_everything`
+- `test_repro.py::test_the_budget_sees_every_run_and_asks_once_for_the_total` (one run allowed, two need approval: nothing launches; approved, the day limit still holds), `test_repro.py::test_check_together_holds_each_run_to_max_run_and_the_total_to_the_rest`
 - `test_sessions.py::test_budget_applies_to_sessions`, `test_diff_watch.py::test_watch_needs_a_free_plan_or_a_persons_yes`, `test_loop.py::test_refusals_say_what_to_do` (a loop's --budget-usd), `test_check.py::test_with_a_config_free_plans_run_and_paid_ones_are_only_priced`
 - Fuzzed: `test_fuzz_budget.py::test_an_allowed_launch_is_inside_every_limit_and_one_inside_them_is_allowed` (any budgets, machine limits, ledgers and estimates: allowed exactly when inside every limit), `test_fuzz_budget.py::test_any_plan_that_loads_is_priced_and_held_to_its_limits`, `test_fuzz_budget.py::test_any_ledger_is_counted_or_refuses_everything`, `test_fuzz_budget.py::test_any_limits_file_is_limits_or_a_refusal`, `test_fuzz_config.py` (any testbench.yaml that loads has finite limits).
 
@@ -95,7 +97,7 @@ says yes:
 
 **Proof**:
 - `test_mcp.py::test_a_cost_above_the_threshold_is_asked_of_the_person`, `test_fuzz_mcp.py::test_approved_by_person_never_skips_asking_a_person_who_can_be_asked`, `test_mcp.py::test_without_elicitation_it_says_what_needs_approval`
-- `test_guardrails.py::test_the_hook_asks_about_approvals_anywhere`, `test_integration.py::test_guard_decisions`, `test_guard_hook.py::test_approvals_ask_with_the_plan_s_estimate`, `test_guard_hook.py::test_mcp_launches_ask_only_with_approved_by_person`, `test_sessions.py::test_guard_asks_before_an_approved_session`, `test_loop.py::test_loop_over_mcp_and_the_guard`
+- `test_guardrails.py::test_the_hook_asks_about_approvals_anywhere`, `test_integration.py::test_guard_decisions`, `test_repro.py::test_the_guard_asks_before_an_approved_repro`, `test_guard_hook.py::test_approvals_ask_with_the_plan_s_estimate`, `test_guard_hook.py::test_mcp_launches_ask_only_with_approved_by_person`, `test_sessions.py::test_guard_asks_before_an_approved_session`, `test_loop.py::test_loop_over_mcp_and_the_guard`
 - Fuzzed: `test_fuzz_guard.py::test_approve_in_disguise_always_asks`, `test_fuzz_guard.py::test_approve_through_a_variable_or_subshell_asks`, `test_fuzz_guard.py::test_arguments_from_xargs_or_find_ask`, `test_fuzz_guard.py::test_approve_from_python_asks`, and the other way: `test_fuzz_guard.py::test_the_same_launches_without_approve_pass`
 - `test_guardrails.py::test_options_are_spelled_out`, `test_trust.py::test_no_abbreviation_of_approve_approves`
 - `test_guardrails.py::test_mcp_names_never_become_options`, `test_fuzz_mcp.py::test_no_tool_argument_becomes_an_option`
@@ -232,9 +234,18 @@ Action's `attest: true`, report.json and every evidence file get a GitHub artifa
 `test_action.py::test_attest_signs_the_report_and_every_evidence_file_and_keeps_the_bundle`,
 `test_action.py::test_attest_refuses_evidence_that_no_longer_matches_its_report`, `test_action.py::test_verify_attestation_runs_gh_and_checks_the_commit`.
 
+A result others can rerun is harder to forge: `testbench repro` runs the plan again (here, or `--on` another backend)
+and `testbench repro --compare` sets a run beside another's - a colleague's shared bundle, a CI run - file by file;
+where the outputs are deterministic their sha256 must match, and a `deterministic:` expectation fails any run whose
+files differ from the last passing run on the same code ([reproducibility.md](reproducibility.md)). Proof:
+`test_repro.py::test_a_deterministic_plan_reproduces`, `test_repro.py::test_compare_runs_that_exist_and_a_shared_bundle`
+(only bytes a run recorded are read: an edited bundle file is compared by its recorded sha256),
+`test_repro.py::test_deterministic_passes_first_then_compares_with_the_last_passing_run`.
+
 **What is not covered**: whoever can write `.testbench/` can rewrite a report and its evidence together so they agree;
 `verify` then passes. A local record is a lab notebook, not a signature: what ties it to the run is the
-evidence_sha256 the person saw printed, or an attestation made in CI.
+evidence_sha256 the person saw printed, or an attestation made in CI. A repro reruns the code it is given: it shows
+the same code gives the same files, not that the code computes what it claims.
 
 ## The dashboard and the MCP HTTP server
 

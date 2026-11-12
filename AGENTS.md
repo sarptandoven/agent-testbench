@@ -23,7 +23,7 @@
   `report`, `procs`, `plugins` and `core` itself - load a config, price and check a launch, run a plan on this machine, check it,
   write and verify its proof record. Everything else is a layer: the ways in (`cli`, `mcp_server`, `api`, `tools`, `connect`,
   `dashboard`, `ui`, `github_action`), the remote backends, `sessions`, `session_backends`, `kernelkit/`,
-  `notebook`, `web`, `mocks`, `notify`, `export`, `loop`, `watch`, `diff`, `rescue`, `scaffold`, `recipes/`, `lint`,
+  `notebook`, `web`, `mocks`, `notify`, `export`, `loop`, `watch`, `diff`, `repro`, `rescue`, `scaffold`, `recipes/`, `lint`,
   `selftest`. A core module never imports a layer or an optional package at module level (only inside the function
   that needs it, e.g. `executor` loads `notebook` for a notebook step); `tests/test_core_boundary.py` checks it.
   The lists are `core.CORE_MODULES` / `core.LAYER_MODULES`; a new module is a layer unless added to the core's.
@@ -50,6 +50,10 @@
   `testbench ci --for gitlab|azure|circleci|shell` templates (one shared job.sh; no template ever approves a cost).
 - Loops: `loop.py` (`testbench loop`: tries on a git branch, kept or reverted by a plan run's metric; stopping
   rules --target, --patience, --max-tries).
+- Reproducibility: `repro.py` (`testbench repro`: a plan run N times, priced and approved as a whole through
+  `budget.check_together` - never run by run - then the runs' evidence compared by sha256 and each difference read
+  for how and why; `--compare` for runs that exist and shared bundles; the `deterministic:` check's comparison, with
+  the reference run `runs.launch` puts in plan.json through `repro.with_reference`).
 - Notifications: `notify.py` (testbench.yaml `notify:`; run_end from `runs.finalize`, once per run and not for a
   loop's tries; loop_rule / loop_end / loop_try from `loop.py`; approval_needed from launches refused with "Needs
   approval"). Delivery never raises or blocks for long, and only a webhook URL's scheme and host are ever shown.

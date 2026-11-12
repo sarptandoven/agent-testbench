@@ -200,14 +200,15 @@ def _raise(key: str, where: str) -> str:
 
 
 def check(cfg: dict, est: dict, approve: bool, how_to_lower: str, command: str = "",
-          again: str = "") -> tuple[bool, str, dict]:
+          again: str = "", together: bool = False) -> tuple[bool, str, dict]:
     """(allowed, message, estimate). Over max_run_usd or a day's budget (the project's, or the machine's for all
     projects together): refused. Over ask_above_usd: needs approve=True, which an agent may only pass after a
     person said yes. Each limit is the project's, capped by the machine's limits.
 
     Every refusal says how to get under the limit: how_to_lower may hold {fit}, the minutes that would fit under
     max_run_usd; command is the launch without --approve (`testbench run smoke`), which a person approves with;
-    again is the command that checks again without launching (`testbench estimate smoke`)."""
+    again is the command that checks again without launching (`testbench estimate smoke`). together: est is several
+    runs at once, each already held to max_run_usd (check_together), so only the day limits and the approval apply."""
     lim = limits(cfg)
     cost, what = est["worst_case_usd"], est["what"]
     numbers = (cost, est.get("max_minutes"), est.get("usd_per_minute"), *(v for v, _ in lim.values()))
@@ -217,7 +218,7 @@ def check(cfg: dict, est: dict, approve: bool, how_to_lower: str, command: str =
                        "minutes, 0 or more (and so must the budget's limits). `testbench prices` shows the prices in "
                        "use; `testbench plans` the minutes."), est
     most, where = lim["max_run_usd"]
-    if cost > most:
+    if cost > most and not together:
         rate = est["usd_per_minute"]
         fit = est["max_minutes"] + (most - cost) / rate if rate > 0 else 0.0
         fit = int(fit) if C.number(fit) else 0                                     # whole minutes, start-up paid
@@ -250,11 +251,37 @@ def check(cfg: dict, est: dict, approve: bool, how_to_lower: str, command: str =
     return True, f"Within budget: up to ${cost:.2f} (today so far ${today:.2f} of ${day:.2f}{machine}).", est
 
 
-def check_launch(cfg: dict, plan_name: str, approve: bool) -> tuple[bool, str, dict]:
-    est = worst_case(cfg, plan_name)
+def _how_to_lower(plan_name: str, est: dict) -> str:
     windows = (", counted once per window, or cut fewer windows (a longer walk_forward.step)" if est.get("windows")
                else f", counted {est['runs']} times: the plan's run and each look-ahead rerun, or fewer lookahead.cuts"
                if est.get("runs") else "")
-    return check(cfg, est, approve,
-                 f"lower the max_minutes of plan {plan_name}'s steps in {C.CONFIG_NAME} ({{fit}} min in all would "
-                 f"fit{windows})", f"testbench run {plan_name}", f"testbench estimate {plan_name}")
+    return (f"lower the max_minutes of plan {plan_name}'s steps in {C.CONFIG_NAME} ({{fit}} min in all would "
+            f"fit{windows})")
+
+
+def check_launch(cfg: dict, plan_name: str, approve: bool) -> tuple[bool, str, dict]:
+    est = worst_case(cfg, plan_name)
+    return check(cfg, est, approve, _how_to_lower(plan_name, est), f"testbench run {plan_name}",
+                 f"testbench estimate {plan_name}")
+
+
+def check_together(cfg: dict, ests: list[dict], approve: bool, what: str, command: str,
+                   again: str = "") -> tuple[bool, str, dict]:
+    """Several runs launched as one (`testbench repro`: a plan run N times, maybe on other backends). Each must fit
+    max_run_usd on its own; all of them together must fit the day limits; above ask_above_usd their total needs a
+    person's yes, asked once for the whole - never run by run, which would hide the total behind N small questions.
+    ests: each run's worst case (worst_case() of the plan as that run launches it). Returns (allowed, message, the
+    total's estimate)."""
+    total = {"what": what, "plan": ests[0].get("plan") if ests else None, "runs": len(ests),
+             "backend": ", ".join(dict.fromkeys(str(e.get("backend")) for e in ests)),
+             "gpu": ", ".join(dict.fromkeys(str(e["gpu"]) for e in ests if e.get("gpu"))) or None,
+             "max_minutes": sum(float(e["max_minutes"]) for e in ests) if ests else 0.0,
+             "usd_per_minute": max((e["usd_per_minute"] for e in ests), default=0.0),
+             "worst_case_usd": round(sum(e["worst_case_usd"] for e in ests), 4) if ests else 0.0}
+    if not ests:
+        return False, f"Refused: {what} has no runs to launch.", total
+    for est in ests:                                     # max_run_usd, NaN and unpriced hardware: run by run
+        ok, message, _ = check(cfg, est, True, _how_to_lower(str(est.get("plan")), est), command, again)
+        if not ok:
+            return False, message, total
+    return check(cfg, total, approve, "", command, again, together=True)
