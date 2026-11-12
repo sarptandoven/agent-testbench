@@ -21,6 +21,7 @@ from pathlib import Path
 from . import __version__, budget, config as C, lint as L, notebook as NB, report as R, runs
 
 INIT_TEMPLATE = """\
+# yaml-language-server: $schema=""" + C.SCHEMA_URL + """
 # agent-testbench: what the agent may run, where, and for how much. Reference: https://github.com/sarptandoven/agent-testbench
 project: {project}
 
@@ -122,7 +123,7 @@ def cmd_init(a):
         return 2
     from .scaffold import detect
     found = detect(root)
-    project = "".join(c if c.isalnum() or c in "-_" else "-" for c in root.name)[:40].strip("-") or "project"
+    project = C.project_name(root)
     if a.recipe:
         return _init_from_recipes(root, target, project, found, a.recipe)
     plans = "".join(text for _, text, _ in found) or EMPTY_PLAN
@@ -231,6 +232,11 @@ def cmd_recipes(a):
     except C.ConfigError:
         base = None                                  # no project here (or one that does not load): default prices
     print(RC.listing(base))
+    return 0
+
+
+def cmd_schema(a):
+    print(C.SCHEMA.read_text(encoding="utf-8"), end="")
     return 0
 
 
@@ -1012,6 +1018,7 @@ GROUPS = {   # `testbench help --all`: every command, in the groups README's Com
         "demo": "copy an example project, run its free plan, show what is next",
         "init": "write testbench.yaml and AGENTS.md for this project",
         "recipes": "ready plans for a goal, each with its worst-case cost",
+        "schema": "testbench.yaml's JSON Schema, for editors to autocomplete it",
         "connect": "set up Cursor, VS Code, Codex, Gemini or Claude Code to use it",
         "doctor": "check what this machine can run, and what to fix",
         "selftest": "a minute or so: check the main promises hold on this machine",
@@ -1082,6 +1089,8 @@ init
 recipes
   testbench recipes                      # each recipe, its plans and their cost
   testbench recipes pytest               # print one
+schema
+  testbench schema                       # print it; init's first line links it
 plans
   testbench plans
 estimate
@@ -1310,6 +1319,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("recipes", help="testbench.yaml starting points for a goal: list them with their costs, or print one")
     p.add_argument("name", nargs="?", metavar="NAME", help="print this recipe")
     p.set_defaults(fn=cmd_recipes)
+    sub.add_parser("schema", help="print testbench.yaml's JSON Schema",
+                   description="Print the JSON Schema (draft 2020-12) of testbench.yaml, so an editor can complete keys "
+                               "and flag mistakes as you type. `testbench init` writes a first line that points the "
+                               "YAML language server (VS Code's YAML extension) at it; or save this output and set "
+                               "VS Code's yaml.schemas to it. It needs no testbench.yaml.").set_defaults(fn=cmd_schema)
     sub.add_parser("plans", help="list plans, their hardware and worst-case cost").set_defaults(fn=cmd_plans)
     p = sub.add_parser("estimate", help="worst-case cost of a plan and whether it may launch (exit 0 yes, 2 no)")
     p.add_argument("plan", metavar="PLAN", help=PLAN)

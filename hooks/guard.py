@@ -109,6 +109,14 @@ def _prices(cfg: dict) -> dict:
             and isinstance(body, dict) for k, v in body.items() if isinstance(k, str) and PRICE_KEY.search(k)}
 
 
+def _backend(plan):
+    """A plan's backend as testbench reads it: a short form (`tests: "pytest -q"`, or a list of commands) runs on
+    local, and so does a plan that names none. None for something that is not a plan."""
+    if isinstance(plan, (str, list)):
+        return "local"
+    return str(plan.get("backend", "local")) if isinstance(plan, dict) else None
+
+
 def _sandbox(old: dict, new: dict) -> list:
     """How an edit loosens the docker sandbox: what the code under test may reach."""
     od, nd = old.get("docker") or {}, new.get("docker") or {}
@@ -123,10 +131,9 @@ def _sandbox(old: dict, new: dict) -> list:
     oplans, nplans = old.get("plans") or {}, new.get("plans") or {}
     if od.get("network") == "none" and isinstance(oplans, dict) and isinstance(nplans, dict):
         for name, plan in oplans.items():
-            was = isinstance(plan, dict) and plan.get("backend") == "docker"
-            now = nplans.get(name)
-            if was and isinstance(now, dict) and now.get("backend") != "docker":
-                out.append(f"plan {name} leaves the docker sandbox (backend {now.get('backend', 'local')})")
+            now = _backend(nplans.get(name))
+            if _backend(plan) == "docker" and now not in (None, "docker"):
+                out.append(f"plan {name} leaves the docker sandbox (backend {now})")
     return out
 
 

@@ -9,11 +9,15 @@ import copy
 import difflib
 import math
 import re
+import shlex
 from pathlib import Path
 
 import yaml
 
 CONFIG_NAME = "testbench.yaml"
+SCHEMA = Path(__file__).parent / "schema" / "testbench.schema.json"      # for editors: `testbench schema` prints it
+SCHEMA_URL = ("https://raw.githubusercontent.com/sarptandoven/agent-testbench/main/src/agent_testbench/schema/"
+              "testbench.schema.json")
 STEP_KINDS = ("notebook", "run", "web")
 
 NEVER_COPIED = [".testbench", ".env", ".env.*"]    # secrets go by name (`secrets:`), never in a copy of the project
@@ -25,9 +29,20 @@ DEFAULTS = {
     "guard": {"ask": ["git push", "gh repo create", "gh pr merge", "gh release create"]},
     "sessions": {"backend": "local", "gpu": None, "idle_minutes": 10, "max_minutes": 60, "secrets": []},
 }
+PLAN_DEFAULTS = {"backend": "local", "gpu": None, "workdir": None, "description": ""}
 STEP_DEFAULTS = {"max_minutes": 10, "params": {}, "env": {}, "secrets": [], "pythonpath": [], "artifacts": [],
                  "expect": {}, "uploads": [], "cells": None, "colab_shim": True, "continue_on_failure": False,
                  "mocks": {}}
+WEB_DEFAULTS = {"serve": None, "ready_timeout": 30, "actions": [], "screenshot": True, "viewport": [1280, 800]}
+PLAN_FORMS = """\
+  tests: "pytest -q"                                one command, run on this machine
+  checks: ["ruff check .", "pytest -q"]             commands run in order, on this machine
+  train: {backend: modal, gpu: T4, steps: [...]}    the long form: backend, gpu, description, steps"""
+STEP_FORMS = """\
+  - "pytest -q"                                     a command; the step is named after its program
+  - {name: train, run: python train.py, max_minutes: 30}
+  - {name: analysis, notebook: notebooks/analysis.ipynb}
+  - {name: app, web: {url: "http://127.0.0.1:8000/", serve: python app.py}}"""
 NOTEBOOK_ONLY = {"params": "it sets a notebook's Colab form fields and papermill parameters",
                  "cells": "it picks the notebook's code cells to run", "uploads": "it answers files.upload() in a notebook",
                  "colab_shim": "it puts the google.colab stand-in in the notebook's kernel"}
@@ -141,9 +156,12 @@ def validate(raw: dict, root: Path) -> dict:
         elif not isinstance(cfg[key], dict):
             raise ConfigError(f"`{key}:` is a mapping of settings (`{key}:`, then indented `name: value` lines); got "
                               f"{cfg[key]!r}")
-    project = cfg.get("project")
+    if cfg.get("project") is None:                       # left out: the folder's name, as `testbench init` writes it
+        cfg["project"] = project_name(root)
+    project = cfg["project"]
     if not project or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,40}", str(project)):
-        raise ConfigError("`project:` must be a short name of letters, digits, - or _ (it names the Modal app and volume)")
+        raise ConfigError("`project:` must be a short name of letters, digits, - or _ (it names the Modal app and "
+                          "volume); or leave it out to use the folder's name")
     cfg["root"] = str(root)
     if not isinstance(cfg.get("exclude"), list) or not all(isinstance(x, str) for x in cfg["exclude"]):
         raise ConfigError("`exclude:` is a list of file names or patterns left out of copies of the project, e.g. "
@@ -164,7 +182,8 @@ def validate(raw: dict, root: Path) -> dict:
     cfg["export"] = check_export(cfg.get("export"))
     plans = cfg.get("plans") or {}
     if not isinstance(plans, dict):
-        raise ConfigError("`plans:` must map plan names to {backend, steps}; see `testbench init` for an example")
+        raise ConfigError(f"`plans:` maps plan names to plans; it is {_brief(plans)}. Under `plans:`, write each plan "
+                          f"one of these ways:\n{PLAN_FORMS}")
     cfg["plans"] = {name: _plan(name, plan, root) for name, plan in plans.items()}
     for name in sorted({p["backend"] for p in cfg["plans"].values()} | {cfg["sessions"]["backend"]}):
         B.get(name).validate(cfg)
@@ -183,6 +202,19 @@ def number(v, positive: bool = False) -> bool:
     launch past every limit."""
     return (isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
             and (v > 0 if positive else v >= 0))
+
+
+def project_name(folder) -> str:
+    """A project name made from a folder's name: letters, digits, - and _ (anything else becomes -), at most 40.
+    `testbench init` writes it, and a testbench.yaml without `project:` uses it."""
+    name = "".join(c if c.isascii() and (c.isalnum() or c in "-_") else "-" for c in Path(folder).resolve().name)
+    return name[:40].strip("-_") or "project"
+
+
+def _brief(x) -> str:
+    """A value as a message shows it: short, and `empty` for a key with nothing after it."""
+    text = "empty" if x is None else repr(x)
+    return text if len(text) <= 60 else text[:57] + "..."
 
 
 def check_hardware(where: str, backend: str, gpu) -> None:
@@ -309,14 +341,93 @@ def check_export(e) -> dict:
     return out
 
 
+# ---- short forms: written out in full before anything else reads a plan ------------------------------------------
+
+LAUNCHERS = ("npx", "bunx", "pnpx", "exec", "time", "nice", "nohup")      # `npx vitest run` runs vitest
+RUNS_WITH = ("uv", "poetry", "pipenv", "pdm", "hatch", "rye")              # `uv run pytest` runs pytest
+SETUP_WORDS = ("cd", "pushd", "source", ".", "export", "set")              # `cd app && npm test` runs npm
+
+
+def step_name(command: str) -> str:
+    """The name a step written as a plain command gets: its program's. pytest for `pytest -q`, `python -m pytest`
+    and `uv run pytest`; train for `python train.py`; npm for `cd web && npm test`; step when there is none."""
+    for part in re.split(r"&&|\|\||[;|&\n]", str(command)):
+        try:
+            words = shlex.split(part)
+        except ValueError:                               # an unclosed quote: the words as they stand
+            words = part.split()
+        while words:
+            prog = re.split(r"[/\\]", words[0])[-1]
+            if re.fullmatch(r"[A-Za-z_]\w*=.*", words[0]) or prog in LAUNCHERS or words[0].startswith("-"):
+                words = words[1:]                        # FOO=1 pytest, npx --yes vitest
+            elif prog in RUNS_WITH and words[1:2] == ["run"]:
+                words = words[2:]
+            else:
+                break
+        if not words or words[0] in SETUP_WORDS:
+            continue
+        prog, rest = re.split(r"[/\\]", words[0])[-1], words[1:]
+        if re.fullmatch(r"python[\d.]*|py", prog):       # the module or script it runs
+            if "-m" in rest[:-1]:
+                prog = rest[rest.index("-m") + 1].split(".")[0]
+            else:
+                prog = next((re.split(r"[/\\]", w)[-1][:-3] for w in rest if w.endswith(".py")), prog)
+        prog = re.sub(r"(?<=.)\.\w+$", "", prog)        # check.sh: check
+        name = re.sub(r"[^A-Za-z0-9_-]+", "-", prog).strip("-_")[:40]
+        if name:
+            return name
+    return "step"
+
+
+def _named(steps: list) -> list:
+    """Steps with each plain command written as a run: step named after its program, unique in the plan (pytest,
+    pytest-2), never taking a name a step written in full already has."""
+    taken = {str(s["name"]) for s in steps if isinstance(s, dict) and s.get("name") not in (None, "")}
+    out = []
+    for s in steps:
+        if isinstance(s, str):
+            base = name = step_name(s)
+            n = 1
+            while name in taken:
+                n += 1
+                name = f"{base}-{n}"
+            taken.add(name)
+            s = {"name": name, "run": s}
+        out.append(s)
+    return out
+
+
+def long_form(name, plan):
+    """A plan as it is written in full. `tests: "pytest -q"` is one step on this machine, named after the plan;
+    `checks: ["ruff check .", "pytest -q"]` is those steps in order on this machine; in any plan, a step written as a
+    plain command is a run: step named after its program. Anything else comes back as it is, for validation to say
+    what is wrong with it. Never raises: the guard's and the recipes' readers use it on files that may not load."""
+    if isinstance(plan, str):
+        return {"backend": "local", "steps": [{"name": str(name), "run": plan}]}
+    if isinstance(plan, list):
+        return {"backend": "local", "steps": _named(plan)}
+    if isinstance(plan, dict) and isinstance(plan.get("steps"), list):
+        return {**plan, "steps": _named(plan["steps"])}
+    return plan
+
+
 def _plan(name: str, plan: dict, root: Path) -> dict:
     where = f"plans.{name}"
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,40}", name):
         raise ConfigError(f"`{where}`: plan names use letters, digits, - or _" + ("" if isinstance(name, str) else
                           f" (quote it, \"{name}\":, so YAML does not read it as a number, a date or true/false)"))
+    written = plan.get("steps") if isinstance(plan, dict) else plan
+    at = where if isinstance(plan, list) else f"{where}.steps"          # where its steps are, as written
+    if isinstance(plan, str) and not plan.strip() or isinstance(plan, list) and not plan:
+        raise ConfigError(f"`{where}` is {_brief(plan)}, which runs nothing; a plan is written one of these ways:\n"
+                          + PLAN_FORMS)
+    for i, step in enumerate(written if isinstance(written, list) else []):
+        if isinstance(step, str) and not step.strip():
+            raise ConfigError(f"`{at}[{i}]` is an empty command; a step is written one of these ways:\n{STEP_FORMS}")
+    plan = long_form(name, plan)
     if not isinstance(plan, dict):
-        raise ConfigError(f"`{where}` must be a mapping with `backend:` and `steps:`")
-    plan = {"backend": "local", "gpu": None, "workdir": None, "description": "", **plan}
+        raise ConfigError(f"`{where}` is {_brief(plan)}; a plan is written one of these ways:\n{PLAN_FORMS}")
+    plan = {**PLAN_DEFAULTS, **plan}
     check_hardware(where, plan["backend"], plan.get("gpu"))
     from . import backends as B
     plan["workdir"] = plan["workdir"] or ("copy" if B.get(plan["backend"]).remote else "inplace")
@@ -324,11 +435,13 @@ def _plan(name: str, plan: dict, root: Path) -> dict:
         raise ConfigError(f"`{where}.workdir` must be inplace (run in the project folder) or copy (a scratch copy)")
     steps = plan.get("steps")
     if not isinstance(steps, list) or not steps:
-        raise ConfigError(f"`{where}.steps` must be a list of steps")
+        raise ConfigError(f"`{where}.steps` must be a list of steps"
+                          + (f", not {_brief(steps)}" if "steps" in plan else "")
+                          + f", each written one of these ways:\n{STEP_FORMS}")
     seen = set()
     plan["steps"] = []
     for i, step in enumerate(steps):
-        s = _step(f"{where}.steps[{i}]", step, root)
+        s = _step(f"{at}[{i}]", step, root)
         if s["name"] in seen:
             raise ConfigError(f"`{where}`: two steps are named {s['name']!r}; names must be unique within a plan")
         seen.add(s["name"])
@@ -349,14 +462,18 @@ def _plain_data(where: str, x, inside: tuple) -> None:
 
 
 def _step(where: str, step: dict, root: Path) -> dict:
-    if not isinstance(step, dict) or not step.get("name"):
-        raise ConfigError(f"`{where}` needs a `name:`")
+    if not isinstance(step, dict):
+        raise ConfigError(f"`{where}` is {_brief(step)}; a step is written one of these ways:\n{STEP_FORMS}")
+    if not step.get("name"):
+        raise ConfigError(f"`{where}` needs a `name:` (only a step written as a plain command is named for you); a "
+                          f"step is written one of these ways:\n{STEP_FORMS}")
     if not isinstance(step["name"], (str, int)) or isinstance(step["name"], bool):
         raise ConfigError(f"`{where}.name` is a short text naming the step, e.g. train")
     step = {**step, "name": str(step["name"])}
     kinds = [k for k in STEP_KINDS if k in step]
     if len(kinds) != 1:
-        raise ConfigError(f"`{where}` ({step['name']}) needs exactly one of `notebook:`, `run:` or `web:`")
+        raise ConfigError(f"`{where}` ({step['name']}) needs exactly one of `notebook:`, `run:` or `web:`; a step "
+                          f"is written one of these ways:\n{STEP_FORMS}")
     known = ["name", *STEP_KINDS, *STEP_DEFAULTS]
     for key in step:
         if key not in known:                             # a misspelt `expect:` would leave the step with no checks
@@ -408,7 +525,7 @@ def _step(where: str, step: dict, root: Path) -> dict:
         w = s["web"]
         if not isinstance(w, dict) or not w.get("url"):
             raise ConfigError(f"`{where}.web` needs at least `url:` (and usually `serve:`, the command that starts the app)")
-        s["web"] = {"serve": None, "ready_timeout": 30, "actions": [], "screenshot": True, "viewport": [1280, 800], **w}
+        s["web"] = {**copy.deepcopy(WEB_DEFAULTS), **w}
         s["web"]["actions"] = [] if s["web"]["actions"] is None else s["web"]["actions"]
         vp, wait = s["web"]["viewport"], s["web"]["ready_timeout"]
         if not isinstance(w["url"], str) or not isinstance(s["web"]["actions"], list) or not _finite(wait) or wait <= 0 \

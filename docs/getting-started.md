@@ -62,6 +62,11 @@ It already checks that every cell runs and that the files the notebook writes ap
 working in the project how to use testbench, and `~/.testbench/limits.yaml` caps every project on the machine
 ([machine limits](reference.md#machine-limits)).
 
+A plan you add by hand can be one line: `tests: "pytest -q"` under `plans:` runs that command here as a plan
+named tests ([short forms](reference.md#plans)). The file's first line, `# yaml-language-server: $schema=...`,
+lets an editor with the YAML extension complete its keys and flag mistakes as you type
+([autocomplete](reference.md#autocomplete-in-your-editor)).
+
 ### 3. Say what "working" means
 
 Only you know which number makes the notebook work. Replace the FILL IN line with the check you want. json paths
