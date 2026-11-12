@@ -489,12 +489,15 @@ def check_a_strategy(plan: Plan = "") -> str:
     return f"""Check whether this trading strategy holds up, rung by rung, with agent-testbench. {which}
 Paper and simulation only: never trade live money and never point the code at a live account.
 
-1. Backtest with costs: fees and slippage modeled (costs_modeled true in `python -m agent_testbench.trading.metrics
-   out/equity.csv out/trades.csv`), 30 round trips or more, and a benchmark. A backtest without costs proves nothing.
-2. Walk-forward: tune on one window, judge on the next, rolling forward over the history. It counts only if it holds
-   out of sample in most windows, not just over the whole history.
-3. Holdout, once: keep the last stretch of data out of every try. Run on it once, at the end; if it fails, that is
-   the answer - never tune against it and run it again.
+1. Backtest with costs: the step writes out/equity.csv and out/trades.csv and checks them with `expect: strategy:`
+   (testbench computes the numbers; fees or slippage must be modeled, 20+ round trips, `beats: buy_and_hold`). A
+   backtest without costs proves nothing. `lookahead:` on the plan reruns it on cut data to catch tomorrow's data
+   used today.
+2. Walk-forward: `walk_forward: {{data: prices, train: 24mo, test: 6mo}}` on a plan tunes on one window and judges on
+   the next, rolling forward. It counts only if every window holds out of sample, not just the whole history.
+3. Holdout, once: `data: {{prices: {{path: ..., holdout_from: DATE}}}}` seals the last stretch from every plan but the
+   one marked `holdout: {{max_opens: 1}}`. Run it once, at the end; if it fails, that is the answer - never tune
+   against it and run it again.
 4. Paper: run the strategy against a paper account (mocks: alpaca, ccxt or ib_async on the step, with a prices
    file), with mock_calls bounding the orders and live: 0.
 5. Count every try: if variants were tried (a loop, or by hand), report the deflated Sharpe of the best over all of
