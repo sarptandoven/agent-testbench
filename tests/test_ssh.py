@@ -58,7 +58,8 @@ def test_a_plan_runs_on_the_machine_and_comes_back(project, box):
     assert r.returncode == 0 and "# PASS - plan `remote` on ssh" in r.stdout, r.stdout + r.stderr
     run = sorted((project / ".testbench" / "runs").iterdir())[-1]
     assert (run / "steps" / "02-notebook" / "artifacts" / "out" / "result.json").exists(), "evidence came back"
-    assert "token s3cret" in (run / "steps" / "02-notebook" / "log.txt").read_text(), "secrets reach the machine"
+    assert "token [secret]" in (run / "steps" / "02-notebook" / "log.txt").read_text(), \
+        "secrets reach the machine (the notebook printed it), and the value printed is not kept"
     assert "/remote/proj/runs/" in (run / "steps" / "01-where" / "log.txt").read_text(), "it ran in the machine's copy"
     assert "on the machine itself" in json.loads((run / "state.json").read_text())["remote_stop"]
     assert not (Path(box["workdir"]) / "proj" / "runs" / run.name).exists(), "the run's folder there is removed"

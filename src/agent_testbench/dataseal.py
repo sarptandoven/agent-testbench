@@ -379,7 +379,8 @@ def _files(target: Path, label: str, role: str, cutting: bool = True, exclude=No
     if target.is_file():
         return [("", target)]
     if not target.is_dir():
-        raise DataError(f"data.{role}: {label} does not exist; write it before launching, or fix data.{role}.path")
+        raise DataError(f"`data.{role}`: {label} does not exist; write it before launching, or fix "
+                        f"`data.{role}.path` in testbench.yaml")
     out = []
     for p in sorted(target.rglob("*")):
         rel = p.relative_to(target).as_posix()
@@ -388,13 +389,13 @@ def _files(target: Path, label: str, role: str, cutting: bool = True, exclude=No
             continue
         if p.suffix.lower() != ".csv":
             if cutting:
-                raise DataError(f"data.{role}: {label}/{rel} is not a .csv file. A data folder holds only CSV files, "
+                raise DataError(f"`data.{role}`: {label}/{rel} is not a .csv file. A data folder holds only CSV files, "
                                 "each cut by its time column, so nothing in it gets past the seal: move it out of "
                                 f"{label}/")
             continue
         out.append((rel, p))
     if not out:
-        raise DataError(f"data.{role}: the folder {label}/ has no .csv files")
+        raise DataError(f"`data.{role}`: the folder {label}/ has no .csv files")
     return out
 
 
@@ -543,7 +544,7 @@ def prepare(root: Path, cfg: dict, plan_name: str) -> dict | None:
         found = scan(Path(root), role, spec, cfg.get("exclude"))
         cut = None if opening else spec["holdout_from"]
         if cut and not found["kept"]["rows"]:
-            raise DataError(f"data.{role}: every row of {spec['path']} is at or after holdout_from {cut}, so plan "
+            raise DataError(f"`data.{role}`: every row of {spec['path']} is at or after holdout_from {cut}, so plan "
                             f"{plan_name} would see none; move holdout_from later (the rows before it are the ones "
                             "plans tune on)")
         seen = found["kept"] if cut or not spec["holdout_from"] else found["file"]

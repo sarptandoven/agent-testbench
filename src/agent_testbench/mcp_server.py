@@ -6,7 +6,8 @@
 Each tool is the CLI command of the same name, run in its own process in the given project folder. Tools run side
 by side: a session can be stopped, or a run checked, while a long exec or a run is still going. Plots and other
 images come back as images the client can show. A launch above the approval threshold asks the person directly
-(MCP elicitation) when the client supports it; otherwise it says what needs approval, as the CLI does.
+(MCP elicitation) when the client supports it, whatever the agent passed; otherwise it says what needs approval,
+as the CLI does.
 
 Resources (testbench://plans, testbench://runs, a run's report and evidence, the loop, the notes) and prompts
 (prove-this-change, find-why-this-fails, tune-with-a-loop, check-a-strategy) are in mcp_resources.py.
@@ -116,10 +117,14 @@ def _can_ask(ctx) -> bool:
 
 async def _with_approval(ctx, project_dir: str, argv: list[str]) -> tuple[int, str]:
     """Run a launch; if it needs a person's approval, ask the person directly when the client can, and launch with
-    --approve only on their yes. The agent is never the one saying yes here. The approval_needed notification
-    (notify:) waits ASK_NOTICE_AFTER_S for that answer: it goes out only if the person has not answered by then,
-    or could not be asked."""
-    if "--approve" in argv or not _can_ask(ctx):
+    --approve only on their yes. The agent is never the one saying yes here: when the client can ask, the person is
+    asked even if the agent passed approved_by_person=true (its --approve is dropped). The approval_needed
+    notification (notify:) waits ASK_NOTICE_AFTER_S for that answer: it goes out only if the person has not answered
+    by then, or could not be asked."""
+    can_ask = _can_ask(ctx)
+    if can_ask:
+        argv = [a for a in argv if a != "--approve"]
+    if "--approve" in argv or not can_ask:
         code, out = await _cli(project_dir, argv)
         if code == 2 and "Needs approval:" in out and "--approve" not in argv:     # the CLI's words, as this tool
             out += ("\nThrough this server the approval is approved_by_person=true on this tool: set it only after "
@@ -187,7 +192,7 @@ def _name(value: str, what: str) -> str:
 
 async def _follow(ctx, project_dir: str, run: str, seconds: int, head: str = "") -> str:
     """Follow a run with `testbench wait`, passing its progress lines on to the client as they come."""
-    code, out = await _cli(project_dir, ["wait", _name(run, "run"), "--timeout", str(max(0, seconds))],
+    code, out = await _cli(project_dir, ["wait", _name(run, "run"), f"--timeout={max(0, seconds)}"],
                            on_line=_progress(ctx))
     if code in (0, 1):                           # it has ended: the runs list and its report are new
         await mcp_resources.updated(ctx, project_dir, run)
@@ -228,8 +233,9 @@ async def recipes(name: str = "", project_dir: str = ".") -> str:
 
 @server.tool(description="Run a plan. Waits up to wait_seconds (passing on progress) and returns the report if it "
                          "finished, otherwise the run id to pass to wait_run. Refused if over budget. Above the approval "
-                         "threshold the person is asked directly when the client supports it; otherwise it needs "
-                         "approved_by_person=true, which you may set only after the person said yes to that cost.")
+                         "threshold the person is asked directly when the client supports it (approved_by_person does "
+                         "not skip that question); otherwise it needs approved_by_person=true, which you may set only "
+                         "after the person said yes to that cost.")
 async def run_plan(plan: str, project_dir: str = ".", approved_by_person: bool = False, wait_seconds: int = 120,
                    ctx: Context = None) -> str:
     code, out = await _with_approval(ctx, project_dir, ["run", _name(plan, "plan"), "--detach"] + (["--approve"] if approved_by_person else []))
@@ -301,7 +307,7 @@ async def export_run(run: str = "", to: str = "", project_dir: str = ".") -> str
 
 @server.tool(description="Recent runs with status and cost.")
 async def list_runs(project_dir: str = ".", n: int = 10) -> str:
-    return _text(*await _cli(project_dir, ["runs", "-n", str(n)]))
+    return _text(*await _cli(project_dir, ["runs", f"-n={n}"]))
 
 
 @server.tool(description="Cancel a run (default: the latest), including its Modal call or Colab session.")
@@ -329,7 +335,7 @@ async def lint_notebook(notebook: str, project_dir: str = ".") -> str:
                          "only (never the original); run=false only reads it.")
 async def rescue_notebook(notebook: str, project_dir: str = ".", timeout_seconds: float = 120, fix_to: str = "",
                           run: bool = True, as_json: bool = False) -> str:
-    argv = ["rescue", "--timeout", str(timeout_seconds)] + ([f"--fix={fix_to}"] if fix_to else []) \
+    argv = ["rescue", f"--timeout={timeout_seconds}"] + ([f"--fix={fix_to}"] if fix_to else []) \
         + ([] if run else ["--no-run"]) + (["--json"] if as_json else []) + ["--", notebook]
     return _text(*await _cli(project_dir, argv))
 
@@ -343,13 +349,13 @@ async def add_note(text: str, project_dir: str = ".") -> str:
                          "machine with an optional GPU (modal: T4, L4, A10, L40S, A100-40GB, A100-80GB, H100, ...), or a "
                          "Colab VM (colab: T4, L4, A100, H100). It stops itself after idle_minutes without use and at "
                          "max_minutes, which bounds its cost. Above the approval threshold the person is asked directly "
-                         "when the client supports it; otherwise it needs approved_by_person=true, which you may set "
-                         "only after the person agreed to that cost.")
+                         "when the client supports it (approved_by_person does not skip that question); otherwise it "
+                         "needs approved_by_person=true, which you may set only after the person agreed to that cost.")
 async def session_start(name: str = "main", backend: str = "", gpu: str = "", idle_minutes: float = 0,
                         max_minutes: float = 0, project_dir: str = ".", approved_by_person: bool = False,
                         ctx: Context = None) -> str:
     argv = ["session", "start", _name(name, "session")] + ([f"--backend={backend}"] if backend else []) + ([f"--gpu={gpu}"] if gpu else []) \
-        + (["--idle-minutes", str(idle_minutes)] if idle_minutes else []) + (["--max-minutes", str(max_minutes)] if max_minutes else []) \
+        + ([f"--idle-minutes={idle_minutes}"] if idle_minutes else []) + ([f"--max-minutes={max_minutes}"] if max_minutes else []) \
         + (["--approve"] if approved_by_person else [])
     return _text(*await _with_approval(ctx, project_dir, argv))
 
@@ -362,7 +368,7 @@ async def session_start(name: str = "main", backend: str = "", gpu: str = "", id
                          "meanwhile (session_stop ends it).")
 async def session_exec(code: str = "", notebook: str = "", cells: str = "", params: str = "", session: str = "",
                        timeout_seconds: float = 600, project_dir: str = ".", as_json: bool = False):
-    argv = ["exec", "--json"] + (["-s", _name(session, "session")] if session else []) + ["--timeout", str(timeout_seconds)]
+    argv = ["exec", "--json"] + (["-s", _name(session, "session")] if session else []) + [f"--timeout={timeout_seconds}"]
     if notebook:
         argv += [f"--cells={notebook}:{cells}" if cells else f"--cells={notebook}"] + ([f"--params={params}"] if params else [])
     else:
@@ -382,7 +388,7 @@ async def session_exec(code: str = "", notebook: str = "", cells: str = "", para
 @server.tool(description="Files on a live session's machine: op 'ls' (path), 'get' (remote path, optional local path; "
                          "default saves into the session's outputs folder) or 'put' (local path, remote path).")
 async def session_files(op: str, path: str = ".", second_path: str = "", session: str = "", project_dir: str = ".") -> str:
-    argv = ["files", op] + (["-s", _name(session, "session")] if session else []) + ["--", path] \
+    argv = ["files", *(["-s", _name(session, "session")] if session else []), "--", op, path] \
         + ([second_path] if second_path else [])
     return _text(*await _cli(project_dir, argv))
 
@@ -428,16 +434,16 @@ async def session_stop(session: str = "", project_dir: str = ".", all_sessions: 
                          "the best try is better than luck (its deflated Sharpe over all tries, reverted ones too); "
                          "min_deflated_sharpe (e.g. 0.95) makes target count only once the best try also clears it. "
                          "Above the approval threshold the person is asked directly when the "
-                         "client supports it; otherwise it needs approved_by_person=true, set only after the person "
-                         "agreed.")
+                         "client supports it (approved_by_person does not skip that question); otherwise it needs "
+                         "approved_by_person=true, set only after the person agreed.")
 async def loop_start(plan: str, metric: str, budget_usd: float, goal: str = "max", max_hours: float = 8.0,
                      min_delta: float = 0.0, target: float | None = None, patience: int = 0, max_tries: int = 0,
                      returns: str = "", min_deflated_sharpe: float | None = None, project_dir: str = ".",
                      approved_by_person: bool = False, ctx: Context = None) -> str:
-    argv = ["loop", "start", _name(plan, "plan"), f"--metric={metric}", "--budget-usd", str(budget_usd), f"--goal={goal}",
-            "--max-hours", str(max_hours), "--min-delta", str(min_delta)] \
+    argv = ["loop", "start", _name(plan, "plan"), f"--metric={metric}", f"--budget-usd={budget_usd}", f"--goal={goal}",
+            f"--max-hours={max_hours}", f"--min-delta={min_delta}"] \
         + ([f"--target={target}"] if target is not None else []) \
-        + (["--patience", str(patience)] if patience else []) + (["--max-tries", str(max_tries)] if max_tries else []) \
+        + ([f"--patience={patience}"] if patience else []) + ([f"--max-tries={max_tries}"] if max_tries else []) \
         + ([f"--returns={returns}"] if returns else []) \
         + ([f"--min-deflated-sharpe={min_deflated_sharpe}"] if min_deflated_sharpe is not None else []) \
         + (["--approve"] if approved_by_person else [])
@@ -452,7 +458,7 @@ async def loop_start(plan: str, metric: str, budget_usd: float, goal: str = "max
                          "in kind.")
 async def loop_try(description: str, wait_seconds: int = 0, new_direction: bool = False, project_dir: str = ".",
                    ctx: Context = None) -> str:
-    argv = ["loop", "try"] + (["--wait", str(wait_seconds)] if wait_seconds else []) \
+    argv = ["loop", "try"] + ([f"--wait={wait_seconds}"] if wait_seconds else []) \
         + (["--new-direction"] if new_direction else []) + ["--", description]
     return _text(*await _cli(project_dir, argv, on_line=_progress(ctx)))
 
@@ -470,6 +476,25 @@ async def loop_stop(project_dir: str = ".") -> str:
     return _text(*await _cli(project_dir, ["loop", "stop"]))
 
 
+LOCAL = ("127.0.0.1", "localhost", "::1")
+
+
+def host_check(host: str, port: int):
+    """For a server on this machine: the Host and Origin a request may name, so a web page that points its own name
+    at 127.0.0.1 (DNS rebinding) cannot call these tools, as it cannot reach the dashboard. None for another host,
+    or an mcp too old to check (mcp 2 checks local servers by itself; mcp 1.x only when told to)."""
+    if host not in LOCAL:
+        return None
+    try:
+        from mcp.server.transport_security import TransportSecuritySettings
+    except ImportError:
+        return None
+    names = ["127.0.0.1", "localhost", "[::1]"]
+    return TransportSecuritySettings(enable_dns_rebinding_protection=True,
+                                     allowed_hosts=[f"{n}:{port}" for n in names] + names,
+                                     allowed_origins=[f"http://{n}:{port}" for n in names])
+
+
 mcp_resources.register(server)              # testbench://plans, runs, reports, evidence, the loop, notes; the prompts
 
 
@@ -477,17 +502,26 @@ def main(http: bool = False, host: str = "127.0.0.1", port: int = 8765):
     if not http:
         server.run("stdio")
         return
-    if host not in ("127.0.0.1", "localhost", "::1"):
+    if host not in LOCAL:
         print(f"[testbench] serving MCP on {host}:{port} with no authentication: anyone who can reach this port can "
               "run code and spend within your limits. Put it behind authentication, or serve on 127.0.0.1.",
               file=sys.stderr, flush=True)
+    check = host_check(host, port)
+    if host in LOCAL and check is None:
+        print("[testbench] this version of the mcp package cannot check the Host header, so a web page could reach "
+              "this server by DNS rebinding: upgrade it (pip install -U \"agent-testbench[mcp]\"), or use stdio.",
+              file=sys.stderr, flush=True)
     print(f"[testbench] MCP over streamable HTTP at http://{host}:{port}/mcp", file=sys.stderr, flush=True)
     try:
-        server.run("streamable-http", host=host, port=port)            # mcp >= 2
+        server.run("streamable-http", host=host, port=port, transport_security=check)      # mcp >= 2
     except TypeError:                                                   # mcp 1.x keeps them in settings
         server.settings.host, server.settings.port = host, port
+        if check is not None and hasattr(server.settings, "transport_security"):
+            server.settings.transport_security = check
+        elif check is not None:
+            print("[testbench] this version of the mcp package cannot check the Host header: upgrade it (pip install "
+                  "-U \"agent-testbench[mcp]\"), or use stdio.", file=sys.stderr, flush=True)
         server.run("streamable-http")
-
 
 if __name__ == "__main__":
     main()

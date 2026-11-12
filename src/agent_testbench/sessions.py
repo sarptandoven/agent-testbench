@@ -304,7 +304,8 @@ def supervise(sdir: Path) -> None:
             print(f"[testbench] session {s['name']} stopped: {reason}", flush=True)
             return
         checks += 1
-        time.sleep(float(os.environ.get("TESTBENCH_SUPERVISE_SECONDS", 15)))
+        from .kernelkit.watchdog import _tick              # 0.01-15 s whatever the environment says: NaN, a
+        time.sleep(_tick(os.environ.get("TESTBENCH_SUPERVISE_SECONDS")))   # negative or huge value must not stop it
 
 
 if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "supervise":

@@ -1,0 +1,29 @@
+name: mutation
+# By hand only: mutation testing of the money paths (budget.py and the guard hook's decisions). Each mutant is one
+# small change to that code; a mutant no test kills means a test is missing or the change is equivalent. Many minutes.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "budget, guard or all"
+        default: all
+jobs:
+  mutants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+      - name: mutants
+        env:
+          TARGET: ${{ inputs.target }}          # an input is a value, never part of the script
+        run: python tools/mutate.py --target "$TARGET" --jobs 2 --json mutants.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants
+          path: mutants.json

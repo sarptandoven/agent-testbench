@@ -252,12 +252,14 @@ A loop over a trading strategy also says whether its best try is better than luc
 - **Hard stops** on the machine doing the work: Modal's timeouts, or kernelkit's watchdog on Colab VMs, ssh machines
   and in containers - so the bound holds with your laptop asleep. Ssh and docker runs are also stopped from this
   machine shortly after their limit, in case the work there stopped its watchdog.
-- **Secrets** by name only, never on a command line; strict mocks stand in for paid APIs in tests.
+- **Secrets** by name only, never on a command line, and a value the code prints is blanked out of everything a
+  run keeps (report, evidence, notifications, exports); strict mocks stand in for paid APIs in tests.
 - **The guard hook** (Claude Code) refuses raw cloud launches and commands that would print secrets, asks before
   an edit raises a budget, lowers a price or loosens a docker sandbox, turns every `--approve` into a question to
-  you, and refuses edits to the ledgers. It is a safety net, not a sandbox (a script the agent writes can still
-  pass `--approve`; the machine's limits still hold) - for running code nobody reviewed, use `backend: docker`
-  with `network: none`.
+  you (in quotes, a variable, xargs or `bash -c` too), and refuses edits to the ledgers. It is a safety net, not a
+  sandbox (a script the agent writes can still pass `--approve`; the machine's limits still hold) - for running code
+  nobody reviewed, use `backend: docker` with `network: none`. [The threat model](docs/threat-model.md) says who can
+  do what, and names the test behind each guarantee.
 
 ## MCP and agents
 

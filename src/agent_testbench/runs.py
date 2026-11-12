@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import re
 import sys
 import time
@@ -257,10 +258,62 @@ def cancel(run_dir: Path) -> str:
     return f"{run_dir.name} cancelled"
 
 
+HIDDEN = "[secret]"
+SECRET_SHORTEST = 6                    # a shorter value ("1", "true", "admin") would blank out ordinary words
+SECRET_SCAN_BYTES = 64 * 1024 * 1024   # evidence files larger than this (a model checkpoint) are not scanned
+
+
+def secret_values(run_dir: Path) -> list[str]:
+    """The values of the secrets the run's plan names, as this machine's environment holds them, longest first. A
+    secret kept elsewhere (a Modal or Kubernetes secret) never passes through here, so it is not known here either."""
+    try:
+        plan = json.loads((Path(run_dir) / "plan.json").read_text())
+        names = {n for s in plan["steps"] for n in s.get("secrets") or [] if isinstance(n, str)}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return []
+    values = {os.environ.get(n, "") for n in names}
+    return sorted((v for v in values if len(v) >= SECRET_SHORTEST), key=len, reverse=True)
+
+
+def _hide(x, values: list[str]):
+    if isinstance(x, str):
+        for v in values:
+            x = x.replace(v, HIDDEN)
+        return x
+    if isinstance(x, list):
+        return [_hide(v, values) for v in x]
+    if isinstance(x, dict):
+        return {_hide(k, values): _hide(v, values) for k, v in x.items()}
+    return x
+
+
+def redact(run_dir: Path, rep: dict) -> dict:
+    """The report with the values of the plan's secrets replaced by [secret], and the same done in every evidence
+    file that holds one (a log the code printed a token to). What the run keeps then never holds a secret's value:
+    not the report, the evidence and its hashes, the dashboard, a notification, an export or a PR comment."""
+    values = secret_values(run_dir)
+    if not values:
+        return rep
+    steps = Path(run_dir) / "steps"
+    for f in sorted(steps.rglob("*")) if steps.is_dir() else []:
+        try:
+            if f.is_symlink() or not f.is_file() or f.stat().st_size > SECRET_SCAN_BYTES:
+                continue
+            data = new = f.read_bytes()
+            for v in values:
+                new = new.replace(v.encode("utf-8", "surrogateescape"), HIDDEN.encode())
+            if new != data:
+                f.write_bytes(new)
+        except OSError:
+            continue
+    return _hide(rep, values)
+
+
 def finalize(root: Path, run_dir: Path, rep: dict, cost_usd: float, cfg: dict | None = None) -> dict:
     """Close a run out: its report, its state, the ledgers, then the run_end notification (after the state says it
     finished, so nothing waiting on the run waits on the notification)."""
     state = read_state(run_dir)
+    rep = redact(run_dir, rep)                       # before the evidence is hashed and the report goes anywhere
     rep.update(run_id=run_dir.name, plan=state["plan"], backend=state["backend"], gpu=state.get("gpu"),
                cost_usd=round(cost_usd, 4), schema_version=provenance.SCHEMA_VERSION, source=state.get("source"),
                worst_case_usd=state.get("worst_case_usd"), approved=bool(state.get("approved")),

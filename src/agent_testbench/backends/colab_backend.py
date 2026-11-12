@@ -118,6 +118,20 @@ def stop_session(session: str, args: list[str]) -> str:
         return f"could not stop Colab session {session}: {exc} - stop it with `colab stop -s {session}`"
 
 
+def extract_inside(tar, dest) -> None:
+    """Unpack the run's results from the VM into dest and nowhere else. Pythons with tarfile's data filter use it;
+    older ones (before 3.10.12) get the same rule here: plain files and folders only, every path inside dest."""
+    if hasattr(tarfile, "data_filter"):
+        tar.extractall(dest, filter="data")
+        return
+    root = Path(dest).resolve()
+    for m in tar.getmembers():
+        target = (root / m.name).resolve()
+        if not (m.isfile() or m.isdir()) or (target != root and root not in target.parents):
+            raise RuntimeError(f"the results from the Colab VM hold {m.name!r}, which would land outside the run "
+                               "folder or is not a plain file; nothing was unpacked from it")
+    tar.extractall(root)
+
 class ColabBackend:
     def __init__(self, root: Path, cfg: dict, run_dir: Path, plan: dict, meta: dict):
         self.root, self.cfg, self.run_dir, self.plan, self.meta = Path(root), cfg, Path(run_dir), plan, meta
@@ -187,7 +201,7 @@ class ColabBackend:
                 raise RuntimeError(f"could not bring the run back from the Colab VM ({exc}). If the plan ran to its "
                                    "time limit, the VM's own hard stop may have released it already.") from None
             with tarfile.open(local) as t:
-                t.extractall(self.run_dir, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
+                extract_inside(t, self.run_dir)
         finally:
             print(f"[testbench] {stop_session(self.session, self.args)}", flush=True)
         rep = R.load(self.run_dir)

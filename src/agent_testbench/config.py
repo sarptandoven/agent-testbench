@@ -243,8 +243,7 @@ def number(v, positive: bool = False) -> bool:
     """A real number of dollars or minutes: not a bool, not NaN or infinity, not negative (not zero if positive).
     Every limit, price and duration goes through this, because NaN compares false with everything and would let a
     launch past every limit."""
-    return (isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
-            and (v > 0 if positive else v >= 0))
+    return _finite(v) and (v > 0 if positive else v >= 0)          # _finite: an int too big for a float is not one
 
 
 def project_name(folder) -> str:

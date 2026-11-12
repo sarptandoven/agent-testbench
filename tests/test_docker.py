@@ -121,7 +121,8 @@ def test_a_plan_runs_in_a_fresh_container_and_its_evidence_comes_back(project):
     run = _latest_run(project)
     assert (run / "steps" / "02-notebook" / "artifacts" / "out" / "result.json").exists(), "evidence came back"
     assert list((run / "steps" / "02-notebook").glob("*.ipynb")), "the executed notebook too"
-    assert f"token {SECRET}" in (run / "steps" / "02-notebook" / "log.txt").read_text(), "secrets reach the container"
+    log = (run / "steps" / "02-notebook" / "log.txt").read_text()
+    assert "token [secret]" in log and SECRET not in log, "secrets reach the container; the value printed is not kept"
     assert not (project / "out").exists(), "the plan ran in the container's copy, not in the project"
     assert all(p.stat().st_uid == os.getuid() for p in run.rglob("*")), "what comes back belongs to whoever ran it"
     state = runs.read_state(run)
