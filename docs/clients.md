@@ -19,6 +19,9 @@ testbench connect claude --dry-run     # the change as a diff (other entries' va
 | OpenAI Codex | `codex` | `.codex/config.toml` | `$CODEX_HOME/config.toml`, else `~/.codex/config.toml` | `AGENTS.md` |
 | Gemini CLI | `gemini` | `.gemini/settings.json` | `~/.gemini/settings.json` | `AGENTS.md`, once connect adds it to `context.fileName` |
 
+For you rather than the agent, [the VS Code extension](vscode.md) shows the plans, runs, loop and today's spend in
+the editor, and asks you before anything that needs approval runs.
+
 The project is the nearest folder at or above this one with a `testbench.yaml`, else this folder: run it in the
 folder you open in the client. Without `--user` nothing outside the project is touched; with `--user` the client's
 file goes under your home folder, and `AGENTS.md` is still written when you are in a testbench project.

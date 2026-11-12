@@ -1,0 +1,236 @@
+{
+  "name": "agent-testbench",
+  "displayName": "agent-testbench",
+  "description": "See a project's testbench plans, runs, loop and today's spend in VS Code. Anything that needs approval runs only after you click Approve and run.",
+  "version": "0.1.0",
+  "publisher": "sarptandoven",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sarptandoven/agent-testbench.git"
+  },
+  "homepage": "https://sarptandoven.github.io/agent-testbench/vscode/",
+  "bugs": {
+    "url": "https://github.com/sarptandoven/agent-testbench/issues"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Testing",
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "agent-testbench",
+    "testbench",
+    "coding agents",
+    "notebooks",
+    "budget"
+  ],
+  "activationEvents": [
+    "workspaceContains:testbench.yaml",
+    "workspaceContains:.testbench"
+  ],
+  "main": "./out/src/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Checking a project and running its plans runs the project's own code, so the extension works only in a folder you trust."
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentTestbench.check",
+        "title": "Check this project",
+        "category": "Testbench",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "agentTestbench.runPlan",
+        "title": "Run plan...",
+        "category": "Testbench",
+        "icon": "$(play)"
+      },
+      {
+        "command": "agentTestbench.showLatestReport",
+        "title": "Show latest report",
+        "category": "Testbench",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "agentTestbench.openReport",
+        "title": "Show report...",
+        "category": "Testbench",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "agentTestbench.openDashboard",
+        "title": "Open dashboard",
+        "category": "Testbench",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "agentTestbench.verifyRun",
+        "title": "Verify run",
+        "category": "Testbench",
+        "icon": "$(verified)"
+      },
+      {
+        "command": "agentTestbench.cancelRun",
+        "title": "Cancel run",
+        "category": "Testbench",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "agentTestbench.showSpend",
+        "title": "Show spend",
+        "category": "Testbench",
+        "icon": "$(credit-card)"
+      },
+      {
+        "command": "agentTestbench.refresh",
+        "title": "Refresh",
+        "category": "Testbench",
+        "icon": "$(refresh)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentTestbench",
+          "title": "Testbench",
+          "icon": "media/testbench.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentTestbench": [
+        {
+          "id": "agentTestbench.plans",
+          "name": "Plans"
+        },
+        {
+          "id": "agentTestbench.runs",
+          "name": "Runs"
+        },
+        {
+          "id": "agentTestbench.loop",
+          "name": "Loop"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "agentTestbench.check",
+          "when": "view == agentTestbench.plans",
+          "group": "navigation@1"
+        },
+        {
+          "command": "agentTestbench.refresh",
+          "when": "view == agentTestbench.plans",
+          "group": "navigation@2"
+        },
+        {
+          "command": "agentTestbench.showLatestReport",
+          "when": "view == agentTestbench.runs",
+          "group": "navigation@1"
+        },
+        {
+          "command": "agentTestbench.openDashboard",
+          "when": "view == agentTestbench.runs",
+          "group": "navigation@2"
+        },
+        {
+          "command": "agentTestbench.refresh",
+          "when": "view == agentTestbench.runs",
+          "group": "navigation@3"
+        },
+        {
+          "command": "agentTestbench.refresh",
+          "when": "view == agentTestbench.loop",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "agentTestbench.runPlan",
+          "when": "view == agentTestbench.plans && viewItem =~ /^plan\\./",
+          "group": "inline"
+        },
+        {
+          "command": "agentTestbench.openReport",
+          "when": "view == agentTestbench.runs && viewItem =~ /^run\\./",
+          "group": "navigation@1"
+        },
+        {
+          "command": "agentTestbench.verifyRun",
+          "when": "view == agentTestbench.runs && viewItem == run.done",
+          "group": "navigation@2"
+        },
+        {
+          "command": "agentTestbench.cancelRun",
+          "when": "view == agentTestbench.runs && viewItem == run.going",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "agent-testbench",
+      "properties": {
+        "agentTestbench.command": {
+          "type": [
+            "string",
+            "array"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "default": "testbench",
+          "scope": "machine",
+          "markdownDescription": "How to start testbench: a program on `PATH` or an absolute path, then its arguments, e.g. `uvx agent-testbench` or `[\"uvx\", \"agent-testbench\"]` (the list form for a path with spaces). It is started directly, never through a shell. Only your user settings can set it: a workspace cannot choose the program the extension starts."
+        },
+        "agentTestbench.runsShown": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 200,
+          "markdownDescription": "How many recent runs the Runs view lists."
+        },
+        "agentTestbench.refreshSeconds": {
+          "type": "integer",
+          "default": 30,
+          "minimum": 5,
+          "markdownDescription": "How often the views and the spend in the status bar are read again, besides whenever a run, the ledger, the loop or `testbench.yaml` changes."
+        },
+        "agentTestbench.spendWarningPercent": {
+          "type": "integer",
+          "default": 80,
+          "minimum": 1,
+          "maximum": 100,
+          "markdownDescription": "The status bar turns to its warning color once today's committed spend reaches this percentage of a day limit (the project's `budget.max_day_usd` or this machine's `max_day_usd`), and to its error color at the limit."
+        }
+      }
+    },
+    "yamlValidation": [
+      {
+        "fileMatch": "testbench.yaml",
+        "url": "https://raw.githubusercontent.com/sarptandoven/agent-testbench/main/src/agent_testbench/schema/testbench.schema.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "tsc -p ./",
+    "compile": "tsc -p ./",
+    "typecheck": "tsc -p ./ --noEmit",
+    "test": "tsc -p ./ && node --test \"out/test/*.test.js\""
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/vscode": "1.90.0",
+    "typescript": "5.9.3"
+  }
+}

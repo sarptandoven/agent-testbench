@@ -98,7 +98,7 @@ def test_each_command_follows_the_exit_code_table(project, monkeypatch, capsys, 
     # missing or wrong arguments: argparse's message, and where the examples are
     ("run", "the following arguments are required: PLAN"),
     ("loop start smoke", "the following arguments are required: --metric, --budget-usd"),
-    ("plans --json", "testbench plans: error: unrecognized arguments: --json"),
+    ("plans --long", "testbench plans: error: unrecognized arguments: --long"),
     ("wait --timeout soon", "'soon' is not a number"),
     ("runs -n 0", "'0' must be 1 or more"),
     ("files get", "files get REMOTE [LOCAL] - got 0 path(s)"),
