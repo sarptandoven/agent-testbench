@@ -1004,6 +1004,21 @@
             "additionalProperties": {"$ref": "#/$defs/rule"}
           }
         },
+        "numbers": {
+          "description": "Rules on the numbers a metric reader reads from the step's files: {reader: trading, files: out/equity.csv, rules: {sharpe: \">= 1\"}}, or a list of those",
+          "anyOf": [
+            {"$ref": "#/$defs/numbers"},
+            {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/numbers"}}
+          ]
+        },
+        "strategy": {
+          "description": "A backtest checked from its standard files, with guardrails on costs, trades and the benchmark: {equity: out/equity.csv, sharpe: \">= 1\", beats: buy_and_hold}",
+          "anyOf": [
+            {"type": "null"},
+            {"type": "string", "pattern": "\\S"},
+            {"$ref": "#/$defs/strategy"}
+          ]
+        },
         "gpu": {
           "description": "GPU use while the step ran: {busy_pct: \">= 50\", max_mem_mib: \"<= 15000\"}",
           "type": ["object", "null"],
@@ -1092,6 +1107,115 @@
           }
         }
       ]
+    },
+    "numbers": {
+      "description": "A metric reader, its files and options, and rules on the numbers it reads (`testbench numbers` lists the readers and their names)",
+      "type": "object",
+      "required": ["reader", "rules"],
+      "additionalProperties": false,
+      "properties": {
+        "reader": {"description": "The reader: json, csv, junit, trading, or one an installed package adds", "type": "string", "pattern": "\\S"},
+        "files": {
+          "description": "What it reads, relative to the step's folder: a path, a list of paths in the reader's order, or {role: path} (default: the reader looks for its own)",
+          "anyOf": [
+            {"type": "string", "pattern": "\\S"},
+            {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "\\S"}},
+            {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "pattern": "\\S"}}
+          ]
+        },
+        "options": {
+          "description": "The reader's options, e.g. {risk_free: 0.04} for trading",
+          "type": "object",
+          "not": {"required": ["files"]}
+        },
+        "rules": {
+          "description": "A rule on each number by name, e.g. {sharpe: \">= 1\", trades: \">= 30\"}",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {"$ref": "#/$defs/rule"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"reader": {"const": "trading"}}, "required": ["reader"]},
+          "then": {
+            "properties": {
+              "files": {"anyOf": [{"not": {"type": "object"}}, {"propertyNames": {"enum": ["equity", "trades", "prices"]}}]},
+              "options": {"$ref": "#/$defs/trading_options"},
+              "rules": {"propertyNames": {"$ref": "#/$defs/trading_number"}}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"reader": {"const": "junit"}}, "required": ["reader"]},
+          "then": {"properties": {"rules": {"propertyNames": {"enum": ["tests", "passed", "failures", "errors", "skipped"]}}}}
+        }
+      ]
+    },
+    "trading_options": {
+      "description": "The trading reader's options",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "risk_free": {"description": "The yearly risk-free rate as a fraction, e.g. 0.04 (default 0)", "type": "number", "exclusiveMinimum": -1},
+        "periods_per_year": {"description": "Bars per year, overriding the one read from the times", "type": "number", "exclusiveMinimum": 0},
+        "calendar": {"description": "auto, stocks (252 trading days a year) or crypto (365), for daily and intraday bars", "enum": ["auto", "stocks", "crypto"]},
+        "symbol": {"description": "prices.csv's benchmark symbol, when it has several", "type": "string", "pattern": "\\S"}
+      }
+    },
+    "trading_number": {
+      "description": "The name of one of testbench's numbers for a backtest (docs/trading.md#the-numbers)",
+      "enum": ["start_equity", "end_equity", "bars", "days", "years", "periods_per_year", "risk_free", "total_return", "cagr",
+               "volatility", "sharpe", "sortino", "max_drawdown", "max_drawdown_days", "max_drawdown_bars",
+               "max_drawdown_recovered", "longest_drawdown_days", "calmar", "fills", "trades", "win_rate", "profit_factor",
+               "average_trade", "average_trade_return", "total_fees", "costs_modeled", "traded_value", "turnover",
+               "turnover_per_year", "exposure", "open_positions", "benchmark_return", "benchmark_sharpe", "excess_return"]
+    },
+    "strategy": {
+      "description": "A backtest's standard files, rules on testbench's numbers for it, and guardrails (docs/trading.md#checking-a-strategy)",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "equity": {"description": "The equity.csv the backtest writes (default out/equity.csv); trades.csv and prices.csv are read next to it", "type": "string", "pattern": "\\S"},
+        "options": {"description": "The trading reader's options: risk_free, periods_per_year, calendar, symbol", "$ref": "#/$defs/trading_options"},
+        "beats": {"description": "buy_and_hold: excess_return > 0, against the benchmark column of equity.csv or prices.csv next to it", "enum": ["buy_and_hold"]},
+        "min_trades": {"description": "The fewest round trips the numbers may come from (default 20; 0 turns this off)", "type": "integer", "minimum": 0},
+        "costs": {"description": "required (default): some fee or slippage was charged; none: zero costs pass, and the report says so", "enum": ["required", "none"]},
+        "start_equity": {"$ref": "#/$defs/rule", "description": "A rule on the equity on the first row"},
+        "end_equity": {"$ref": "#/$defs/rule", "description": "A rule on the equity on the last row"},
+        "bars": {"$ref": "#/$defs/rule", "description": "A rule on the rows of equity.csv"},
+        "days": {"$ref": "#/$defs/rule", "description": "A rule on the calendar days from the first row to the last"},
+        "years": {"$ref": "#/$defs/rule", "description": "A rule on the span in years (days / 365.25)"},
+        "periods_per_year": {"$ref": "#/$defs/rule", "description": "A rule on the bars per year the yearly numbers use"},
+        "risk_free": {"$ref": "#/$defs/rule", "description": "A rule on the yearly risk-free rate used"},
+        "total_return": {"$ref": "#/$defs/rule", "description": "A rule on last equity / first - 1"},
+        "cagr": {"$ref": "#/$defs/rule", "description": "A rule on the yearly growth rate, on calendar time"},
+        "volatility": {"$ref": "#/$defs/rule", "description": "A rule on the yearly volatility of the bar returns"},
+        "sharpe": {"$ref": "#/$defs/rule", "description": "A rule on the Sharpe ratio, e.g. \">= 1\""},
+        "sortino": {"$ref": "#/$defs/rule", "description": "A rule on the Sortino ratio"},
+        "max_drawdown": {"$ref": "#/$defs/rule", "description": "A rule on the deepest fall from a running peak, -1 to 0, e.g. \">= -0.2\""},
+        "max_drawdown_days": {"$ref": "#/$defs/rule", "description": "A rule on the calendar days the max drawdown ran"},
+        "max_drawdown_bars": {"$ref": "#/$defs/rule", "description": "A rule on the bars the max drawdown ran"},
+        "max_drawdown_recovered": {"$ref": "#/$defs/rule", "description": "A rule on whether the equity got back to that peak (true or false)"},
+        "longest_drawdown_days": {"$ref": "#/$defs/rule", "description": "A rule on the longest any drawdown ran, in calendar days"},
+        "calmar": {"$ref": "#/$defs/rule", "description": "A rule on cagr / -max_drawdown"},
+        "fills": {"$ref": "#/$defs/rule", "description": "A rule on the rows of trades.csv"},
+        "trades": {"$ref": "#/$defs/rule", "description": "A rule on the round trips (min_trades is the guardrail's floor)"},
+        "win_rate": {"$ref": "#/$defs/rule", "description": "A rule on the share of round trips that made money after fees"},
+        "profit_factor": {"$ref": "#/$defs/rule", "description": "A rule on money won by winning round trips / money lost by losing ones"},
+        "average_trade": {"$ref": "#/$defs/rule", "description": "A rule on the mean profit of a round trip, after fees"},
+        "average_trade_return": {"$ref": "#/$defs/rule", "description": "A rule on the mean return of a round trip on the entries it closed"},
+        "total_fees": {"$ref": "#/$defs/rule", "description": "A rule on the sum of the fees"},
+        "costs_modeled": {"$ref": "#/$defs/rule", "description": "A rule on whether some fee or slippage is above 0 (costs: is the guardrail)"},
+        "traded_value": {"$ref": "#/$defs/rule", "description": "A rule on the sum of quantity x price over the fills"},
+        "turnover": {"$ref": "#/$defs/rule", "description": "A rule on traded value / mean equity, over the whole backtest"},
+        "turnover_per_year": {"$ref": "#/$defs/rule", "description": "A rule on the turnover per calendar year"},
+        "exposure": {"$ref": "#/$defs/rule", "description": "A rule on the share of the bars that start with a position open"},
+        "open_positions": {"$ref": "#/$defs/rule", "description": "A rule on the symbols with a position still open at the end"},
+        "benchmark_return": {"$ref": "#/$defs/rule", "description": "A rule on buy and hold's total return over the same rows"},
+        "benchmark_sharpe": {"$ref": "#/$defs/rule", "description": "A rule on buy and hold's Sharpe ratio"},
+        "excess_return": {"$ref": "#/$defs/rule", "description": "A rule on total_return - benchmark_return (beats: buy_and_hold asks > 0)"}
+      }
     },
     "mocks": {
       "description": "Mock clients by name, or with options: [openai, anthropic], {anthropic: {replies: tests/replies.yaml}}, or a mock broker: {alpaca: {prices: data/prices.csv, cash: 100000, fee_usd: 1}}; an installed plug-in's mock by its name",

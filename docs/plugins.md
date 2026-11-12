@@ -113,8 +113,9 @@ All six built-in backends keep it (a test checks).
 
 ## Checks
 
-Every kind of check under a step's `expect:` is a plug-in of kind `checks`, the thirteen built-ins of
-[Expectations](expectations.md) included: they sit in the same registry a package adds to. So a check from a package
+Every kind of check under a step's `expect:` is a plug-in of kind `checks`, the fifteen built-ins of
+[Expectations](expectations.md) included: they sit in the same registry a package adds to (`strategy:` is the
+trading pack's, registered by name and imported when checks are first used). So a check from a package
 works exactly like a built-in. testbench refuses a malformed value when `testbench.yaml` loads, before anything runs.
 Its findings go in `report.md` and `report.json` with the others, and its numbers reach history, run-to-run
 comparisons and `testbench loop --metric check:...`.
@@ -727,23 +728,30 @@ Exit 0 when it read the files, 2 when a file is missing or refused (the message 
 Each value is a finite number, `true`/`false`, or `null` where the number is not defined (no trades file, a NaN in
 the file); the notes say why. A null passes no rule.
 
-### In a plan (planned)
+### In a plan
 
-Checks will name a reader, its files and rules on its numbers. This is the shape planned for the next release; it is
-not wired into `expect:` yet:
+A step's `numbers:` expectation ([Expectations](expectations.md#numbers)) names a reader, its files and options, and
+rules on the numbers it reads; a list of such blocks reads with several readers. A reader a package adds works
+there like a built-in, once the package is installed where the step is checked:
 
 ```yaml
 expect:
   numbers:
-    reader: trading
-    files: {equity: out/equity.csv, trades: out/trades.csv}
-    options: {risk_free: 0.04}
+    reader: trading                                          # json | csv | junit | trading | an installed reader
+    files: {equity: out/equity.csv, trades: out/trades.csv}  # or a path, or a list; default: the reader's own
+    options: {risk_free: 0.04}                               # the reader's options
     rules: {sharpe: ">= 1", max_drawdown: ">= -0.2", trades: ">= 30"}
 ```
 
-Each rule is written as every other expectation's (`>= 1`, `~= 0.93 +- 0.01`, `between 0.8 and 0.95`). A missing
-file fails every rule with the reader's message. Until then, `testbench numbers` shows what each name will hold, and
-from Python:
+Each rule is written as every other expectation's (`>= 1`, `~= 0.93 +- 0.01`, `between 0.8 and 0.95`). A missing,
+refused or stale file (last written before the step started) fails every rule with the reader's message; a number
+the reader did not give, or gave as `null`, fails its rule with the reader's note on why. When `testbench.yaml`
+loads, the reader, its options (by name, and by value through `check_options`), its file roles and the rules are
+checked, and for a reader with `keys` the names too. A reader whose options include `keys` gets the rules' names
+there unless the block sets it, so it reads exactly those. The trading pack's `strategy:`
+([trading](trading.md#checking-a-strategy)) reads with `trading` and adds guardrails.
+
+`testbench numbers` shows what each name holds, and from Python:
 
 ```python
 from agent_testbench import metrics
@@ -795,6 +803,11 @@ A reader has:
   `notes` (plain-words caveats) and `files` (`{role: the path it read}`). A missing file raises
   `FileNotFoundError` naming it (`self.path()` does this); a file it refuses raises `ValueError` saying what to change.
 - `sample()`: `{relative path: text}` that `read()` reads with its default options.
+- `keys` (optional): the names `read()` always gives, when they do not depend on the file (`trading`'s and
+  `junit`'s do not). A `numbers:` rule on another name is then refused when `testbench.yaml` loads, with the near
+  miss.
+- `check_options(opts)` (optional): raise `ValueError` for an option's value it refuses, saying what to write, so a
+  `numbers:` block with `calendar: stockz` is refused at load rather than after the step.
 
 ### The contract
 
@@ -807,5 +820,6 @@ returns the problems in plain words (`[]` when it keeps it):
 3. On its `sample()` files it returns finite numbers, booleans or `None` by name (not NaN, not numpy types, not
    text), `notes` as strings and `files` as a mapping.
 4. Reading the same files twice gives the same names in the same order: checks name them.
+5. With `keys`, every name it lists is among those `read()` gives on its sample.
 
 The four built-in readers keep it (tests/test_metrics_readers.py checks each).

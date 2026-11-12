@@ -50,8 +50,9 @@
   configs, merged as text).
 - Metric readers: `metrics.py` (core: evidence files as named numbers - json, csv, junit, trading, and a package's by
   entry point; `testbench numbers`). A missing file is a FileNotFoundError naming it, a value a finite number, a bool
-  or None; `metrics.contract` checks a reader. Checks do not use it yet (the planned `numbers:` shape is in its
-  docstring).
+  or None; `metrics.contract` checks a reader. The `numbers:` check (expect.py) reads with any reader, and the
+  trading pack's `strategy:` (`trading/checks.py`, a layer the core registers by name: `expect.STRATEGY`) with
+  `trading`, adding its guardrails (costs, min_trades, beats).
 - testbench.yaml: `config.py` reads it; its short forms (`tests: "pytest -q"`, a list of commands, a step written as
   a command) become the long form there (`config.long_form`), so nothing downstream sees them.
   `schema/testbench.schema.json` is its JSON Schema for editors (`testbench schema`): a new key needs an entry

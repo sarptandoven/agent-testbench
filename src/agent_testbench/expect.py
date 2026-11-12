@@ -21,6 +21,14 @@ finding ("accuracy 0.71, wanted >= 0.9") rather than a bare FAIL. A check that m
       junit: {path: report.xml, tests: ">= 10"}       # failures: 0 and errors: 0 unless said otherwise
       metrics:                               # numbers printed: the regex's first group, in its last match
         stdout: {"val_loss=([0-9.eE+-]+)": "< 0.3"}
+      numbers:                               # numbers a metric reader reads from files (metrics.py); or a list
+        reader: trading
+        files: {equity: out/equity.csv}
+        rules: {sharpe: ">= 1", max_drawdown: ">= -0.2"}
+      strategy:                              # the trading pack's check, with its guardrails (trading/checks.py)
+        equity: out/equity.csv
+        sharpe: ">= 1"
+        beats: buy_and_hold
       gpu: {busy_pct: ">= 50", max_mem_mib: "<= 15000"}
       image:
         outputs/plot.png: {like: golden/plot.png, max_diff: 0.02}
@@ -31,8 +39,9 @@ finding ("accuracy 0.71, wanted >= 0.9") rather than a bare FAIL. A check that m
 
 Any rule can also be a tolerance ("~= 0.93 +- 0.01", "~= 100 +- 5%") or an inclusive range ("between 0.8 and 0.95").
 
-Every kind of check is a plug-in of kind "checks" (agent_testbench.plugins), the thirteen above included, so a package
-can add one that works exactly like a built-in (docs/plugins.md#checks):
+Every kind of check is a plug-in of kind "checks" (agent_testbench.plugins), the fifteen above included, so a package
+can add one that works exactly like a built-in (docs/plugins.md#checks). `strategy:` lives in the trading pack, a layer:
+the registry names it ("agent_testbench.trading.checks:StrategyCheck") and imports it when checks are first used.
 
     # pyproject.toml of a package
     [project.entry-points."agent_testbench.checks"]
@@ -67,6 +76,7 @@ from __future__ import annotations
 
 import copy
 import glob
+import importlib
 import json
 import math
 import os
@@ -87,10 +97,13 @@ OPS = {">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b, "!=": lambda a, b: 
 RULE = re.compile(r"^\s*(>=|<=|!=|==|>|<)\s*(.+?)\s*$")
 NEAR = re.compile(r"^\s*~=\s*(\S+?)\s*(?:\+-|\+/-|±)\s*(\S+?)\s*(%?)\s*$")
 BETWEEN = re.compile(r"^\s*between\s+(\S+)\s+and\s+(\S+)\s*$", re.I)
-KINDS = ("exit_code", "no_errors", "files", "json", "text", "media", "web", "junit", "metrics", "gpu", "image",
-         "duration", "mock_calls")                       # the built-ins, in the order testbench.yaml is validated
-RUN_ORDER = ("exit_code", "no_errors", "files", "json", "text", "media", "web", "junit", "metrics", "image", "gpu",
-             "duration", "mock_calls")                   # ... and the order their findings come in
+KINDS = ("exit_code", "no_errors", "files", "json", "text", "media", "web", "junit", "metrics", "numbers", "strategy",
+         "gpu", "image", "duration", "mock_calls")       # the built-ins, in the order testbench.yaml is validated
+RUN_ORDER = ("exit_code", "no_errors", "files", "json", "text", "media", "web", "junit", "metrics", "numbers",
+             "strategy", "image", "gpu", "duration", "mock_calls")    # ... and the order their findings come in
+STRATEGY = "agent_testbench.trading.checks:StrategyCheck"           # a layer's built-in: imported by name, when used
+NUMBERS_KEYS = ("reader", "files", "options", "rules")
+NUMBERS_EXAMPLE = '{reader: trading, files: out/equity.csv, rules: {sharpe: ">= 1"}}'
 LLM_SDKS = ("anthropic", "openai")
 BROKER_SDKS = ("alpaca", "ccxt", "ib_async")
 MOCK_SDKS = LLM_SDKS + BROKER_SDKS
@@ -179,6 +192,34 @@ def compare(actual, rule) -> tuple[bool, str]:
     except TypeError:
         return False, f"{actual!r} cannot be compared with {op} {target!r}"
     return bool(ok), f"{actual!r} (wanted {op} {target!r})"
+
+
+def number_rule_error(rule) -> str | None:
+    """Why a rule cannot hold for a reader's number (a finite number or true/false), or None: a rule against text or
+    null could never pass, so the numbers: and strategy: checks refuse it when testbench.yaml loads."""
+    bad = rule_error(rule)
+    if bad or isinstance(rule, (bool, int, float)):
+        return bad
+    if isinstance(rule, str):
+        if NEAR.match(rule) or BETWEEN.match(rule):
+            return None
+        m = RULE.match(rule)
+        target = _num(m.group(2) if m else rule)
+        if _real(target) or (str(target).lower() in ("true", "false") and (not m or m.group(1) in ("==", "!="))):
+            return None
+    return (f"{rule!r} compares with {'nothing' if rule is None else 'text'}, but a reader's numbers are numbers or "
+            "true/false: write the number to compare with, e.g. \">= 1\" or \"between 0.8 and 0.95\"")
+
+
+def compare_shown(actual, rule) -> tuple[bool, str]:
+    """compare(), with a float shown to 6 significant digits (1.2345678912 as 1.23457) unless that would change the
+    outcome, which is always the exact value's."""
+    ok, detail = compare(actual, rule)
+    if isinstance(actual, float) and math.isfinite(actual):
+        short_ok, short = compare(float(f"{actual:.6g}"), rule)
+        if short_ok == ok:
+            return ok, short
+    return ok, detail
 
 
 def _real(x) -> bool:
@@ -588,6 +629,30 @@ class MetricsCheck(Check):
                               f": {last.group(0).strip()[:80]!r}")
 
 
+class NumbersCheck(Check):
+    name, keys = "numbers", NUMBERS_KEYS
+    example = {"reader": "json", "files": "outputs/metrics.json", "rules": {"accuracy": ">= 0.9"}}
+
+    def validate(self, where, value):
+        if isinstance(value, list) and not value:
+            raise ConfigError(f"`{where}` is empty, so nothing would be checked; e.g. {NUMBERS_EXAMPLE}")
+        for i, block in enumerate(value if isinstance(value, list) else [value]):
+            _numbers_block(where + (f"[{i}]" if isinstance(value, list) else ""), block)
+
+    def check(self, value, *, workdir, result, add):
+        from . import metrics as M
+        for block in value if isinstance(value, list) else [value]:
+            reader, files, rules = str(block.get("reader")), block.get("files"), block.get("rules") or {}
+            options = dict(block.get("options") or {})
+            try:                                         # a reader that takes `keys` reads the names the rules use
+                if "keys" in (getattr(M.get(reader), "options", None) or {}) and "keys" not in options:
+                    options["keys"] = list(rules)
+            except ValueError:                           # no such reader here: read_numbers says so
+                pass
+            got, why = read_numbers(reader, workdir, result, files, options)
+            number_findings(_numbers_label(reader, files), got, why, rules, add, shown=not files)
+
+
 class GpuCheck(Check):
     name, keys, example = "gpu", GPU_KEYS, {"busy_pct": ">= 50", "max_mem_mib": "<= 15000"}
 
@@ -668,7 +733,14 @@ class MockCallsCheck(Check):
 
 
 BUILTIN = {c.name: c for c in (ExitCodeCheck, NoErrorsCheck, FilesCheck, JsonCheck, TextCheck, MediaCheck, WebCheck,
-                               JunitCheck, MetricsCheck, GpuCheck, ImageCheck, DurationCheck, MockCallsCheck)}
+                               JunitCheck, MetricsCheck, NumbersCheck, GpuCheck, ImageCheck, DurationCheck,
+                               MockCallsCheck)}     # this module's; strategy is the trading pack's (STRATEGY)
+REFS = {name: STRATEGY if name == "strategy" else f"{__name__}:{BUILTIN[name].__name__}" for name in KINDS}
+
+
+def _builtin_class(name: str) -> type:
+    module, _, attr = REFS[name].partition(":")
+    return getattr(importlib.import_module(module), attr)
 
 
 def _prepare(obj, name: str):
@@ -702,7 +774,7 @@ def contract(chk) -> list[str]:
                         "and not a word YAML reads as true, false or null, such as on, off, yes or no), e.g. "
                         "max_log_lines")
         name = "your_check"
-    elif name in BUILTIN and not isinstance(chk, BUILTIN[name]):
+    elif name in REFS and not isinstance(chk, _builtin_class(name)):
         problems.append(f"{name!r} is a built-in check's name, and a plug-in cannot replace a built-in; pick another")
     missing = [m for m in ("validate", "check") if not callable(getattr(chk, m, None))]
     if missing:
@@ -825,9 +897,137 @@ def schema_text() -> str:
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
-KIND = plugins.Kind("checks", "check", "what a step's `expect:` can check",
-                    {name: f"{__name__}:{cls.__name__}" for name, cls in BUILTIN.items()},
-                    prepare=_prepare, contract=contract)
+KIND = plugins.Kind("checks", "check", "what a step's `expect:` can check", dict(REFS), prepare=_prepare,
+                    contract=contract)
+
+
+# ---- numbers from metric readers (metrics.py): numbers:, and the trading pack's strategy: -------------------------
+
+def _numbers_block(where: str, block) -> None:
+    from . import metrics as M
+    if not isinstance(block, dict):
+        raise ConfigError(f"`{where}` is {NUMBERS_EXAMPLE}, or a list of those: a metric reader, its files and rules "
+                          "on the numbers it reads")
+    for k in block:
+        if k not in NUMBERS_KEYS:
+            raise ConfigError(f"`{where}` has no {k!r}{near(k, NUMBERS_KEYS)}; use {', '.join(NUMBERS_KEYS)}, e.g. "
+                              f"{NUMBERS_EXAMPLE}")
+    reader, files, options = block.get("reader"), block.get("files"), block.get("options")
+    if not isinstance(reader, str) or not reader.strip():
+        raise ConfigError(f"`{where}` needs `reader:`, one of {', '.join(M.names())} (`testbench numbers` lists them "
+                          f"and the files each reads), e.g. {NUMBERS_EXAMPLE}")
+    try:
+        M.get(reader)
+    except ValueError as exc:
+        raise ConfigError(f"`{where}.reader`: {exc}") from None
+    if files is not None and not _paths(files):
+        raise ConfigError(f"`{where}.files` is a path, a list of paths in the reader's order, or {{role: path}} such "
+                          "as {equity: out/equity.csv}; leave it out and the reader looks for its own files")
+    if options is not None and (not isinstance(options, dict) or "files" in options):
+        raise ConfigError(f"`{where}.options` is a mapping of the reader's options, e.g. {{risk_free: 0.04}}"
+                          + ("; files go under `files:`, next to `options:`" if isinstance(options, dict) else ""))
+    try:
+        M.options(reader, {**(options or {}), "files": files})
+    except ValueError as exc:
+        raise ConfigError(f"`{where}`: {exc}") from None
+    if "rules" not in block:
+        raise ConfigError(f"`{where}` needs `rules:`, a rule on each number by name, e.g. {{sharpe: \">= 1\"}} "
+                          "(`testbench numbers READER PATH` prints the names and their numbers)")
+    rules = validate_table(f"{where}.rules", block["rules"], '{sharpe: ">= 1", trades: ">= 30"}', some=True)
+    known = M.keys(reader)
+    for key, rule in rules.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ConfigError(f"`{where}.rules` has {key!r} where the name of a number goes; write it in quotes")
+        if known is not None and key not in known:
+            raise ConfigError(f"`{where}.rules` names {key!r}{near(key, known)}, a number reader {reader} does not "
+                              f"give; it gives {', '.join(known)}")
+        bad = number_rule_error(rule)
+        if bad:
+            raise ConfigError(f"`{where}.rules.{key}`: {bad}")
+
+
+def _paths(files) -> bool:
+    """files: a path, a non-empty list of paths, or a non-empty {role: path}."""
+    path = lambda p: isinstance(p, str) and bool(p.strip())
+    if isinstance(files, list):
+        return bool(files) and all(map(path, files))
+    if isinstance(files, dict):
+        return bool(files) and all(path(r) and path(p) for r, p in files.items())
+    return path(files)
+
+
+def _numbers_label(reader: str, files) -> str:
+    """How findings name what was read: the reader and the first file named, as testbench.yaml gives them, so the
+    name is the same in every run (history and loops find a number by it)."""
+    if isinstance(files, dict):
+        files = list(files.values())
+    first = files if isinstance(files, str) else files[0] if isinstance(files, list) and files else ""
+    return f"{reader} {first}".strip()
+
+
+def read_numbers(reader: str, workdir: Path, result: dict, files=None, options=None) -> tuple[dict | None, str]:
+    """What a metric reader finds in the step's folder ({reader, files, values, notes}, as metrics.read gives it),
+    or None and why not: a file missing or refused, or last written before the run started (an old result, not this
+    run's). Never raises: a check records what went wrong as a finding."""
+    from . import metrics as M
+    since = result.get("run_started")
+    try:
+        ready = M.options(reader, {**(options or {}), "files": files}, values=False)
+        why = _stale_among(workdir, ready["files"].values(), since)        # the files named: before reading them
+        got = None if why else M.read(reader, workdir, ready)
+    except (FileNotFoundError, ValueError) as exc:
+        return None, str(exc)
+    except Exception as exc:                                               # never expected: M.read wraps a reader's
+        return None, f"reader {reader} failed: {type(exc).__name__}: {exc}"
+    why = why or _stale_among(workdir, got["files"].values(), since)        # and those it found by their patterns
+    return (None, why) if why else (got, "")
+
+
+def _stale_among(workdir: Path, paths, since) -> str:
+    for p in paths:
+        f = Path(workdir) / p
+        try:
+            why = f.is_file() and _stale(f, since)
+        except OSError:
+            continue
+        if why:
+            return f"{p}: {why}"
+    return ""
+
+
+def notes_about(key: str, notes: list[str]) -> list[str]:
+    """The reader's notes that name a number (or, for a dotted name such as loss.last, its first part), as a word of
+    its own: trades in "no trades file: fills, trades, ..." but not in a file's name such as out/trades.csv."""
+    words = {key, key.split(".")[0]}
+    return [n for n in notes if any(re.search(rf"(?<![\w.]){re.escape(w)}(?!\w|\.\w)", n) for w in words)]
+
+
+def number_findings(label: str, got: dict | None, why: str, rules: dict, add, about=notes_about,
+                    context: str = "", shown: bool = False, remarks=None) -> None:
+    """One finding per rule on a reader's numbers, named `{label}: {key} {rule}`. A number the reader did not give,
+    or gave as None (not defined), fails with the reader's notes on it (about(key, notes) picks them): a rule never
+    passes for want of a number. When the files could not be read (got None), every rule fails with why, in full on
+    the first. After a measured number come context, the files read when shown (testbench.yaml named none), and the
+    notes remarks(key, notes) picks, if given."""
+    for i, (key, rule) in enumerate(rules.items()):
+        name = f"{label}: {key} {rule}"
+        if got is None:
+            add(name, False, why if i == 0 or "\n" not in why else
+                f"{why.splitlines()[0]} (the whole message is on the first of these checks)")
+            continue
+        values, notes = got["values"], got["notes"]
+        if key not in values:
+            names = list(values)
+            add(name, False, f"reader {got['reader']} gave no number {key!r}{near(key, names)}; it gave "
+                             f"{', '.join(names[:30]) or 'none'}{' and more' if len(names) > 30 else ''}")
+        elif values[key] is None:
+            add(name, False, f"{key} is undefined (null): " + ("; ".join(about(key, notes) or notes) or
+                                                              f"reader {got['reader']} gave no reason"))
+        else:
+            ok, detail = compare_shown(values[key], rule)
+            files = f"; read {', '.join(got['files'].values())}" if shown and got["files"] else ""
+            add(name, ok, detail + (f"; {context}" if context else "") + files
+                + "".join(f"; {n}" for n in (remarks(key, notes) if remarks else ())))
 
 
 # ---- calls to the mock clients (docs/mocks.md) ---------------------------------------------------------------

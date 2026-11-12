@@ -11,7 +11,9 @@ one line each) and read(workdir, opts) -> {name: value} - each value a finite in
 number is not defined - plus, under the reserved names `notes` and `files`, plain-words caveats and the files it read.
 opts["files"] names files by role (paths relative to workdir); a role it leaves out is looked for by its patterns.
 A missing file raises FileNotFoundError naming it; a file or option it refuses raises ValueError saying what to change;
-nothing else. sample() gives files read() works on: `testbench plugin test` and contract() read them.
+nothing else. sample() gives files read() works on: `testbench plugin test` and contract() read them. Optional:
+`keys`, the names read() always gives (a rule on another name is refused when testbench.yaml loads), and
+check_options(opts), which raises ValueError for an option's value it refuses, so that is refused at load too.
 
 Built in:
     json     a JSON file's numbers by dotted path (accuracy, losses.-1), as the json: expectation reads them
@@ -24,8 +26,8 @@ Readers are a plug-in kind (plugins.py): a package adds one with an entry point 
 that names a Reader subclass or instance. `testbench numbers READER [PATH...]` prints what a reader finds, to write
 rules with; docs/plugins.md#metrics has an example package.
 
-Planned for checks (not wired yet: expect.py is where checks live): a step's expect: names a reader, its files and
-rules on the numbers it reads, each rule as every other expectation writes one:
+Checks name them: the `numbers:` expectation (expect.NumbersCheck) names a reader, its files and rules on the numbers
+it reads, each rule as every other expectation writes one, and the trading pack's `strategy:` reads with `trading`:
 
     expect:
       numbers:
@@ -34,7 +36,8 @@ rules on the numbers it reads, each rule as every other expectation writes one:
         options: {risk_free: 0.04}
         rules: {sharpe: ">= 1", max_drawdown: ">= -0.2", trades: ">= 30"}
 
-A missing file fails every rule with the reader's message; a number that is None fails its rule.
+A missing, refused or stale file fails every rule with the reader's message; a number that is None, or that the reader
+did not give, fails its rule.
 
 This module is part of the core: only the standard library and plugins at module level. The json and junit readers
 use expect's dig and read_junit, and the trading reader the trading pack, each imported when it reads.
@@ -69,6 +72,11 @@ class Reader:
     files: dict = {}                                  # role -> glob patterns tried in order, relative to the folder
     required: tuple = ()                              # the roles that must be found (default: the first)
     options: dict = {}                                # option -> one line on what it does
+    keys: tuple | None = None                         # optional: the names read() always gives, for load-time checks
+
+    def check_options(self, opts: dict) -> None:
+        """Optional: raise ValueError for an option's value it refuses (opts without files), saying what to write.
+        It runs when testbench.yaml loads, so a bad value fails before anything runs, not after the step."""
 
     def read(self, workdir: Path, opts: dict) -> dict:
         raise NotImplementedError
@@ -260,7 +268,7 @@ class JunitReader(Reader):
     name = "junit"
     what = "tests, passed, failures, errors and skipped from a JUnit XML report"
     files = {"file": ("junit.xml", "*/junit.xml", "report.xml", "*/report.xml")}
-    KEYS = ("tests", "passed", "failures", "errors", "skipped")
+    KEYS = keys = ("tests", "passed", "failures", "errors", "skipped")
 
     def read(self, workdir, opts):
         import xml.etree.ElementTree as ET
@@ -292,6 +300,17 @@ class TradingReader(Reader):
                "calendar": "auto, stocks (252 days a year) or crypto (365), for daily and intraday bars",
                "symbol": "prices.csv's benchmark symbol, when it has several"}
 
+    @property
+    def keys(self) -> tuple:
+        from .trading import metrics as TM
+        return TM.KEYS
+
+    def check_options(self, opts):
+        from .trading import metrics as TM
+        TM.check_settings(opts.get("risk_free", 0.0), opts.get("periods_per_year"), opts.get("calendar", "auto"))
+        if "symbol" in opts and not (isinstance(opts["symbol"], str) and opts["symbol"].strip()):
+            raise MetricsError(f"symbol is {opts['symbol']!r}; give prices.csv's benchmark symbol, e.g. SPY")
+
     def read(self, workdir, opts):
         from .trading import metrics as TM
         workdir = Path(workdir)
@@ -302,8 +321,17 @@ class TradingReader(Reader):
             found[role] = self.path(workdir, opts, role) if given.get(role) else self.path(equity.parent, {}, role)
         settings = {k: opts[k] for k in self.options if opts.get(k) is not None}
         others = [str(found[role]) if found[role] else None for role in ("trades", "prices")]
-        got = TM.compute(str(equity), *others, **settings)    # a refused file or setting: ValueError saying what to do
-        return {**got, "files": {role: self.shown(workdir, f) for role, f in found.items() if f}}
+        shown = {role: self.shown(workdir, f) for role, f in found.items() if f}
+
+        def relative(text: str) -> str:                       # messages and notes name each file as `files` does
+            for role, f in found.items():
+                text = text.replace(str(f), shown[role]) if f else text
+            return text
+        try:
+            got = TM.compute(str(equity), *others, **settings)
+        except ValueError as exc:                             # a refused file or setting: the message says what to do
+            raise MetricsError(relative(str(exc))) from None
+        return {**got, "notes": [relative(n) for n in got["notes"]], "files": shown}
 
     def sample(self):
         return {"equity.csv": "time,equity\n2024-01-02,100000\n2024-01-03,100400\n2024-01-04,99900\n"
@@ -390,6 +418,16 @@ def contract(reader) -> list[str]:
                        "None where the number is not defined")
     if not any(k not in RESERVED for k in first):
         out.append("read() on its sample() files found no numbers")
+    said = getattr(reader, "keys", None)
+    if said is not None:
+        if not isinstance(said, (list, tuple)) or not all(isinstance(k, str) and k.strip() for k in said):
+            out.append(f"keys is {said!r}; it is the names read() always gives, as a tuple of strings (or None when "
+                       "they depend on the file)")
+        elif [k for k in said if k not in first]:
+            missing = [k for k in said if k not in first]
+            out.append(f"keys names {', '.join(missing[:5])}, but read() on its sample() files does not give "
+                       f"{'it' if len(missing) == 1 else 'them'}; keys are the names read() always gives (a rule on "
+                       "any other is refused when testbench.yaml loads)")
     if isinstance(reads[1], dict) and [k for k in first if k not in RESERVED] != \
             [k for k in reads[1] if k not in RESERVED]:
         out.append("reading the same files twice gave different names; names are stable, as checks name them")
@@ -435,6 +473,24 @@ def read(name: str, workdir, opts: dict | None = None) -> dict:
     (MetricsError) saying what to change; nothing else. A value that is not a finite number becomes None, with a
     note, so it passes no rule."""
     reader = get(name)
+    opts = options(name, opts, values=False)
+    workdir = Path(workdir)
+    try:
+        got = reader.read(workdir, opts)
+    except (FileNotFoundError, ValueError):
+        raise
+    except Exception as exc:                             # a reader's own bug, or a file it could not open
+        raise MetricsError(f"reader {name} could not read {workdir}: {type(exc).__name__}: {exc}") from None
+    return _clean(name, got)
+
+
+def options(name: str, opts: dict | None = None, values: bool = True) -> dict:
+    """opts made ready for reader `name` without reading a file: files as {role: path}, and every other key one of
+    the reader's options; with values, each option's value checked by the reader's check_options() too. A reader
+    there is not, a file role or an option it does not take, or a value it refuses raises MetricsError naming the
+    closest or saying what to write. read() starts with it; the numbers: and strategy: checks call it when
+    testbench.yaml loads, so a misspelt option fails before anything runs."""
+    reader = get(name)
     opts = dict(opts or {})
     opts["files"] = _files(reader, opts.get("files"))
     known = getattr(reader, "options", None)
@@ -444,14 +500,24 @@ def read(name: str, workdir, opts: dict | None = None) -> dict:
             if key != "files" and key not in known:
                 raise MetricsError(f"reader {name} has no option {key!r}{near(key, list(known))}; "
                                    + (f"its options are {', '.join(known)}" if known else "it takes none"))
-    workdir = Path(workdir)
+    hook = getattr(reader, "check_options", None)
+    if values and callable(hook):
+        try:
+            hook({k: v for k, v in opts.items() if k != "files"})
+        except ValueError as exc:
+            raise MetricsError(f"reader {name}: {exc}") from None
+        except Exception as exc:                         # a reader's own bug
+            raise MetricsError(f"reader {name} could not check its options: {type(exc).__name__}: {exc}") from None
+    return opts
+
+
+def keys(name: str) -> tuple | None:
+    """The names reader `name` always gives, when it says (its `keys`), else None: they depend on the file."""
     try:
-        got = reader.read(workdir, opts)
-    except (FileNotFoundError, ValueError):
-        raise
-    except Exception as exc:                             # a reader's own bug, or a file it could not open
-        raise MetricsError(f"reader {name} could not read {workdir}: {type(exc).__name__}: {exc}") from None
-    return _clean(name, got)
+        found = getattr(get(name), "keys", None)
+    except Exception:                                    # a reader's keys property that breaks: not known ahead
+        return None
+    return tuple(found) if isinstance(found, (list, tuple)) and all(isinstance(k, str) for k in found) else None
 
 
 def _files(reader, given) -> dict:

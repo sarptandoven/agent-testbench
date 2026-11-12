@@ -31,26 +31,80 @@ python -m agent_testbench.trading.metrics out/equity.csv out/trades.csv --benchm
 The files and the numbers need nothing but the Python standard library: no numpy, no pandas (pandas DataFrames are
 accepted when pandas is there).
 
-## In a plan
+## Checking a strategy
 
-Until `strategy:` checks arrive, the metrics are a plan step of their own, and the plan's `json:` checks read them:
+The backtest step writes the standard files, and its `strategy:` expectation reads them: testbench computes the
+numbers, checks your rules on them, and adds guardrails a good-looking number needs before it means anything.
 
 ```yaml
+# testbench.yaml
+project: momentum
 plans:
   backtest:
+    backend: local
     steps:
       - name: backtest
-        run: python backtest.py                 # writes out/equity.csv and out/trades.csv
-      - name: metrics
-        run: python -m agent_testbench.trading.metrics out/equity.csv out/trades.csv --out out/metrics.json
+        run: python backtest.py               # writes out/equity.csv, out/trades.csv and out/prices.csv
+        max_minutes: 10
         expect:
-          json:
-            out/metrics.json: {sharpe: ">= 1", max_drawdown: ">= -0.2", trades: ">= 30", costs_modeled: true}
+          strategy:
+            equity: out/equity.csv            # the default; trades.csv and prices.csv are read next to it
+            options: {calendar: stocks}       # risk_free, periods_per_year, calendar, symbol: as in compute()
+            sharpe: ">= 1"                    # a rule on any of the numbers below
+            max_drawdown: ">= -0.25"
+            beats: buy_and_hold               # the total return beats buy and hold over the same bars
+            min_trades: 30                    # default 20; 0 turns this guardrail off
+            costs: required                   # the default; `none` allows a backtest that charged nothing
 ```
 
-A number that is not defined is `null` in the JSON (no losing trade means no profit factor), and a `null` fails any
-comparison, so a check never passes for want of a number. A file the reader refuses fails the step, with the
-reader's message in its log.
+`testbench run backtest` then reports, for a strategy that misses:
+
+```
+- expected strategy out/equity.csv: sharpe >= 1: 0.842 (wanted >= 1.0); daily bars, 252 a year; 3 years
+- expected strategy out/equity.csv: beats buy and hold: -0.0412 (wanted > 0.0); excess_return: the total return 0.3127 against buy and hold's 0.3539 (closes in out/prices.csv); daily bars, 252 a year; 3 years
+- expected strategy out/equity.csv: trades >= 30 (min_trades): 12 (wanted >= 30.0); round trips in out/trades.csv, from 24 fills; a number from this few trades means little: backtest over a longer span or more symbols, or set min_trades knowingly (0 turns this off)
+- expected strategy out/equity.csv: costs modelled: false: every fee and slippage in out/trades.csv is 0: the backtest charged no trading costs, so its returns are better than an account would get. Charge fees or slippage in the backtest (trades.csv's fee and slippage columns), or write `costs: none` to allow zero costs - the report then says costs were not modelled
+```
+
+Each finding is named `strategy EQUITY: ...`, and a measured number comes first, so history, run-to-run
+comparisons and `testbench loop --metric check:sharpe` read it back. What `strategy:` takes:
+
+| key | | |
+|---|---|---|
+| `equity` | default `out/equity.csv` | the equity file; trades.csv and prices.csv are read from the same folder when they are there. `strategy: out/run/equity.csv` is short for `{equity: out/run/equity.csv}` |
+| `options` | | the trading reader's: `risk_free`, `periods_per_year`, `calendar`, `symbol` ([below](#the-numbers)) |
+| any key of [the numbers](#the-numbers) | | a rule, as every expectation writes one: `">= 1"`, `"~= 0.12 +- 0.02"`, `"between -0.3 and 0"`, `true` |
+| `beats` | | `buy_and_hold`: `excess_return` > 0 against the benchmark column of equity.csv, or prices.csv's closes |
+| `min_trades` | default 20 | the fewest round trips the numbers may come from; 0 turns it off |
+| `costs` | default `required` | `required`: some fee or slippage in trades.csv is above 0. `none`: zero costs pass |
+
+The guardrails, each a finding of its own:
+
+- **Costs.** A backtest that charged no fee and no slippage on any fill fails `costs modelled` (and so does one with
+  no trades.csv, where costs cannot be seen). `costs: none` lets it pass, and puts a line on the report that says
+  so: `strategy out/equity.csv: costs not modelled (costs: none) - warning: every fee and slippage in
+  out/trades.csv is 0: ...`.
+- **Too few trades.** Fewer round trips than `min_trades` (20 unless set) fails `trades >= 20 (min_trades)`: a win
+  rate or Sharpe from a dozen trades is mostly luck. No trades.csv fails it too, saying what to write.
+- **A benchmark to beat.** `beats: buy_and_hold` with no benchmark column and no prices.csv fails, saying how to give
+  one; it never passes for want of a benchmark.
+- **Undefined numbers.** A rule on a number that is not defined (`null`: Sharpe from two bars, profit factor with no
+  losing trade) fails with the note that says why: `sharpe is undefined (null): volatility, sharpe and sortino are
+  null: they need at least 3 rows (2 returns)`.
+- **Old or broken files.** A file last written before the step started is an earlier run's: it is refused, not
+  read, and so is a file the reader refuses (with its message: the file, the line, the column). Then
+  `strategy out/equity.csv: the standard files` fails with why, and every other finding fails as not checked.
+
+The first finding, `the standard files`, passes once they are read and lists every note of the computation - how the
+periods per year were chosen, too few bars, positions left open - so a passing report still shows the caveats.
+
+`numbers:` ([Expectations](expectations.md#numbers)) reads the same numbers with rules and no guardrails, for a
+step that checks a backtest's numbers alongside other readers':
+
+```yaml
+expect:
+  numbers: {reader: trading, files: {equity: out/equity.csv}, rules: {sharpe: ">= 1", trades: ">= 30"}}
+```
 
 ## Sealed data
 
@@ -132,7 +186,8 @@ out/equity.csv, line 1 (the header): no `time` column. The column with no name m
 ## The numbers
 
 `compute()` and the command line return every one of these keys, always, in this order; a number that is not
-defined is `null` (`None`), and a note says why. Checks will refer to them by name, so they are never renamed.
+defined is `null` (`None`), and a note says why. Checks refer to them by name (`strategy:`, `numbers:`), so they are
+never renamed.
 
 | key | what it is |
 |---|---|
@@ -243,9 +298,9 @@ python -m agent_testbench.trading.metrics EQUITY [TRADES] [--benchmark PRICES] [
 It prints the numbers as JSON (and writes them to `--out`); a refused file or setting prints `error: ` and the
 message, and exits 2.
 
-The same numbers come from the `trading` [metric reader](plugins.md#metrics), the name checks will use for them:
-`testbench numbers trading out/equity.csv out/trades.csv out/prices.csv --opt risk_free=0.04` prints each one by
-name (`--json` for JSON).
+The same numbers come from the `trading` [metric reader](plugins.md#metrics), which `strategy:` and `numbers:` read
+them with: `testbench numbers trading out/equity.csv out/trades.csv out/prices.csv --opt risk_free=0.04` prints
+each one by name (`--json` for JSON).
 
 ## Writing the files from a framework
 

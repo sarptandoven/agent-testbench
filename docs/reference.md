@@ -288,9 +288,9 @@ between runs (put downloaded weights there); `python` and `testbench` are the en
 
 ## Expectations
 
-The common ones are below; every expectation - `junit:`, `metrics:`, `gpu:`, `image:`, `duration:`, tolerances
-(`"~= 0.93 +- 0.01"`) and ranges (`"between 0.8 and 0.95"`) - with what its failure looks like is in
-[expectations.md](expectations.md).
+The common ones are below; every expectation - `junit:`, `metrics:`, `numbers:`, `strategy:`, `gpu:`, `image:`,
+`duration:`, tolerances (`"~= 0.93 +- 0.01"`) and ranges (`"between 0.8 and 0.95"`) - with what its failure looks
+like is in [expectations.md](expectations.md).
 
 ```yaml
 expect:

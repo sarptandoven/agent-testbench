@@ -6,7 +6,7 @@
 prints the numbers as JSON (and writes them to --out); a refused file or setting prints why and exits 2.
 compute() returns the same dict: every key in KEYS, always, as a float, int or bool, or None where the number is not
 defined (no trades file, no benchmark, no volatility), then `notes`, plain-words caveats (too few trades or bars, no
-costs, no benchmark, how the periods per year were chosen). Checks will name these keys (`sharpe: ">= 1"`), so a key
+costs, no benchmark, how the periods per year were chosen). Checks name these keys (`sharpe: ">= 1"`), so a key
 is never renamed or dropped. Only the standard library: no numpy, no pandas.
 
 Definitions (docs/trading.md has them with worked examples):
@@ -73,7 +73,7 @@ def compute(equity, trades=None, prices=None, *, risk_free: float = 0.0, periods
     overrides the one read from the times; calendar ("auto", "stocks": 252 days, "crypto": 365) decides daily and
     intraday bars only. symbol picks prices.csv's benchmark when it has several. Raises files.TradingFileError for a
     refused file and ValueError for a refused setting, with a message that says what to change."""
-    _check_settings(risk_free, periods_per_year, calendar)
+    check_settings(risk_free, periods_per_year, calendar)
     names = {k: F.name_of(src, k) for k, src in (("equity", equity), ("trades", trades), ("prices", prices))}
     bars = F.read_equity(equity, names["equity"])
     fills = None if trades is None else F.read_trades(trades, names["trades"])
@@ -131,7 +131,8 @@ def compute(equity, trades=None, prices=None, *, risk_free: float = 0.0, periods
     return out
 
 
-def _check_settings(risk_free, periods_per_year, calendar) -> None:
+def check_settings(risk_free, periods_per_year, calendar) -> None:
+    """Refuse a setting compute() cannot use, with a ValueError saying what to write (checks call it at load)."""
     if isinstance(risk_free, bool) or not isinstance(risk_free, (int, float)) or not math.isfinite(risk_free) \
             or risk_free <= -1:
         raise ValueError(f"risk_free is {risk_free!r}; give the yearly risk-free rate as a fraction, e.g. 0.04 for "
