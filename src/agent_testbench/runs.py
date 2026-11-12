@@ -223,7 +223,8 @@ def settle(run_dir: Path) -> dict:
 def cancel(run_dir: Path) -> str:
     s = read_state(run_dir)
     if s.get("status") in DONE:
-        return f"{run_dir.name} already {s['status']}"
+        return (f"{run_dir.name} already {s['status']}, so there is nothing to cancel. `testbench report "
+                f"{run_dir.name}` shows how it ended; `testbench runs` lists the others.")
     pid = s.get("driver_pid")
     if alive(pid):
         kill_group(pid)                                # the driver cancels remote work on its way out

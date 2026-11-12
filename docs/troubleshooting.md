@@ -17,20 +17,25 @@ Each command's own codes are in the [reference](reference.md#commands).
 
 ## The command line
 
-`testbench` alone, or `testbench help`, lists every command in groups, with the ones to start with; `testbench help
-<command>` shows its options and examples.
+`testbench` alone, or `testbench help`, lists the core commands in groups, with the ones to start with; `testbench
+help --all` lists every command, and `testbench help <command>` shows its options and examples. Every refusal (exit 2)
+says what was refused, why, and the command or the testbench.yaml field that fixes it.
 
-- `` testbench: no command 'rnu'; did you mean `testbench run smoke`? `testbench --help` lists the commands. `` - a
+- `` testbench: no command 'rnu'; did you mean `testbench run smoke`? `testbench help --all` lists every command. `` - a
   mistyped command. The suggestion is the whole command line, ready to run; for a word that is a subcommand it says
   where it lives: `` no command 'start'; did you mean `testbench session start` or `testbench loop start`? ``
 - `` testbench: 'smoke' is not a command; the command comes first: `testbench run smoke`. `` - and for a plan's name
   on its own, `` no command 'smoke'; smoke is a plan here: `testbench run smoke` runs it. ``
 - `testbench run: error: the following arguments are required: PLAN`, then `` `testbench run --help` says what it
-  takes, with examples. `` - every command's help ends with examples. `unrecognized arguments: --json` is the same:
+  takes, with examples. `` - every command's help ends with examples, and the line before that one quotes the example
+  that uses the option the mistake is about (`` For example: `testbench runs -n 30`. ``). `unrecognized arguments:
+  --json` is the same:
   `--json` (or `--format json`) is on `report`, `diff`, `history`, `estimate`, `exec` and `rescue`.
 - `argument --timeout/--wait: 'soon' is not a number` - times on the command line are seconds (`--wait`,
   `--timeout`, `--debounce`) unless the option says minutes or hours (`--max-minutes`, `--max-hours`).
-- `<file> does not exist` and `<path> is a folder, not a file` - paths are relative to the folder testbench runs in.
+- `` trian.ipynb does not exist; did you mean `testbench lint train.ipynb`? `` - the closest file of its kind there, as
+  the whole command line; with none close, `<file> does not exist (paths start from <folder>)` and the files of that
+  kind there. `<path> is a folder, not a file` - paths are relative to the folder testbench runs in.
 - `` testbench: the other way round: `testbench nb build cells train.ipynb` (the folder of cell files, then the
   notebook to write) ``
 - `no recipe 'pytst' (did you mean pytest?); the recipes are ...`, `unknown client cusor (did you mean cursor?)` and
@@ -78,7 +83,8 @@ no   testbench.yaml: No testbench.yaml here or in any parent of <folder>. Run `t
 ## Loading testbench.yaml
 
 The file is checked when it loads, before anything runs, and a bad one stops every command (exit 2) with the
-field and what to write instead (`testbench plans` is a quick way to load it):
+file, the field and what to write instead (`testbench plans` is a quick way to load it). The messages below start
+with the file's path, `<project>/testbench.yaml: `, left out here:
 
 - `` No testbench.yaml here or in any parent of <folder>. Run `testbench init` in the project folder. ``
   testbench looks in the current folder and its parents. `cd` into the project, or run `testbench init` there.
@@ -126,28 +132,35 @@ field and what to write instead (`testbench plans` is a quick way to load it):
 These come before anything starts, so nothing ran and nothing was spent (exit 2). `testbench plans` shows each
 plan's worst case, and `testbench estimate <plan>` checks one without running it.
 
-- `Refused: plan <plan> could cost up to $3.10 (60 min at $0.0500/min), over budget.max_run_usd $2.00. Lower the
-  steps' max_minutes, use a cheaper GPU, or have a person raise the budget.`
+- `` Refused: plan <plan> could cost up to $3.10 (60 min at $0.0500/min), over budget.max_run_usd $2.00. Lower the
+  max_minutes of plan <plan>'s steps in testbench.yaml (38 min in all would fit), use a cheaper GPU or backend, or have
+  a person raise budget.max_run_usd in testbench.yaml. `testbench estimate <plan>` checks it again. ``
   The worst case (rate times the steps' `max_minutes`, plus start-up) is over the per-run limit. `--approve` does
   not change this. Make the plan cheaper, or a person raises `budget.max_run_usd`.
 - `Refused: plan <plan> could cost up to $6.10 (120 min at $0.0500/min), over max_run_usd $5.00 in
-  <home>/.testbench/limits.yaml (this machine's limit, which a project cannot raise). ...`
+  <home>/.testbench/limits.yaml (this machine's limit, which a project cannot raise). ... or have a person raise
+  max_run_usd in <home>/.testbench/limits.yaml. ...`
   The project's budget is higher than the machine's limit, and the machine's wins. `testbench plans` says so on
   its second line (`capped by this machine: max_run_usd $5.00 in ...`). Only you raise it, in that file.
-- `Refused: $0.35 already committed today; plan <plan> could add $0.35, over budget.max_day_usd $0.60.`
+- `` Refused: $0.35 already committed today; plan <plan> could add $0.35, over budget.max_day_usd $0.60. Wait for
+  running work to finish ... or have a person raise budget.max_day_usd in testbench.yaml. `testbench spend` shows
+  what today's runs cost. ``
   Runs still going count at their worst case, finished ones at their measured cost (`testbench spend`). Wait for
   the running one to finish, run something cheaper, or wait until tomorrow.
 - `Refused: $<n> already committed today across every project on this machine; ... over max_day_usd $<n> in
   <home>/.testbench/limits.yaml (this machine's limit, which a project cannot raise).` *(from the code)* - the
   same, for all projects together.
-- `Needs approval: plan <plan> could cost up to $0.60 (above budget.ask_above_usd $0.50). Ask a person; if they
-  agree, rerun with --approve.`
+- `` Needs approval: plan <plan> could cost up to $0.60 (above budget.ask_above_usd $0.50). Ask a person; only they
+  approve it, with `testbench run <plan> --approve`. `` (over MCP, the same yes is `approved_by_person=true` on the
+  tool)
   An agent shows you the plan, its hardware and this worst case, and waits. If you agree, it reruns with
   `--approve` (in Claude Code the hook asks you again; MCP clients with elicitation ask you directly). In the
   GitHub Action, `approve: true` on the step is that yes, for every run of the workflow.
 - Loops: `Needs approval: a loop on plan <plan> could spend up to $<n> in total (each run up to $<n>), above ...`,
-  `--budget-usd $0.10 has no room for one run of <plan> (worst case $0.35)`, and `the loop's budget has no room for
-  another run: $<spent> of $<budget> spent, and a run could cost up to $<n>. Stop the loop.` *(from the code)* - a
+  `` --budget-usd $0.10 has no room for one run of <plan> (worst case $0.35); give the loop at least that:
+  `testbench loop start <plan> ... --budget-usd 0.35` ``, and `` the loop's budget has no room for another run:
+  $<spent> of $<budget> spent, and a run could cost up to $<n>. Stop the loop with `testbench loop stop` ... ``
+  *(from the code)* - a
   loop's `--budget-usd` covers all its runs; stop it and start a new one with a budget you agree to.
 
 ## Plan runs
@@ -189,7 +202,8 @@ A run that started writes a report; the failure is in it, first. `testbench repo
   `error` with `the driver process exited without finishing; see driver.log` *(from the code)* - the background
   driver died (killed, out of memory, the machine rebooted). `driver.log` in the run folder says why;
   `testbench cancel <run>` also stops any remote work it left.
-- `No plan 'smok' (did you mean smoke?). Plans: <list>` - from `run`, `estimate`, `watch`, `history` and `loop start`.
+- `` No plan 'smok' (did you mean smoke?). Plans: <list>. `testbench plans` shows each with its hardware and worst
+  case `` - from `run`, `estimate`, `watch`, `history` and `loop start`.
 - `` No run '<run>'. Run ids look like 20261101-091612-tests (the latest; a prefix is enough, or last, last~1).
   `testbench runs` lists them `` - and for a plan's name where a run goes, `` tests is a plan, not a run; its latest
   run is 20261101-091612-tests (a prefix of the id is enough) ``. `` run '2026' matches 3 runs (...); give more of
@@ -200,8 +214,12 @@ A run that started writes a report; the failure is in it, first. `testbench repo
 - `<run>: the evidence no longer matches its report:` then `changed: <file>`, `missing: <file>` or
   `added after the run: <file>` (exit 1) - a file under the run's `steps/` was edited, deleted or added after
   the report was written. Run the plan again for evidence you can rely on.
-- `<run> has no recorded evidence to check (it ran before agent-testbench recorded hashes, or never finished)`.
-- `testbench: --repo goes with --attestation (whose workflow should have signed the report)` - `--repo` alone would
+- `` <run> has no recorded evidence to check (it ran before agent-testbench recorded hashes, or never finished).
+  `testbench status <run>` says how it stands; a new run records it: `testbench run <plan>` ``.
+- `` <run> already passed, so there is nothing to cancel. `testbench report <run>` shows how it ended `` - from
+  `testbench cancel`, exit 0.
+- `` testbench: --repo goes with --attestation (whose workflow should have signed the report): `testbench verify
+  --attestation --repo <owner/repo>` `` - `--repo` alone would
   check nothing more.
 
 ## Live sessions
@@ -210,7 +228,10 @@ A run that started writes a report; the failure is in it, first. `testbench repo
   says `no running sessions, so nothing to stop` and exits 0.)
 - `<n> sessions are running (<names>); name one with -s` - `exec`, `files` and `session stop|sync|install|shell`
   pick the only running session; with more, name it: `testbench exec -s gpu "..."`.
-- `session 'main' is already running on local; stop it first or use another name`
+- `` session 'main' is already running on local; work in it (`testbench exec -s main ...`), stop it first
+  (`testbench session stop main`), or start another under a new name ``
+- `` Refused: session gpu could cost up to $6.20 (60 min at $0.1000/min), over budget.max_run_usd $2.00. Start it for
+  fewer minutes: `testbench session start gpu --backend docker --max-minutes 18`, ... `` - the same limits as runs.
 - `` No session named 'gp' (did you mean gpu?). `testbench session list` shows them. ``
 - `` testbench: nothing to run. Give exec the code (`testbench exec "print(1)"`), a file (-f train.py), notebook cells
   (--cells nb.ipynb:1-3) or code on stdin (`testbench exec < script.py`). `` - `exec` with no code in a terminal
@@ -230,16 +251,20 @@ A run that started writes a report; the failure is in it, first. `testbench repo
   in any case; `testbench session list` shows why.
 - `` `colab <command>` did not answer within <n> s (the Colab connection may have stalled); the session is still
   there - try again, or `testbench session list` `` *(from the code)*.
-- `a modal session can last at most 24 hours (max_minutes <= 1440)` *(from the code)*.
+- `` a modal session can last at most 24 hours (max_minutes <= 1440): `testbench session start main --backend modal
+  --max-minutes 1440` `` *(from the code)*.
 
 ## Loops
 
 - `` the loop keeps and reverts changes with git, and this folder is not in a git repository: `git init`, commit
-  the project, then start the loop ``
-- `the repository has uncommitted changes, which a revert could lose. Commit or stash them, then start the loop:`
-  followed by the files (`?? scratch.py`).
-- `` plan <plan> checks no 'accuracy' in summary.json, so its runs would not report the metric. Give a step an
-  expectation such as `expect: {json: {summary.json: {accuracy: ">= 0"}}}`. `` - `--metric FILE:KEY` must be a
+  the project (`git add -A && git commit -m "before the loop"`), then start the loop: `testbench loop start ...` `` -
+  the same command line, ready to run again.
+- `` the repository has uncommitted changes, which a revert could lose. Commit or stash them (`git stash -u`), then
+  start the loop: `testbench loop start ...`. The changes: `` followed by the files (`?? scratch.py`).
+- `` plan <plan> checks no 'accuracy' in summary.json, so its runs would not report the metric. The numbers it
+  checks: summary.json:rows; e.g. `testbench loop start <plan> --metric summary.json:rows ...`. Or give a step of plan
+  <plan> in testbench.yaml an expectation such as `expect: {json: {summary.json: {accuracy: ">= 0"}}}`, then `testbench
+  loop start ...`. `` - `--metric FILE:KEY` must be a
   number one of the plan's `json:` expectations checks; or use `check:SUBSTRING` for any check that found a number.
 - `` nothing changed since the best commit; edit the code, then `testbench loop try "what changed"` ``
 - `` No loop is running here. Start one with `testbench loop start PLAN --metric FILE:KEY --budget-usd N`. ``

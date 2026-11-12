@@ -305,34 +305,45 @@ def start(root: Path, cfg: dict, plan: str, metric: str, budget_usd: float, goal
         if not (isinstance(v, (int, float)) and math.isfinite(v) and v >= least):      # nan would pass every limit
             raise LoopError(f"{flag} is a number of {'at least 0' if least == 0 else 'more than 0'}; got {v!r}")
     path, key = parse_metric(metric)
-    checked = any(key in ((s["expect"].get("json") or {}).get(path) or {}) for s in cfg["plans"][plan]["steps"])
-    if path != CHECK and not checked:
-        raise LoopError(f"plan {plan} checks no {key!r} in {path}, so its runs would not report the metric. Give a "
-                        f"step an expectation such as `expect: {{json: {{{path}: {{{key}: \">= 0\"}}}}}}`.")
+
+    def again(metric=metric, budget_usd=budget_usd) -> str:
+        """This loop start as a person types it (without --approve), with what a refusal says to change."""
+        given = (("max-hours", max_hours, 8.0), ("min-delta", min_delta, 0.0), ("target", target, None),
+                 ("patience", patience, None), ("max-tries", max_tries, None))
+        return " ".join([f"testbench loop start {plan} --metric {shlex.quote(metric)} --budget-usd {budget_usd:g}"]
+                        + ([f"--goal {goal}"] if goal != "max" else [])
+                        + [f"--{k} {v:g}" for k, v, usual in given if v != usual])
+
+    checks = [f"{p}:{k}" for s in cfg["plans"][plan]["steps"] for p, keys in (s["expect"].get("json") or {}).items()
+              if isinstance(keys, dict) for k in keys]
+    if path != CHECK and f"{path}:{key}" not in checks:
+        raise LoopError(f"plan {plan} checks no {key!r} in {path}, so its runs would not report the metric. "
+                        + (f"The numbers it checks: {', '.join(checks[:8])}; e.g. `{again(checks[0])}`. Or give"
+                           if checks else "Give")
+                        + f" a step of plan {plan} in {C.CONFIG_NAME} an expectation such as "
+                        f"`expect: {{json: {{{path}: {{{key}: \">= 0\"}}}}}}`, then `{again()}`.")
     if active(root):
         raise LoopError(f"loop {active(root)['id']} is still running here; stop it first with `testbench loop stop`")
     if _git(root, "rev-parse", "--is-inside-work-tree", check=False) != "true":
         raise LoopError("the loop keeps and reverts changes with git, and this folder is not in a git repository: "
-                        "`git init`, commit the project, then start the loop")
+                        "`git init`, commit the project (`git add -A && git commit -m \"before the loop\"`), then "
+                        f"start the loop: `{again()}`")
     dirty = _changes(root, _git(root, "rev-parse", "--show-toplevel"))
     if dirty:
-        raise LoopError("the repository has uncommitted changes, which a revert could lose. Commit or stash them, then "
-                        "start the loop:\n  " + "\n  ".join(dirty[:10]))
+        raise LoopError("the repository has uncommitted changes, which a revert could lose. Commit or stash them "
+                        f"(`git stash -u`), then start the loop: `{again()}`. The changes:\n  " + "\n  ".join(dirty[:10]))
     worst = budget.worst_case(cfg, plan)["worst_case_usd"]
     if worst > budget_usd:
-        raise LoopError(f"--budget-usd ${budget_usd:.2f} has no room for one run of {plan} (worst case ${worst:.2f})")
+        raise LoopError(f"--budget-usd ${budget_usd:.2f} has no room for one run of {plan} (worst case ${worst:.2f}); "
+                        f"give the loop at least that: `{again(budget_usd=math.ceil(worst * 100) / 100)}`")
     ok, message, _ = budget.check_launch(cfg, plan, approve=True)
     if not ok:
         raise LoopError(message)
     ask, where = budget.limits(cfg)["ask_above_usd"]
     if budget_usd > ask and not approve:
+        how = f"{again()} --approve"
         message = (f"Needs approval: a loop on plan {plan} could spend up to ${budget_usd:.2f} in total (each run up "
-                   f"to ${worst:.2f}), above {where}. Ask a person; if they agree, rerun with --approve.")
-        given = (("max-hours", max_hours, 8.0), ("min-delta", min_delta, 0.0), ("target", target, None),
-                 ("patience", patience, None), ("max-tries", max_tries, None))
-        how = " ".join([f"testbench loop start {plan} --metric {shlex.quote(metric)} --budget-usd {budget_usd:g}"]
-                       + ([f"--goal {goal}"] if goal != "max" else [])
-                       + [f"--{k} {v:g}" for k, v, usual in given if v != usual] + ["--approve"])
+                   f"to ${worst:.2f}), above {where}. Ask a person; only they approve it, with `{how}`.")
         p = cfg["plans"][plan]
         notify.approval_needed(root, cfg, message, {"what": f"a loop on plan {plan}", "plan": plan,
                                                     "backend": p["backend"], "gpu": p.get("gpu"),
@@ -361,7 +372,9 @@ def _room(cfg: dict, state: dict) -> float:
     worst = budget.worst_case(cfg, state["plan"])["worst_case_usd"]
     if spent(state) + worst > state["budget_usd"]:
         raise LoopError(f"the loop's budget has no room for another run: ${spent(state):.2f} of "
-                        f"${state['budget_usd']:.2f} spent, and a run could cost up to ${worst:.2f}. Stop the loop.")
+                        f"${state['budget_usd']:.2f} spent, and a run could cost up to ${worst:.2f}. Stop the loop with "
+                        "`testbench loop stop` (its report keeps the best try); going on takes a new loop, with a "
+                        "budget a person agrees to.")
     if time.time() > state["deadline"]:
         raise LoopError("the loop is past its --max-hours; stop it with `testbench loop stop`")
     return worst

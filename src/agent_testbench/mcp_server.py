@@ -115,7 +115,11 @@ async def _with_approval(ctx, project_dir: str, argv: list[str]) -> tuple[int, s
     (notify:) waits ASK_NOTICE_AFTER_S for that answer: it goes out only if the person has not answered by then,
     or could not be asked."""
     if "--approve" in argv or not _can_ask(ctx):
-        return await _cli(project_dir, argv)
+        code, out = await _cli(project_dir, argv)
+        if code == 2 and "Needs approval:" in out and "--approve" not in argv:     # the CLI's words, as this tool
+            out += ("\nThrough this server the approval is approved_by_person=true on this tool: set it only after "
+                    "the person said yes to this cost.")
+        return code, out
     fd, name = tempfile.mkstemp(prefix="testbench-approval-", suffix=".json")
     os.close(fd)
     held = Path(name)

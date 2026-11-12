@@ -1365,6 +1365,8 @@ def render(d: dict) -> str:
 
 
 def main(a) -> int:
+    if not Path(a.notebook).exists():               # said before anything runs, with the closest notebook (cli.main)
+        raise FileNotFoundError(2, "No such file or directory", a.notebook)
     if not a.json and not a.no_run:
         print(f"[testbench] reading {a.notebook}, then running it top to bottom in a fresh kernel here "
               f"(up to {a.timeout:g} s) ...", flush=True)
