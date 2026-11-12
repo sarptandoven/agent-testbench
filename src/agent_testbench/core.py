@@ -45,6 +45,7 @@ CORE_MODULES = (
     "agent_testbench.driver",              # the background process behind a run
     "agent_testbench.executor",            # a plan's steps where the plan runs, and their evidence
     "agent_testbench.expect",              # expectations: the checks on a step's result
+    "agent_testbench.metrics",             # metric readers: evidence files as named numbers, for checks to name
     "agent_testbench.provenance",          # source, environment and evidence hashes; verify
     "agent_testbench.report",              # the report: json, md, html, junit, history
     "agent_testbench.procs",               # background processes and lock files, the same on every system

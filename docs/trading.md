@@ -235,6 +235,10 @@ python -m agent_testbench.trading.metrics EQUITY [TRADES] [--benchmark PRICES] [
 It prints the numbers as JSON (and writes them to `--out`); a refused file or setting prints `error: ` and the
 message, and exits 2.
 
+The same numbers come from the `trading` [metric reader](plugins-metrics.md), the name checks will use for them:
+`testbench numbers trading out/equity.csv out/trades.csv out/prices.csv --opt risk_free=0.04` prints each one by
+name (`--json` for JSON).
+
 ## Writing the files from a framework
 
 Each snippet records every fill and every bar's equity and writes them with the writers. The **plain pandas**,

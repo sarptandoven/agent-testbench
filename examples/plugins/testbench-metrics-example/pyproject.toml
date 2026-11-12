@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "testbench-metrics-example"
+version = "0.1.0"
+description = "An example agent-testbench plug-in: a metric reader for key=value logs"
+requires-python = ">=3.10"
+dependencies = ["agent-testbench"]
+
+# The reader's name = the class that reads it
+[project.entry-points."agent_testbench.metrics"]
+kvlog = "testbench_metrics_example:KeyValueLog"
+
+[tool.hatch.build.targets.wheel]
+include = ["testbench_metrics_example.py"]

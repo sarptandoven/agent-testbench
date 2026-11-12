@@ -16,9 +16,9 @@
   through `config.number` (NaN compares false with every limit), and an MCP tool argument that ends up on the
   command line is a value, never an option (`mcp_server._name`, `--opt=value`, or after `--`).
 - Core and layers (`core.py`, the base for plug-ins; `docs/architecture.md`): the core is `config`, `budget`,
-  `prices`, `backends/__init__` and `backends/local`, `runs`, `driver`, `executor`, `expect`, `provenance`, `report`,
-  `procs` and `core` itself - load a config, price and check a launch, run a plan on this machine, check it, write and
-  verify its proof record. Everything else is a layer: the ways in (`cli`, `mcp_server`, `api`, `tools`, `connect`,
+  `prices`, `backends/__init__` and `backends/local`, `runs`, `driver`, `executor`, `expect`, `metrics`, `provenance`,
+  `report`, `procs` and `core` itself - load a config, price and check a launch, run a plan on this machine, check it,
+  write and verify its proof record. Everything else is a layer: the ways in (`cli`, `mcp_server`, `api`, `tools`, `connect`,
   `dashboard`, `ui`, `github_action`), the remote backends, `sessions`, `session_backends`, `kernelkit/`,
   `notebook`, `web`, `mocks`, `notify`, `export`, `loop`, `watch`, `diff`, `rescue`, `scaffold`, `recipes/`, `lint`,
   `selftest`. A core module never imports a layer or an optional package at module level (only inside the function
@@ -44,8 +44,14 @@
 - Exports: `export.py` (`testbench export`, and testbench.yaml's `export:` after every run from `runs.finalize`:
   MLflow, W&B, csv, jsonl). Trackers are imported only when used and never fail or hold up a run; their tests
   skip unless mlflow / wandb are installed (in a separate venv: `docs/export.md`).
-- Setup: `recipes/` (the YAML ladders `testbench recipes` and `init --recipe` use; recipes never set budget:,
-  pricing: or guard:), `connect.py` (`testbench connect`: other clients' MCP configs, merged as text).
+- Setup: `recipes/` (the YAML ladders `testbench recipes` and `init --recipe` use, plus any a package adds by entry
+  point; recipes never set budget:, pricing: or guard: - `recipes.parse` refuses one that does - and
+  `recipes.contract` is what a new one is checked against), `connect.py` (`testbench connect`: other clients' MCP
+  configs, merged as text).
+- Metric readers: `metrics.py` (core: evidence files as named numbers - json, csv, junit, trading, and a package's by
+  entry point; `testbench numbers`). A missing file is a FileNotFoundError naming it, a value a finite number, a bool
+  or None; `metrics.contract` checks a reader. Checks do not use it yet (the planned `numbers:` shape is in its
+  docstring).
 - testbench.yaml: `config.py` reads it; its short forms (`tests: "pytest -q"`, a list of commands, a step written as
   a command) become the long form there (`config.long_form`), so nothing downstream sees them.
   `schema/testbench.schema.json` is its JSON Schema for editors (`testbench schema`): a new key needs an entry

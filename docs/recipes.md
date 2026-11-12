@@ -14,8 +14,9 @@ testbench init --add --recipe llm-eval     # its plans added to the testbench.ya
 ```
 
 The MCP server has the same as the `recipes` tool (no name: the list; a name: that recipe). The recipes are files in
-[src/agent_testbench/recipes/](../src/agent_testbench/recipes), installed with the package. In a project with a
-test suite and `src/train.py`:
+[src/agent_testbench/recipes/](../src/agent_testbench/recipes), installed with the package; other packages can add
+more ([recipe plug-ins](plugins-recipes.md)), and `testbench recipes` names the package each of those comes from.
+In a project with a test suite and `src/train.py`:
 
 ```
 $ testbench init --recipe pytorch-train

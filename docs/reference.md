@@ -440,6 +440,7 @@ with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`); ev
 | `diff [A B \| PLAN \| RUN] [--json]` | what changed between two runs | 0 |
 | `history PLAN [-n N] [--json]` | a plan's runs over time | 0 |
 | `export [RUN\|all] [--to mlflow\|wandb\|csv\|jsonl]` | a run in a tracker or a file | 0, 1 a target failed |
+| `numbers [READER [PATH...]] [--opt KEY=VALUE] [--json]` | the named numbers a metric reader (json, csv, junit, trading or an installed one) finds in evidence files, to write rules with; no READER: the readers and the files each reads ([metric readers](plugins-metrics.md)) | 0 (2: a file is missing or refused) |
 | **sessions and notifications** | | |
 | `files ls\|get\|put PATH...` | files on the session's machine | 0 |
 | `notify test` | one test message to the `notify:` webhook | 0 accepted, 1 refused by the service |
