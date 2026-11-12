@@ -287,30 +287,36 @@ def own_file(root: Path, path: Path) -> Path:
     return Path(path)
 
 
+NOTIFY_OWN = ("webhook", "webhook_env", "on")     # notify:'s own keys; every other key names a notifier
+
+
 def _notify(n) -> dict | None:
-    """Where notifications go. The values are never repeated in a message: a webhook URL's path is its secret."""
+    """Where notifications go: the webhook (`webhook:` or `webhook_env:`, as always) and any other notifier by its
+    name (`desktop: true`, or an installed plug-in's, with its settings); `on:` picks the events for all of them.
+    The values are never repeated in a message: a webhook URL's path is its secret. Returns webhook, webhook_env and
+    on, plus {name: settings} for each other notifier (notify.chosen reads it)."""
     if n is None:
         return None
     if not isinstance(n, dict):
         raise ConfigError(f"`notify:` is a mapping, e.g. {NOTIFY_EXAMPLE}")
     if True in n:                                  # YAML 1.1 reads a bare `on:` key as true
         n = {("on" if k is True else k): v for k, v in n.items()}
+    from . import plugins as P
+    names, broken = P.names("notifiers"), P.broken("notifiers")
     for k in n:
-        if k not in ("webhook", "webhook_env", "on"):
-            raise ConfigError(f"`notify` has no {str(k)!r}; use webhook (or webhook_env) and on, e.g. {NOTIFY_EXAMPLE}")
+        if k not in NOTIFY_OWN and k not in names and k not in broken:
+            others = [x for x in names if x != "webhook"]
+            raise ConfigError(f"`notify` has no {str(k)!r}; use webhook (or webhook_env) and on, e.g. {NOTIFY_EXAMPLE}"
+                              + (f"; another notifier goes by its name: {', '.join(others)}" if others else ""))
     url, env = n.get("webhook"), n.get("webhook_env")
-    if bool(url) == bool(env):
+    others = {k: v for k, v in n.items() if k not in NOTIFY_OWN and v is not False}
+    if not url and not env and not others:
         raise ConfigError("`notify` needs one of `webhook:` (the URL to POST to) or `webhook_env:` (the name of an "
                           "environment variable that holds it, which keeps the URL's secret out of the file), e.g. "
-                          + NOTIFY_EXAMPLE)
-    if url and (not isinstance(url, str) or not re.match(r"https?://[^/\s]+", url.strip())):
-        raise ConfigError("`notify.webhook` is a URL that takes a JSON POST, starting with https:// (e.g. a Slack "
-                          "incoming webhook); or put the URL in an environment variable and name it with "
-                          "`notify.webhook_env: NAME`")
-    if env and (not isinstance(env, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", env)):
-        raise ConfigError("`notify.webhook_env` is the NAME of an environment variable that holds the webhook URL, "
-                          "e.g. TESTBENCH_WEBHOOK - not the URL itself (export TESTBENCH_WEBHOOK=https://... where "
-                          "testbench runs)")
+                          + NOTIFY_EXAMPLE + "; or another notifier by its name, e.g. `desktop: true` (a notification "
+                          "on this machine's screen)")
+    hook = _settings("notifiers", "webhook", "notify", {"webhook": url, "webhook_env": env}) if url or env else \
+        {"webhook": None, "webhook_env": None}
     on = n.get("on", list(NOTIFY_DEFAULT))
     on = [on] if isinstance(on, str) else on
     if not isinstance(on, list) or not on or any(e not in NOTIFY_EVENTS for e in on):
@@ -320,60 +326,70 @@ def _notify(n) -> dict | None:
                           + f" (default: {', '.join(NOTIFY_DEFAULT)}), e.g. {NOTIFY_EXAMPLE}")
     if "loop_end" in on:                           # a rule firing was sent as loop_end before loop_rule was its own
         on = [*on, "loop_rule"]
-    return {"webhook": url.strip() if url else None, "webhook_env": env or None, "on": list(dict.fromkeys(on))}
+    out = {"webhook": hook["webhook"], "webhook_env": hook["webhook_env"], "on": list(dict.fromkeys(on))}
+    for name, opts in others.items():              # installed but not loading: kept, and told in notify.log
+        out[name] = _settings("notifiers", name, f"notify.{name}", opts) if name in names else \
+            opts if isinstance(opts, dict) else {}
+        _no_secrets(f"notify.{name}", out[name])
+    return out
 
 
-EXPORT_KEYS = {"mlflow": ("tracking_uri", "experiment", "artifacts"),
+EXPORT_KEYS = {"mlflow": ("tracking_uri", "experiment", "artifacts"),     # the built-in sinks' settings (export.py)
                "wandb": ("project", "entity", "mode", "dir", "tags", "artifacts"), "csv": ("path",), "jsonl": ("path",)}
-EXPORT_SECRETS = {"mlflow": "MLFLOW_TRACKING_TOKEN (or MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD)",
-                  "wandb": "WANDB_API_KEY"}
-EXPORT_EXAMPLES = {"tracking_uri": "http://127.0.0.1:5000 or sqlite:///.testbench/mlflow.db", "experiment": "my-project",
-                   "project": "my-project", "entity": "my-team", "mode": "offline", "dir": ".testbench"}
 
 
 def check_export(e) -> dict:
-    """export: where every finished run goes too (docs/export.md). Returns {target: options}; false leaves one out."""
+    """export: where every finished run goes too (docs/export.md). Returns {sink: its settings}, each checked by the
+    sink itself (export.Sink.validate); false leaves one out. A plug-in sink that is installed but does not load is
+    kept as written, so its exports fail in export.log and it never stops a run or this file from loading."""
     example = "{csv: .testbench/runs.csv, mlflow: {tracking_uri: http://127.0.0.1:5000, experiment: my-project}}"
     if e is None:
         return {}
     if not isinstance(e, dict):
         raise ConfigError(f"`export` maps trackers to their settings, e.g. {example}")
+    from . import plugins as P
+    names, broken = P.names("sinks"), P.broken("sinks")
     out = {}
     for target, opts in e.items():
         where = f"export.{target}"
-        if target not in EXPORT_KEYS:
-            raise ConfigError(f"`export` has no {target!r}; use {', '.join(EXPORT_KEYS)}, e.g. {example}")
+        if target not in names and target not in broken:
+            raise ConfigError(f"`export` has no {target!r}; use {', '.join(names)}, e.g. {example}")
         if opts is False:
             continue
-        opts = {"path": opts} if isinstance(opts, str) and target in ("csv", "jsonl") else \
-            {} if opts in (None, True) else opts
-        if not isinstance(opts, dict):
-            raise ConfigError(f"`{where}` is a mapping of settings ({', '.join(EXPORT_KEYS[target])})"
-                              + (f", or the file's path, e.g. `{target}: .testbench/runs.{target}`" if target in ("csv", "jsonl") else ""))
-        for k, v in opts.items():
-            if re.search(r"token|key|secret|password|passwd|credential", str(k), re.I):
-                raise ConfigError(f"`{where}.{k}`: secrets never go in testbench.yaml. Set "
-                                  f"{EXPORT_SECRETS.get(target, 'it')} in the environment, where the tracker reads it; "
-                                  "testbench never prints or writes it")
-            if k not in EXPORT_KEYS[target]:
-                raise ConfigError(f"`{where}` has no {k!r}; use {', '.join(EXPORT_KEYS[target])}")
-            if k == "artifacts" and not isinstance(v, bool):
-                raise ConfigError(f"`{where}.artifacts` is true (upload the report and the evidence files, the "
-                                  "default) or false")
-            if k == "tags" and (not isinstance(v, list) or not all(isinstance(t, str) for t in v)):
-                raise ConfigError(f"`{where}.tags` is a list of words, e.g. [baseline, nightly]")
-            if k not in ("artifacts", "tags") and (not isinstance(v, str) or not v.strip()):
-                raise ConfigError(f"`{where}.{k}` is a string, e.g. {EXPORT_EXAMPLES.get(k, f'.testbench/runs.{target}')}")
-        if re.match(r"\w[\w+.-]*://[^/@\s]+@", str(opts.get("tracking_uri", ""))):
-            raise ConfigError(f"`{where}.tracking_uri` holds credentials; write the URL without them and set "
-                              f"{EXPORT_SECRETS['mlflow']} in the environment")
-        if opts.get("mode") not in (None, "online", "offline", "disabled"):
-            raise ConfigError(f"`{where}.mode` is online (to the W&B server), offline (kept on this machine for "
-                              "`wandb sync`) or disabled")
-        if target == "wandb" and set(str(opts.get("project", ""))) & set("/\\#?%:"):
-            raise ConfigError(f"`{where}.project` is a W&B project name, without / \\ # ? % or :")
-        out[target] = opts
+        out[target] = _settings("sinks", target, where, opts) if target in names else \
+            opts if isinstance(opts, dict) else {}
+        _no_secrets(where, out[target])
     return out
+
+
+def _settings(kind: str, name: str, where: str, opts) -> dict:
+    """A sink's or notifier's settings as it checks them itself (its validate()). One that cannot check them, rather
+    than refusing them with a ConfigError, has a bug: it is named, with the line that leaves it out."""
+    from . import plugins as P
+    try:
+        got = P.get(kind, name).validate(where, opts)
+    except ConfigError:
+        raise
+    except Exception as exc:
+        got = exc
+    if not isinstance(got, dict):
+        what = f"failed ({type(got).__name__}: {got})" if isinstance(got, Exception) else \
+            f"gave back {type(got).__name__}, not its settings"
+        raise ConfigError(f"`{where}`: the {name} {P.kind(kind).one} could not check its settings - its validate() "
+                          f"{what}. That is a bug in the package that provides it; leave it out (`{name}: false`) "
+                          "until it is fixed") from None
+    return got
+
+
+def _no_secrets(where: str, opts: dict) -> None:
+    """Secrets stay out of testbench.yaml, whatever a plug-in's own check allows: a setting named like a token, key
+    or password is refused, unless it ends in _env and holds an environment variable's NAME."""
+    for k, v in opts.items():
+        if re.search(r"token|key|secret|password|passwd|credential", str(k), re.I) and not (
+                str(k).endswith("_env") and isinstance(v, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", v)):
+            raise ConfigError(f"`{where}.{k}`: secrets never go in testbench.yaml. Put it in an environment variable "
+                              "where testbench runs and give that variable's NAME instead (a setting ending in _env, "
+                              "if this one takes it); testbench never prints or writes it")
 
 
 # ---- short forms: written out in full before anything else reads a plan ------------------------------------------

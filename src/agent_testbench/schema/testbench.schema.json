@@ -136,11 +136,18 @@
       }
     },
     "notify": {
-      "description": "A JSON POST when a run or loop ends or a launch needs approval (docs/notify.md)",
+      "description": "A JSON POST, a desktop notification or a plug-in's message when a run or loop ends or a launch needs approval (docs/notify.md)",
       "type": ["object", "null"],
-      "additionalProperties": false,
+      "additionalProperties": {
+        "description": "Another notifier by its name: desktop (a notification on this machine's screen) or an installed plug-in's; true or its settings, false leaves it out",
+        "anyOf": [{"type": ["boolean", "null"]}, {"type": "object"}]
+      },
       "if": {"type": "object"},
-      "then": {"oneOf": [{"required": ["webhook"]}, {"required": ["webhook_env"]}]},
+      "then": {
+        "not": {"required": ["webhook", "webhook_env"]},
+        "anyOf": [{"required": ["webhook"]}, {"required": ["webhook_env"]},
+                  {"not": {"propertyNames": {"enum": ["webhook", "webhook_env", "on"]}}}]
+      },
       "properties": {
         "webhook": {
           "description": "The URL to POST to, starting with https:// (or use webhook_env to keep it out of the file)",
@@ -166,7 +173,7 @@
       }
     },
     "export": {
-      "description": "Where every finished run goes too: MLflow, W&B, csv, jsonl (docs/export.md)",
+      "description": "Where every finished run goes too: MLflow, W&B, csv, jsonl (docs/export.md); testbench also takes an installed plug-in sink's name, which this schema cannot know",
       "type": ["object", "null"],
       "additionalProperties": false,
       "properties": {

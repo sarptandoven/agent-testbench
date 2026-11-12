@@ -1,7 +1,7 @@
 """Exports: a finished run in the experiment tracker people already use (MLflow, Weights & Biases) or in a table
 (csv, jsonl), with the way back to its proof.
 
-    testbench export [RUN|latest|all] [--to mlflow|wandb|csv|jsonl]
+    testbench export [RUN|latest|all] [--to mlflow|wandb|csv|jsonl|a plug-in sink]
     export: {mlflow: {tracking_uri: ..., experiment: ...}, wandb: {project: ..., mode: offline}, csv: runs.csv}
 
 A run becomes one record: plan, status, backend and GPU, cost, minutes, commit and dirty flag, the steps' params,
@@ -12,36 +12,43 @@ csv and jsonl replace its row, MLflow finds it by tag, W&B uses the run id as it
 unreachable tracker never holds a run up; every outcome goes to the run's export.log, which `testbench report`
 shows. Secrets (WANDB_API_KEY, MLFLOW_TRACKING_TOKEN, ...) stay in the environment, where the trackers read them;
 nothing here prints or writes them.
+
+Each place a run can go is a sink (the `sinks` plug-in kind: KIND at the end; Sink says what one is). The four
+above are the built-ins. A package adds more with an entry point in the group agent_testbench.sinks, and `export:`
+and `--to` then take its name like a built-in's (docs/plugins.md#sinks).
 """
 from __future__ import annotations
 
+import copy
 import csv
 import datetime as dt
+import importlib
 import io
 import json
 import os
 import re
 import sys
 import threading
+import time
 from pathlib import Path
 
 import yaml
 
-from . import config as C, procs, report as R
+from . import config as C, plugins as P, procs, report as R
 
-TARGETS = ("mlflow", "wandb", "csv", "jsonl")
-LOCAL = ("csv", "jsonl")                              # written at the end of a run; trackers go to the background
 FIELDS = ("run_id", "project", "plan", "status", "backend", "gpu", "started", "finished", "minutes", "cost_usd",
           "worst_case_usd", "commit", "branch", "dirty", "steps", "steps_passed", "checks", "checks_passed",
           "evidence_files", "evidence_sha256", "stopped_because", "testbench_version", "python", "report")
-PACKAGES = {"mlflow": "MLflow", "wandb": "Weights & Biases (wandb)"}
 QUIET = {"mlflow": {"MLFLOW_HTTP_REQUEST_MAX_RETRIES": "2", "MLFLOW_HTTP_REQUEST_TIMEOUT": "30",   # down: fails fast
                     "MLFLOW_DISABLE_TELEMETRY": "true", "MLFLOW_DISABLE_AGENT_HINT": "1", "MLFLOW_LOGGING_LEVEL": "WARNING"},
          "wandb": {"WANDB_SILENT": "true", "WANDB_ERROR_REPORTING": "false"}}
 BACKGROUND_LIMIT = 900                                # seconds a background export may take before it gives up
+FOREGROUND_LIMIT = 60                                 # seconds the quick sinks may take at the end of a run, in all
 LINE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (\w+): (ok|failed|started) - (.*)$")
 RULE_AT_END = re.compile(r"\s+(?:(?:>=|<=|!=|==|>|<)\s*\S+|~=\s*\S+\s*(?:\+-|\+/-|±)\s*\S+|between\s+\S+\s+and\s+\S+"
                          r"|[-+]?\d[\d.eE+-]*)$", re.I)
+SECRET_WORDS = re.compile(r"token|key|secret|password|passwd|credential", re.I)     # setting names never in the file
+VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 class ExportError(Exception):
@@ -50,6 +57,98 @@ class ExportError(Exception):
 
 class Missing(ExportError):
     code = 2
+
+
+class Sink:
+    """Where `export:` sends a finished run (the `sinks` plug-in kind). A plug-in sink is any object with these;
+    subclassing this class is optional, and brings the settings check described at the end.
+
+        name        its key under `export:` and its `--to` name ("csv"); the entry point's name when left empty
+        background  True for anything that may touch the network or take long: after a run it goes to a background
+                    process (at most BACKGROUND_LIMIT seconds), so it never holds the run up. False for quick local
+                    work, done at the end of the run (FOREGROUND_LIMIT seconds for all of them, then the run goes on)
+        requires    the module that must import for it to work ("mlflow"), or "". Imported only when the sink is
+                    used; a missing one fails that export with the pip command that installs it, never the run
+        package     what to pip install when `requires` does not import (default: `requires`)
+        title       how messages name it ("MLflow"; default: its name)
+        example     settings that validate, for `testbench plugin test` (relative paths land in a scratch folder)
+
+        validate(where, opts) -> dict
+            The settings as written under `export.NAME` (None or true for none, a string for a short form) -> the
+            settings send() gets. Anything it cannot use raises config.ConfigError naming the field (`where` is
+            "export.NAME") and saying what to write instead. Secrets never go in testbench.yaml: a setting named
+            like a token, key or password is refused, unless it ends in _env and holds an environment variable's
+            NAME.
+        send(root, run_dir, record, opts) -> str
+            Export one finished run (`record`: what record() makes - FIELDS, and params and metrics) and return
+            what was done, in one line ("row 3 of .testbench/runs.csv"). A plain failure raises ExportError (Missing
+            for something to install) with a message that says what to do. Whatever it raises fails that export
+            only, in export.log; nothing a sink does can fail a run. Never print or return a secret (the
+            environment's are blanked out of messages too, but a sink must not lean on that).
+
+    The settings check this class brings: `options` names the settings it takes; each is a non-empty string,
+    except `flags` ({name: what true means}: true or false) and `lists` (lists of words). `short` is the setting a
+    plain string stands for (`csv: runs.csv`) and `short_hint` what that string is ("the file's path"); `hints`
+    ({setting: an example value}) go in the messages, and `secrets` names the variables to set when someone writes
+    a secret in the file. check(where, opts) adds rules of its own; or override validate() altogether.
+    """
+    name = ""
+    background = False
+    requires = ""
+    package = ""
+    title = ""
+    example: dict = {}
+    options: tuple = ()
+    flags: dict = {}
+    lists: tuple = ()
+    short = ""
+    short_hint = ""
+    hints: dict = {}
+    secrets = "it"
+    quiet: dict = {}                                  # environment defaults set before `requires` is imported
+
+    def __init__(self, name: str = "", send=None, **settings):
+        for k, v in settings.items():
+            if k.startswith("_") or not hasattr(Sink, k) or callable(getattr(Sink, k)):
+                raise TypeError(f"a Sink has no setting {k!r}")
+            setattr(self, k, v)
+        if name:
+            self.name = name
+        if send is not None:
+            self.send = send
+
+    def __repr__(self):
+        return f"<sink {self.name or '?'}>"
+
+    def validate(self, where: str, opts) -> dict:
+        opts = {self.short: opts} if isinstance(opts, str) and self.short else {} if opts in (None, True) else opts
+        if not isinstance(opts, dict):
+            raise C.ConfigError(f"`{where}` is a mapping of settings ({', '.join(self.options)})"
+                                + (f", or {self.short_hint}, e.g. `{self.name}: {self.hints.get(self.short)}`"
+                                   if self.short else ""))
+        for k, v in opts.items():
+            if SECRET_WORDS.search(str(k)) and not (k in self.options and str(k).endswith("_env")):
+                raise C.ConfigError(f"`{where}.{k}`: secrets never go in testbench.yaml. Set {self.secrets} in the "
+                                    "environment, where the tracker reads it; testbench never prints or writes it")
+            if k not in self.options:
+                raise C.ConfigError(f"`{where}` has no {k!r}; use {', '.join(self.options)}")
+            if k in self.flags and not isinstance(v, bool):
+                raise C.ConfigError(f"`{where}.{k}` is true ({self.flags[k]}) or false")
+            if k in self.lists and (not isinstance(v, list) or not all(isinstance(t, str) for t in v)):
+                raise C.ConfigError(f"`{where}.{k}` is a list of words, e.g. {self.hints.get(k, '[a, b]')}")
+            if k not in self.flags and k not in self.lists and (not isinstance(v, str) or not v.strip()):
+                raise C.ConfigError(f"`{where}.{k}` is a string, e.g. {self.hints.get(k, '...')}")
+            if str(k).endswith("_env") and not VARIABLE.fullmatch(v):
+                raise C.ConfigError(f"`{where}.{k}` is the NAME of an environment variable that holds the value, "
+                                    f"e.g. {self.hints.get(k, 'MY_TOKEN')} - not the value itself")
+        self.check(where, opts)
+        return opts
+
+    def check(self, where: str, opts: dict) -> None:
+        """Rules of the sink's own, after the ones validate() applies to every setting."""
+
+    def send(self, root: Path, run_dir: Path, record: dict, opts: dict) -> str:
+        raise ExportError(f"the {self.name or '?'} sink has no send(); its package is unfinished")
 
 
 # ---- one record per run --------------------------------------------------------------------------------------
@@ -290,7 +389,79 @@ def to_wandb(root: Path, run_dir: Path, rec: dict, opts: dict) -> str:
     return f"W&B run {rec['run_id']} in project {project!r}, offline in {where}; `wandb sync {where}` uploads it"
 
 
-EXPORTERS = {"mlflow": to_mlflow, "wandb": to_wandb, "csv": to_csv, "jsonl": to_jsonl}
+# ---- the built-in sinks -----------------------------------------------------------------------------------------
+
+ARTIFACTS = {"artifacts": "upload the report and the evidence files, the default"}
+
+
+class _MLflow(Sink):
+    def check(self, where: str, opts: dict) -> None:
+        if re.match(r"\w[\w+.-]*://[^/@\s]+@", str(opts.get("tracking_uri", ""))):
+            raise C.ConfigError(f"`{where}.tracking_uri` holds credentials; write the URL without them and set "
+                                f"{self.secrets} in the environment")
+
+
+class _WandB(Sink):
+    def check(self, where: str, opts: dict) -> None:
+        if opts.get("mode") not in (None, "online", "offline", "disabled"):
+            raise C.ConfigError(f"`{where}.mode` is online (to the W&B server), offline (kept on this machine for "
+                                "`wandb sync`) or disabled")
+        if set(str(opts.get("project", ""))) & set("/\\#?%:"):
+            raise C.ConfigError(f"`{where}.project` is a W&B project name, without / \\ # ? % or :")
+
+
+MLFLOW = _MLflow("mlflow", to_mlflow, background=True, requires="mlflow", title="MLflow", quiet=QUIET["mlflow"],
+                 options=C.EXPORT_KEYS["mlflow"], flags=ARTIFACTS,
+                 example={"tracking_uri": "sqlite:///.testbench/mlflow.db"},
+                 hints={"tracking_uri": "http://127.0.0.1:5000 or sqlite:///.testbench/mlflow.db",
+                           "experiment": "my-project"},
+                 secrets="MLFLOW_TRACKING_TOKEN (or MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD)")
+WANDB = _WandB("wandb", to_wandb, background=True, requires="wandb", title="Weights & Biases (wandb)",
+               quiet=QUIET["wandb"], options=C.EXPORT_KEYS["wandb"], flags=ARTIFACTS, lists=("tags",),
+               example={"mode": "offline"}, secrets="WANDB_API_KEY",
+               hints={"project": "my-project", "entity": "my-team", "mode": "offline", "dir": ".testbench",
+                         "tags": "[baseline, nightly]"})
+CSV = Sink("csv", to_csv, options=C.EXPORT_KEYS["csv"], short="path", short_hint="the file's path",
+           hints={"path": ".testbench/runs.csv"})
+JSONL = Sink("jsonl", to_jsonl, options=C.EXPORT_KEYS["jsonl"], short="path", short_hint="the file's path",
+             hints={"path": ".testbench/runs.jsonl"})
+
+
+def __getattr__(attr: str):
+    """TARGETS, EXPORTERS, LOCAL and PACKAGES as callers knew them before sinks were plug-ins, read from the
+    registry now (so they include installed plug-in sinks)."""
+    found = P.registry("sinks") if attr in ("TARGETS", "EXPORTERS", "LOCAL", "PACKAGES") else None
+    if attr == "TARGETS":
+        return tuple(found)
+    if attr == "EXPORTERS":
+        return {n: s.send for n, s in found.items()}
+    if attr == "LOCAL":
+        return tuple(n for n, s in found.items() if getattr(s, "background", False) is not True)
+    if attr == "PACKAGES":
+        return {n: getattr(s, "title", "") or n for n, s in found.items() if getattr(s, "requires", "")}
+    raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
+
+
+def sink(target: str):
+    """The sink of that name (a built-in or an installed plug-in); plugins.PluginError says why there is none."""
+    return P.get("sinks", target)
+
+
+def background(target: str) -> bool:
+    """Whether the sink runs in the background process after a run. One that does not load fails at once instead,
+    in export.log."""
+    try:
+        return getattr(sink(target), "background", False) is True
+    except Exception:
+        return False
+
+
+def known(target: str) -> bool:
+    """A sink installed here, loaded or not (`testbench export --to NAME` can try it again)."""
+    try:
+        return target in P.names("sinks") or target in P.broken("sinks")
+    except Exception:
+        return False
 
 
 # ---- running exports, and what they left in export.log ----------------------------------------------------------
@@ -299,14 +470,26 @@ def require(target: str) -> None:
     """Trackers are imported only when used; a missing one says how to install it into this Python. Each is set up
     to send nothing but the run (no usage telemetry or error reports) and to say little, unless the environment
     already says otherwise."""
-    for k, v in QUIET.get(target, {}).items():
+    try:
+        found = sink(target)
+    except P.PluginError:
+        return                                   # not a sink here: check_export says so, and export() again
+    _require(found, target)
+
+
+def _require(found, target: str) -> None:
+    for k, v in (getattr(found, "quiet", None) or {}).items():
         os.environ.setdefault(k, v)
-    if target in PACKAGES:
+    module = getattr(found, "requires", "") or ""
+    if module:
         try:
-            __import__(target)
+            importlib.import_module(module)
         except ImportError:
-            raise Missing(f"{PACKAGES[target]} is not installed in this Python ({sys.executable}): "
-                          f"pip install 'agent-testbench[{target}]' (or pip install {target})") from None
+            package = getattr(found, "package", "") or module
+            how = (f"pip install 'agent-testbench[{target}]' (or pip install {package})"
+                   if P.builtin("sinks", target) else f"pip install {package}")
+            raise Missing(f"{getattr(found, 'title', '') or target} is not installed in this Python "
+                          f"({sys.executable}): {how}") from None
 
 
 def redact(text: str) -> str:
@@ -341,10 +524,14 @@ def export(root: Path, run_dir: Path, targets: dict, project: str) -> list[tuple
         try:
             if rec is None:
                 raise ExportError(why)
-            ok, msg, code = True, EXPORTERS[target](root, run_dir, rec, opts or {}), 0
-        except Exception as exc:
-            ok, code = False, getattr(exc, "code", 1)
-            msg = str(exc) if isinstance(exc, ExportError) else f"{type(exc).__name__}: {str(exc)[:600]}"
+            found = sink(target)
+            _require(found, target)
+            msg = found.send(root, run_dir, rec, opts or {})
+            ok, msg, code = True, "done" if msg is None else str(msg), 0
+        except (Exception, SystemExit) as exc:                 # a plug-in's sys.exit() fails its export, not the run
+            ok, code = False, exc.code if isinstance(exc, ExportError) else 1
+            plain = isinstance(exc, (ExportError, P.PluginError))          # a message that says what to do
+            msg = str(exc) if plain else f"{type(exc).__name__}: {str(exc)[:600]}"
         msg = " ".join(redact(msg).split())
         log(run_dir, target, "ok" if ok else "failed", msg)
         out.append((target, ok, msg, code))
@@ -353,7 +540,8 @@ def export(root: Path, run_dir: Path, targets: dict, project: str) -> list[tuple
 
 def after_run(root: Path, run_dir: Path) -> None:
     """At the end of every run: export it where testbench.yaml's `export:` says. Never raises, never waits on a
-    tracker: csv and jsonl now, MLflow and W&B in a background process (at most BACKGROUND_LIMIT seconds)."""
+    tracker: csv and jsonl now, MLflow and W&B in a background process (at most BACKGROUND_LIMIT seconds); a plug-in
+    sink goes where its `background` says."""
     try:
         if not (Path(root) / C.CONFIG_NAME).is_file():
             return                                       # a folder `testbench check` ran in: no export: section
@@ -362,10 +550,10 @@ def after_run(root: Path, run_dir: Path) -> None:
             return                                       # no exports: nothing to load, nothing to log
         cfg = C.load(root)
         targets = cfg["export"]
-        local = {t: o for t, o in targets.items() if t in LOCAL}
+        local = {t: o for t, o in targets.items() if not background(t)}
         if local:
-            export(root, run_dir, local, cfg["project"])
-        remote = [t for t in targets if t not in LOCAL]
+            _at_the_end(root, run_dir, local, cfg["project"])
+        remote = [t for t in targets if background(t)]
         for t in remote:
             log(run_dir, t, "started", "in the background")
         if remote:
@@ -376,6 +564,31 @@ def after_run(root: Path, run_dir: Path) -> None:
             log(run_dir, "export", "failed", f"{type(exc).__name__}: {exc}")
         except Exception:
             pass
+
+
+def _at_the_end(root: Path, run_dir: Path, targets: dict, project: str) -> None:
+    """The quick sinks: the built-ins one after the other (csv, jsonl), each plug-in in a thread of its own, all in
+    FOREGROUND_LIMIT seconds. One that hangs (a plug-in that should have said background = True) holds up no other
+    sink, costs the end of the run that long at worst, and export.log says so."""
+    done: set = set()
+
+    def go(group: list) -> None:
+        for t in group:
+            export(root, run_dir, {t: targets[t]}, project)
+            done.add(t)
+
+    groups = [[t for t in targets if P.builtin("sinks", t)], *([t] for t in targets if not P.builtin("sinks", t))]
+    workers = [threading.Thread(target=go, args=(group,), daemon=True) for group in groups if group]
+    for worker in workers:
+        worker.start()
+    deadline = time.monotonic() + FOREGROUND_LIMIT
+    for worker in workers:
+        worker.join(max(0.0, deadline - time.monotonic()))
+    for t in targets:
+        if t not in done:
+            log(run_dir, t, "failed", f"no outcome after {FOREGROUND_LIMIT:g} s at the end of the run, so the run "
+                "went on without it. A sink that can be slow should say background = True (its package's job), so it "
+                "runs in a background process; `testbench export` tries it again")
 
 
 def summary(run_dir: Path) -> str:
@@ -392,7 +605,7 @@ def summary(run_dir: Path) -> str:
         elif state == "started":
             out.append(f"- {target}: started {when} in the background, no outcome yet (export.log in the run folder)")
         else:
-            again = f"`testbench export {Path(run_dir).name}" + (f" --to {target}`" if target in TARGETS else "`")
+            again = f"`testbench export {Path(run_dir).name}" + (f" --to {target}`" if known(target) else "`")
             out.append(f"- {target}: FAILED ({when}): {msg}. Fix that, then {again}")
     return "\n".join(["## Exports", "", *out]) if out else ""
 
@@ -428,6 +641,204 @@ def main(argv=None) -> None:
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(0)                  # trackers can leave threads behind; the outcomes are written
+
+
+# ---- the sinks plug-in kind: what the registry holds, and the contract `testbench plugin test` checks ------------
+
+NAME = re.compile(r"[a-z][a-z0-9_-]{0,39}")
+CHECK_LIMIT = 120                # seconds the contract waits for one send()
+QUICK = 10                       # seconds a sink with background = False may take in the contract
+
+
+def _prepare(obj, name: str):
+    found = obj() if isinstance(obj, type) else obj
+    if not callable(getattr(found, "send", None)):
+        raise P.PluginError(f"{obj!r} is not a sink: a sink has send(root, run_dir, record, opts) (export.Sink)")
+    if not getattr(found, "name", ""):
+        found.name = name
+    return found
+
+
+def _scratch_run(root: Path) -> Path:
+    """A finished run's folder, as runs.finalize leaves it, for a sink to export in the contract."""
+    run_dir = Path(root) / ".testbench" / "runs" / "20260101-000000-check"
+    (run_dir / "steps" / "01-check").mkdir(parents=True)
+    (run_dir / "steps" / "01-check" / "log.txt").write_text("val_loss=0.25\n")
+    plan = {"backend": "local", "steps": [{"name": "check", "params": {"N": 3}}]}
+    (run_dir / "plan.json").write_text(json.dumps(plan))
+    rep = {"run_id": run_dir.name, "plan": "check", "backend": "local", "gpu": None, "status": "passed",
+           "started": 1767225600.0, "finished": 1767225660.0, "minutes": 1.0, "cost_usd": 0.0, "testbench_version": "0",
+           "schema_version": 1, "source": None, "steps": [{"name": "check", "kind": "run", "status": "passed",
+                                                           "dir": "steps/01-check", "minutes": 1.0, "expectations": [
+               {"check": "stdout /val_loss=([0-9.]+)/ < 0.3", "ok": True, "detail": "0.25 (wanted < 0.3)"}]}]}
+    from . import provenance
+    rep["evidence"], rep["evidence_sha256"] = provenance.evidence(run_dir)
+    R.write(run_dir, rep)
+    return run_dir
+
+
+class _NoNetwork:
+    """While a sink is checked: connections to other machines are refused (and noted), loopback ones go through."""
+    LOCAL = ("localhost", "127.0.0.1", "::1", "0.0.0.0", "")
+
+    def __init__(self):
+        import socket
+        import urllib.parse
+        self.socket, self.reached = socket, []
+        self.saved = (socket.socket.connect, socket.socket.connect_ex, socket.getaddrinfo)
+        self.proxies = set()                         # a proxy on this machine is the way out all the same
+        for k, v in os.environ.items():
+            if k.lower().endswith("_proxy") and k.lower() != "no_proxy" and "://" in v:
+                try:
+                    p = urllib.parse.urlsplit(v)
+                    self.proxies.add((p.hostname, p.port or (443 if p.scheme == "https" else 80)))
+                except ValueError:
+                    pass
+
+    def _local(self, host, port=None) -> bool:
+        host = host.decode() if isinstance(host, bytes) else str(host)
+        return (host, port) not in self.proxies and (host in self.LOCAL or host.startswith("127.")
+                                                     or host.startswith("::ffff:127."))
+
+    def __enter__(self):
+        connect, connect_ex, getaddrinfo = self.saved
+        guard = self
+
+        def refuse(address) -> bool:
+            if isinstance(address, tuple) and address and not guard._local(*address[:2]):
+                guard.reached.append(f"{address[0]}:{address[1]}" if len(address) > 1 else str(address[0]))
+                return True
+            return False
+
+        def checked_connect(sock, address):
+            if refuse(address):
+                raise ConnectionRefusedError("the sink check lets nothing leave this machine")
+            return connect(sock, address)
+
+        def checked_connect_ex(sock, address):
+            return 111 if refuse(address) else connect_ex(sock, address)
+
+        def checked_getaddrinfo(host, *args, **kwargs):
+            if host is not None and refuse((host, args[0] if args else "")):
+                raise self.socket.gaierror("the sink check lets nothing leave this machine")
+            return getaddrinfo(host, *args, **kwargs)
+
+        self.socket.socket.connect, self.socket.socket.connect_ex = checked_connect, checked_connect_ex
+        self.socket.getaddrinfo = checked_getaddrinfo
+        return self
+
+    def __exit__(self, *exc):
+        self.socket.socket.connect, self.socket.socket.connect_ex, self.socket.getaddrinfo = self.saved
+
+
+def _contract(found) -> list[str]:
+    """What is wrong with a sink, in plain words ([] = it keeps the contract): a name, settings checked (junk
+    refused with a ConfigError naming the field), send() into a scratch folder either working or raising ExportError,
+    no secret shown (one in the environment and one slipped into its settings), and background = True if it reaches
+    for another machine."""
+    out = []
+    name = getattr(found, "name", "")
+    if not isinstance(name, str) or not NAME.fullmatch(name):
+        out.append(f"its name is {name!r}: a sink's name is a short lowercase word (its key under `export:` and its "
+                   "--to name), e.g. sheets")
+    if not isinstance(getattr(found, "background", False), bool):
+        out.append("background is True (it may touch the network or take long, so it runs in a background process) "
+                   "or False (quick local work at the end of a run)")
+    lacking = [f"it has no {how} (export.Sink says what each does)" for attr, how in (
+        ("validate", "validate(where, opts) -> dict"), ("send", "send(root, run_dir, record, opts) -> str"))
+        if not callable(getattr(found, attr, None))]
+    if lacking:
+        return out + lacking
+    where = f"export.{name}"
+    for junk in (42, ["a", "list"], {"no_such_setting": 1}):
+        try:
+            found.validate(where, copy.deepcopy(junk))
+            out.append(f"validate() took {junk!r} as its settings; refuse what it cannot use with config.ConfigError, "
+                       f"naming `{where}` and saying what to write instead")
+        except C.ConfigError as exc:
+            if where not in str(exc):
+                out.append(f"validate() refused {junk!r} without naming the field ({exc}); name `{where}` (or the "
+                           "setting under it), so the reader knows which line of testbench.yaml to fix")
+        except Exception as exc:
+            out.append(f"validate() raised {type(exc).__name__} for {junk!r} ({exc}); refuse bad settings with "
+                       "config.ConfigError, whose message says what to write instead")
+    example = getattr(found, "example", None) or {}
+    try:
+        opts = found.validate(where, copy.deepcopy(example))
+    except Exception as exc:
+        return out + [f"validate() refused its own example settings {example!r} ({type(exc).__name__}: {exc}); "
+                      "`example` holds settings that validate, so its send() can be tried"]
+    if not isinstance(opts, dict):
+        return out + [f"validate() returned {type(opts).__name__}; it returns the settings send() gets, as a dict"]
+    return out + _try_send(found, name, opts)
+
+
+def _try_send(found, name: str, opts: dict) -> list[str]:
+    import contextlib
+    import secrets
+    import tempfile
+    out, shh = [], {"env": f"tb-check-{secrets.token_hex(8)}", "opts": f"tb-check-{secrets.token_hex(8)}"}
+    variable, before = "TESTBENCH_CHECK_TOKEN", os.environ.get("TESTBENCH_CHECK_TOKEN")
+    printed, got = io.StringIO(), []
+    with tempfile.TemporaryDirectory(prefix="testbench-sink-check-") as tmp:
+        root = Path(tmp)
+        run_dir = _scratch_run(root)
+        rec = record(root, run_dir, R.load(run_dir), "sinkcheck")
+
+        def go():
+            try:
+                _require(found, name)
+                got.append(("ok", found.send(root, run_dir, rec, {**opts, "token": shh["opts"]})))
+            except ExportError as exc:
+                got.append(("failed", str(exc)))
+            except BaseException as exc:
+                got.append(("raised", exc))
+
+        began = time.monotonic()
+        os.environ[variable] = shh["env"]
+        try:
+            with _NoNetwork() as net, contextlib.redirect_stdout(printed), contextlib.redirect_stderr(printed):
+                worker = threading.Thread(target=go, daemon=True)
+                worker.start()
+                worker.join(CHECK_LIMIT)
+        finally:
+            if before is None:
+                os.environ.pop(variable, None)
+            else:
+                os.environ[variable] = before
+        took = time.monotonic() - began
+        logged = (run_dir / "export.log").read_text(errors="replace") if (run_dir / "export.log").is_file() else ""
+    if not got:
+        return [f"send() did not finish within {CHECK_LIMIT} s; a sink gives up on what does not answer and raises "
+                "ExportError saying so"]
+    state, said = got[0]
+    if state == "raised":
+        why = str(said)[:300].replace(shh["env"], "<a secret>").replace(shh["opts"], "<a secret>")
+        out.append(f"send() raised {type(said).__name__} ({why}); a plain failure raises export.ExportError "
+                   "(Missing for something to install) with a message that says what to do")
+    elif state == "ok" and not isinstance(said, str):
+        out.append(f"send() returned {type(said).__name__}; it returns what it did as one line of text, e.g. "
+                   "'row 3 of .testbench/runs.csv'")
+    shown = f"{said}\n{printed.getvalue()}\n{logged}"
+    leaked = [where for where, value in shh.items() if value in shown]
+    if leaked:
+        out.append("a secret came out in what send() returned, printed or wrote to export.log (one put in "
+                   + " and one in ".join({"env": f"the environment as {variable}", "opts": "its settings"}[w]
+                                         for w in leaked)
+                   + "); say what was done without echoing settings or the environment")
+    if net.reached and getattr(found, "background", False) is not True:
+        out.append(f"it reached for {net.reached[0]} with background = False; anything that may touch the network "
+                   "says background = True, so it runs in a background process and a slow service never holds a run up")
+    elif getattr(found, "background", False) is not True and took > QUICK:
+        out.append(f"it took {took:.0f} s with background = False; the end of a run waits for such sinks, so they "
+                   f"take well under {QUICK} s (local files) - or say background = True")
+    return out
+
+
+KIND = P.Kind("sinks", "sink", "where `export:` sends every finished run (`testbench export --to NAME`)",
+              {"mlflow": "agent_testbench.export:MLFLOW", "wandb": "agent_testbench.export:WANDB",
+               "csv": "agent_testbench.export:CSV", "jsonl": "agent_testbench.export:JSONL"},
+              prepare=_prepare, contract=_contract)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "testbench-sink-example"
+version = "0.1.0"
+description = "An example agent-testbench export sink: one markdown table row per finished run"
+requires-python = ">=3.10"
+dependencies = ["agent-testbench"]
+
+# `export: {markdown: ...}` and `testbench export --to markdown` find the sink by this name
+[project.entry-points."agent_testbench.sinks"]
+markdown = "testbench_sink_example:MarkdownSink"
+
+[tool.setuptools]
+py-modules = ["testbench_sink_example"]
