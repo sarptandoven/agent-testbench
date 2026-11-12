@@ -60,6 +60,7 @@ WATCH = f"{RUN}/watchdog"                # a plan's watchdog state; its log come
 DONE = f"{WORK}/done"                    # written when a plan's work has ended
 IDLE_SLACK = 10                          # the container's watchdog waits this much longer than the supervisor here
 LINGER_SECONDS = 120                     # after a plan, the container waits (idle) this long for its evidence to be taken
+PREFLIGHT_SECONDS = 15                   # `docker info` before a launch: a running daemon answers in about a second
 PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy")
 IMAGE_VERSION = 1                        # part of the derived image's tag: bump when the Dockerfile changes
 REMOTE_STOP = ("inside the container: its watchdog ends the work at the time limit and the container removes itself, "
@@ -638,6 +639,36 @@ class DockerBackend(Backend):
             return f"could not remove the container {name}: {exc}"
         gone = p.returncode == 0 or "No such container" in p.stderr or "no such container" in p.stderr
         return f"removed the container {name}" if gone else f"could not remove the container {name}: {p.stderr.strip()}"
+
+    def preflight(self, cfg: dict) -> str:
+        """Whether the container CLI answers (`docker info`), before a run or session is recorded: a daemon that is
+        not running would otherwise fail the run after its folder, plan and ledger line were written."""
+        command = (cfg.get("docker") or {}).get("command") or ["docker"]
+        what = "Podman" if Path(str(command[0])).name.lower().startswith("podman") else "Docker"
+        check = "check with `testbench doctor`"
+        ask = ["info", "--format", "{{.ServerVersion}}"] if what == "Docker" else ["info"]   # podman has no such field
+        try:
+            p = Docker(command)(*ask, check=False, timeout=PREFLIGHT_SECONDS)
+        except DockerError as exc:
+            if "is not installed here" in str(exc):
+                return (f"{what} is not installed here (no `{command[0]}` command): install it "
+                        "(https://docs.docker.com/get-docker/), or set docker.command in testbench.yaml to the "
+                        f"container CLI you use, e.g. [podman]; {check}")
+            return (f"{what} did not answer `info` within {PREFLIGHT_SECONDS} s: it may still be starting, or be "
+                    f"stuck - wait for it or restart it; {check}")
+        said = (p.stderr or "").strip() or str(p.stdout or "").strip()
+        if p.returncode == 0 and (str(p.stdout or "").strip() or what != "Docker"):    # docker: the server's version
+            return ""
+        if re.search(r"permission denied", said, re.I):
+            return (f"{what} is running, but this user may not use it (permission denied on its socket): add yourself "
+                    "to the docker group (`sudo usermod -aG docker $USER`, then log in again); " + check)
+        if p.returncode != 0 and re.search(r"Cannot connect to the Docker daemon|Is the docker daemon running|"
+                                           r"error during connect|Cannot connect to Podman|docker_engine|"
+                                           r"connection refused", said, re.I):
+            return (f"{what} is installed but not running here: start it (Docker Desktop, or `sudo systemctl start "
+                    f"{'podman.socket' if what == 'Podman' else 'docker'}` on Linux); {check}")
+        tail = " ".join(said.splitlines()[-3:])[-400:] or "it said nothing"
+        return f"`{command[0]} info` did not work (exit {p.returncode}: {tail}); {check}"
 
     def doctor(self):
         what = "docker CLI (docker plans and sessions)"

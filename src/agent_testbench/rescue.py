@@ -870,8 +870,15 @@ print(json.dumps(out))
 """
 
 
-def kernel_python() -> str:
-    """The Python the notebook's kernel runs: jupyter_client starts a `python` kernelspec with this Python."""
+def kernel_python(project: str | Path | None = None) -> str:
+    """The Python the notebook's kernel runs: from uvx, uv tool or pipx, the project's virtualenv when it has ipykernel
+    (executor.kernel_python, as a notebook step chooses it); else the Python jupyter_client starts a `python`
+    kernelspec with."""
+    if project is not None:
+        from .executor import kernel_python as projects
+        python, _ = projects(Path(project))
+        if python:
+            return python
     try:
         from jupyter_client.kernelspec import KernelSpecManager
         exe = KernelSpecManager().get_kernel_spec("python3").argv[0]
@@ -888,7 +895,11 @@ def _probe(names: list[str], workdir: Path) -> dict:
     if not names:
         return {}
     try:
-        out = subprocess.run([kernel_python(), "-c", PROBE, *names], capture_output=True, text=True, timeout=90,
+        try:
+            project = C.find_root(workdir)
+        except C.ConfigError:
+            project = workdir
+        out = subprocess.run([kernel_python(project), "-c", PROBE, *names], capture_output=True, text=True, timeout=90,
                              cwd=str(Path(sys.executable).parent))
         return json.loads(out.stdout)
     except Exception:
@@ -1268,7 +1279,7 @@ def rescue(notebook: str | Path, *, timeout: float = 120, fix: str | Path | None
             "status": "not run", "seconds": None, "timeout_seconds": timeout, "code_cells": info["cells"],
             "cells_ran": 0, "failure": None, "findings": info["findings"], "packages": info["packages"],
             "colab": info["colab"], "saved_with_python": info["saved_python"],
-            "machine": {"python": sys.version.split()[0], "kernel_python": kernel_python(), "gpu": has_gpu()}}
+            "machine": {"python": sys.version.split()[0], "kernel_python": kernel_python(project), "gpu": has_gpu()}}
     if run:
         began = time.time()
         res = _run(nb_path, project, workdir, out_dir, timeout)

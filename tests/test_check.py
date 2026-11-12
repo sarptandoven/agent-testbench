@@ -110,7 +110,14 @@ def test_with_a_config_free_plans_run_and_paid_ones_are_only_priced(tmp_path, ma
                      r"a person runs it with `testbench run gpu-check`$", r.stdout), r.stdout
     assert re.search(r"(?m)^full: .* not run: it can cost up to \$\d+\.\d\d on modal H100, over the budget; a person "
                      r"runs it with `testbench run full`$", r.stdout), r.stdout
-    assert "3 plans: 1 passed, 0 failed, 2 not run" in r.stdout and "Next: `testbench ui --open`" in r.stdout
+    assert "3 plans: 1 passed, 0 failed, 2 not run" in r.stdout
+    run = re.search(r"Run (\S+-quick): ", r.stdout)[1]
+    assert re.search(rf"(?m)^Next: show the proof: `testbench report {run} --format html` writes it as one page; "
+                     rf"`testbench share {run} --to ./public --dry-run` lists what publishing it would put out\.$",
+                     r.stdout), "a passing check with a testbench.yaml names how to show the proof, on one line"
+    assert cli(root, "share", run, "--to", "./public", "--dry-run").returncode == 0, "and that command works"
+    assert cli(root, "report", run, "--format", "html").returncode == 0 and \
+        (root / ".testbench" / "runs" / run / "report.html").is_file()
     launched = [e["plan"] for e in ledger(root / ".testbench" / "ledger.jsonl") if e["event"] == "launch"]
     assert launched == ["quick"], "a plan that costs money is priced, never launched"
     assert [e["plan"] for e in ledger(machine_limits / "ledger.jsonl") if e["event"] == "launch"] == ["quick"]

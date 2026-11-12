@@ -26,7 +26,9 @@ docker:
 
 Use it like any other backend: `backend: docker` on a plan, `testbench session start --backend docker`, or
 `sessions: {backend: docker}`. `testbench doctor` checks that the docker CLI is installed and the daemon answers;
-`testbench prices` shows the rate. The section is checked only when a plan or the sessions use it, and every
+`testbench prices` shows the rate. Every run and session asks `docker info` first (once the budget allows it): when
+Docker is installed but not running, the launch is refused with exit 2 and how to start it, before a run folder or a
+ledger line is written. The section is checked only when a plan or the sessions use it, and every
 error says what to write instead.
 
 ## How a run goes

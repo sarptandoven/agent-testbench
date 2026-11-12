@@ -289,8 +289,24 @@ def _environment(a: dict, b: dict) -> dict:
         both = ea.get("packages_sha256") and eb.get("packages_sha256")
         packages = {"known": False, "same": ea.get("packages_sha256") == eb.get("packages_sha256") if both else None}
     packages["count"] = [ea.get("packages"), eb.get("packages")]
-    return {"recorded": bool(ea and eb), "changes": changes, "packages": packages,
+    return {"recorded": bool(ea and eb), "changes": changes, "packages": packages, "steps": _runtimes(a, b),
             "b": {k: eb.get(k) for k in ("python", "implementation", "platform", "machine")}}
+
+
+def _runtime(rep: dict) -> dict:
+    """{step name: what it ran on, in words} for the steps that recorded it (the first, when a name repeats)."""
+    out = {}
+    for s in rep.get("steps") or []:
+        if isinstance(s, dict) and (text := R.runtime_text(s.get("runtime"))):
+            out.setdefault(str(s.get("name")), text)
+    return out
+
+
+def _runtimes(a: dict, b: dict) -> list[dict]:
+    """Steps in both runs whose interpreter changed: another Python (a project's virtualenv made, or gone), another
+    version of node, go or cargo."""
+    ra, rb = _runtime(a), _runtime(b)
+    return [{"step": name, "a": ra[name], "b": rb[name]} for name in rb if name in ra and ra[name] != rb[name]]
 
 
 def _data(a: dict, b: dict) -> dict:
@@ -468,6 +484,8 @@ def _where(d: dict) -> list[str]:
     pk = env["packages"]
     lines = [f"- {k}: {x if x is not None else '-'} -> {y if y is not None else '-'}" for k, (x, y) in
              env["changes"].items() if env["recorded"] or k in ("backend", "gpu")]
+    lines += [f"- step {R._line(s['step'])} ran on another interpreter: {R._line(s['a'])} -> {R._line(s['b'])}"
+              for s in env.get("steps") or []]
     if not env["recorded"]:
         return lines + ["- the Python and packages were not recorded for one run or both (cut short before its first "
                         "step, or from an older testbench)"]
@@ -505,4 +523,8 @@ def summary(d: dict, limit: int = 3) -> str:
     changed = [r["role"] for r in (d.get("data") or {}).get("roles", []) if r["change"] == "file changed"]
     if changed:
         parts.append(f"the data changed ({', '.join(changed)})")
+    other = (d.get("environment") or {}).get("steps") or []
+    if other:
+        parts.append(f"{other[0]['step']} ran on {other[0]['b']} (was {other[0]['a']})"
+                     + (f" and {len(other) - 1} more step(s) on another interpreter" if len(other) > 1 else ""))
     return "; ".join(parts) or "no change in step results or checked numbers"

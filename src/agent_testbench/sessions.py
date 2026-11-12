@@ -101,14 +101,19 @@ def start(root: Path, cfg: dict, name: str = "main", backend: str | None = None,
             raise SessionError(f"session {name!r} is already running on {old['backend']}; work in it "
                                f"(`testbench exec -s {name} ...`), stop it first (`testbench session stop {name}`), "
                                "or start another under a new name")
-        archive = sessions_dir(root) / ".old" / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}"
-        archive.parent.mkdir(parents=True, exist_ok=True)
-        sdir.rename(archive)
+    from .runs import preflight
+    down = preflight(cfg, hw["backend"], f"session {name}", how)
     with budget.launching():
         ok, message, est = budget.check(cfg, budget.estimate(cfg, hw, longest, f"session {name}"), approve,
                                         f"start it for fewer minutes: `{how} --max-minutes {{fit}}`",
                                         f"{how} --max-minutes {longest:g}")
+        if ok and down:                                # money first; then a backend that could only fail
+            ok, message = False, down
         if ok:
+            if (sdir / "state.json").exists():         # the stopped session of that name: kept, under .old
+                archive = sessions_dir(root) / ".old" / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}"
+                archive.parent.mkdir(parents=True, exist_ok=True)
+                sdir.rename(archive)
             (sdir / "outputs").mkdir(parents=True)
             now = time.time()
             state = write(sdir, name=name, backend=hw["backend"], gpu=hw["gpu"], cpu=hw["cpu"],
@@ -120,8 +125,9 @@ def start(root: Path, cfg: dict, name: str = "main", backend: str | None = None,
             budget.record(root, {"event": "launch", "run": f"session:{name}:{int(now)}", "plan": f"session {name}",
                                  "backend": hw["backend"], "worst_case_usd": est["worst_case_usd"]})
     if not ok:                                         # told outside the launch lock, so no launch waits on it
-        from . import notify
-        notify.approval_needed(root, cfg, message, est, f"{how} --max-minutes {longest:g} --approve")
+        if message != down:
+            from . import notify
+            notify.approval_needed(root, cfg, message, est, f"{how} --max-minutes {longest:g} --approve")
         raise SessionError(message)
     write(sdir, ledger_id=f"session:{name}:{int(now)}")
     be = B.get(hw["backend"]).session_class()(root, cfg, sdir, state)

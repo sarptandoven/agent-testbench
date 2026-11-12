@@ -226,7 +226,7 @@ def _init_from_recipes(root: Path, target: Path, project: str, found: list, want
         print(f"  plan {name}: {what}, found here")
     for name, _, what in left:
         print(f"  found {what}: the recipe's plans already cover it, so it gets no plan of its own")
-    for note in notes:
+    for note in notes + RC.write_starters(chosen, root):
         print(note)
     print("and the working rules in AGENTS.md (CLAUDE.md points to it).")
     _print_machine_limits(machine)
@@ -254,7 +254,7 @@ def _add_recipes(root: Path, target: Path, wanted: list[str]) -> int:
     target.write_text(text)
     print(f"Added to {target.name} (the plans, budget and sections already there are unchanged):")
     _print_recipe_plans(cfg, chosen)
-    for note in notes:
+    for note in notes + RC.write_starters(chosen, root):
         print(note)
     from .check import tb
     print(f"Next: fill in the lines marked FILL IN under the new plans - the commands, paths and numbers that mean "
@@ -1381,12 +1381,9 @@ class _Parser(argparse.ArgumentParser):
         return f"For example: `{hit}`. " if hit else ""
 
 
-class _Kinds:
-    """The kinds of plug-in, read when `plugin test --help` shows them rather than whenever the parser is made."""
-
-    def __str__(self):
-        from .plugins import KINDS
-        return ", ".join(KINDS)
+# The kinds of plug-in (plugins.KINDS), written out so that making the parser loads no core module; tests/test_cli_ux.py
+# checks they agree. (A %(kinds)s read later breaks on Python 3.14, whose argparse expands help as options are added.)
+PLUGIN_KINDS = "backends, checks, mocks, sinks, notifiers, recipes, metrics"
 
 
 def _number(text: str) -> float:
@@ -2126,8 +2123,8 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("target", nargs="?", metavar="TARGET",
                    help="module:attr, or an installed package's name (e.g. testbench-backend-example)")
     q.add_argument("--installed", action="store_true", help="every installed plug-in, of every kind")
-    q.add_argument("--kind", metavar="KIND", help="test it as this kind: %(kinds)s (default: the kind its entry point "
-                                                  "declares, or the only one that takes it)").kinds = _Kinds()
+    q.add_argument("--kind", metavar="KIND", help=f"test it as this kind: {PLUGIN_KINDS} (default: the kind its entry "
+                                                  "point declares, or the only one that takes it)")
     _json(q, "the results")
     p.set_defaults(fn=cmd_plugin)
     p = sub.add_parser("selftest", help="a minute or so, local and free: check that the main promises hold on this "

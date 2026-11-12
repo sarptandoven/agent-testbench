@@ -313,7 +313,10 @@ each). [examples/trading](../examples/trading) is a project made to it (`testben
 prices file and `holdout_from`, the backtest command, the bar (`sharpe`, `max_drawdown`), the windows, and what a
 window and the holdout must at least do. The backtest reads `TESTBENCH_DATA_PRICES`, trades from
 `TESTBENCH_TEST_START` or `TRADE_FROM` when set, and writes `out/signals.csv` with the signal's number, not only
-the position it gives: a number changes on every peek ahead, a 0 or 1 only when it flips. **Costs** nothing.
+the position it gives: a number changes on every peek ahead, a 0 or 1 only when it flips. In a folder with no
+`backtest.py`, `init` writes a starter one (plain Python, a trend follower with fees and no look-ahead, writing the
+three files) and says so; it never writes over a file. A backtest of your own that writes its own CSV files:
+`python -m agent_testbench.trading.files --check out` says what to rename or add in each. **Costs** nothing.
 
 #### vectorbt-strategy
 

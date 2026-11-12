@@ -155,8 +155,10 @@ backend = Rack()
 ```
 
 Optional: `validate(cfg)` checks the backend's own section (called only when a plan or the sessions use it),
-`max_session_minutes`, and `remote = False` for a backend on this machine (plans then run in the project folder
-and no start-up is priced in). Every remote run and session must have a hard stop on the remote side, so the
+`preflight(cfg)` says in words why work cannot start there now and the fix, '' when it can (asked once the budget
+allows a launch, before its run folder or ledger line is written: docker's asks `docker info`),
+`max_session_minutes`, and `remote = False` for a backend on this machine (plans then run in the project folder and
+no start-up is priced in). Every remote run and session must have a hard stop on the remote side, so the
 worst case holds even if this machine goes offline; `hard_stop` says what it is. A backend that fails to load is
 listed by `testbench doctor` and `testbench plugins`, and only breaks the projects that use it; one that takes a
 built-in's name is skipped. `testbench plugin test testbench-rack` checks a backend keeps the backend contract
@@ -294,8 +296,9 @@ step they are refused, not ignored.
 
 Inside a step: the working folder is the project (or its copy); `TESTBENCH_RUN_DIR`, `TESTBENCH_STEP_DIR`,
 `TESTBENCH_PROJECT_DIR` are set; on Modal `TESTBENCH_CACHE` is a folder on the project's volume that survives
-between runs (put downloaded weights there); `python` and `testbench` are the environment running agent-testbench;
-`MPLBACKEND=Agg` for child processes.
+between runs (put downloaded weights there); `python` and `testbench` are the environment running agent-testbench -
+from uvx, `uv tool` or pipx, `python` is the project's own (an activated virtualenv, else `.venv` or `venv`), and so
+is a notebook's kernel when that virtualenv has ipykernel; `MPLBACKEND=Agg` for child processes.
 
 ## Expectations
 
@@ -388,6 +391,7 @@ testbench loop stop
 |---|---|
 | `source` | at launch: `commit`, `branch`, `dirty` (uncommitted changes or untracked files were part of the run), `changes_sha256` (the diff against the commit and the untracked files), `untracked_files`; null outside git. `.testbench/` is not counted |
 | `environment` | where the plan ran (recorded on that machine, Modal, Colab and ssh too): `python`, `platform`, `machine`, `packages` and `packages_sha256` (of the sorted name==version list) |
+| `steps[].runtime` | what each step ran on, found the way the step finds it: `python` (`path`, `version`) - what its command's `python` resolved to, or the Python it names; from uvx the project's own - and for a notebook the `kernel` and its Python; `node`, `go` or `cargo` when the command uses them. report.md's "The steps ran on" line; `testbench diff` names a step whose interpreter changed |
 | `evidence`, `evidence_sha256` | every file under `steps/` with its size and sha256, and one sha256 over all of them |
 | `worst_case_usd`, `approved`, `remote_stop` | the bound checked before launch, whether a person approved it, and the hard stop on the remote side |
 | `data` | with `data:` in testbench.yaml, each role: `path`, `view` (`sealed`, `full`, `windows`), the `bytes`, `sha256`, `rows`, `first` and `last` time of what the steps saw, the whole `file` at launch and the `sealed` rows' (each step folder's `data.json` holds what its data was, as evidence) |
