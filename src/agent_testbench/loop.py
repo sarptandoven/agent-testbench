@@ -635,7 +635,8 @@ def start(root: Path, cfg: dict, plan: str, metric: str, budget_usd: float, goal
             raise LoopError("--returns is the path of each try's equity.csv (or of a CSV of its returns) in its run, "
                             f"e.g. out/{EQUITY}")
         parts = Path(returns.strip()).as_posix().split("/")
-        if Path(returns.strip()).is_absolute() or ".." in parts or re.match(r"^[A-Za-z]:", returns.strip()):
+        if Path(returns.strip()).is_absolute() or ".." in parts or re.match(r"^[A-Za-z]:", returns.strip()) \
+                or returns.strip().startswith(("/", "\\")):              # rooted: not inside the project on Windows
             raise LoopError(f"--returns {returns!r} is looked for inside each try's run (its evidence or its work "
                             f"copy), so it is a relative path inside the project, e.g. out/{EQUITY}")
         returns = "/".join(x for x in parts if x not in ("", "."))

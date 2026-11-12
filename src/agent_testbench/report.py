@@ -546,8 +546,9 @@ def html_body(report: dict, run_dir: Path, published: set | None = None) -> str:
             seen.add(hashlib.sha256(raw).digest())
             budget_left -= len(raw)
             src = link(rel) if published is not None else f"data:{mime};base64,{base64.b64encode(raw).decode()}"
-            shown.append(f"<figure><img alt='{e(s['name'])}: {e(name)}' src='{src}'><figcaption>{e(s['name'])}: "
-                         f"{e(name)}</figcaption></figure>")
+            label = name.replace("\\", "/")                     # as the report names it on every system
+            shown.append(f"<figure><img alt='{e(s['name'])}: {e(label)}' src='{src}'><figcaption>{e(s['name'])}: "
+                         f"{e(label)}</figcaption></figure>")
     if shown:
         out += ["<h2>Evidence to look at</h2>"] + shown
     files = r.get("evidence") or []

@@ -44,7 +44,7 @@ def write_prices(path: Path, start=dt.date(2020, 1, 1), end=dt.date(2025, 10, 1)
     lines = ["time,symbol,close"] + [f"{d.isoformat()},{symbol},{100 + i * 0.1:.2f}"
                                     for i, d in enumerate(weekdays(start, end))]
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", newline="\n")        # the same bytes on Windows
     return lines
 
 
@@ -52,7 +52,7 @@ def project(tmp_path: Path, plans: dict, data=None, **more) -> Path:
     root = tmp_path / "proj"
     root.mkdir(parents=True)
     write_prices(root / "data" / "prices.csv")
-    (root / "seen.py").write_text(SEEN)
+    (root / "seen.py").write_text(SEEN, newline="\n")      # the same bytes on Windows
     data = {"prices": {"path": "data/prices.csv", "holdout_from": HOLDOUT}} if data is None else data
     (root / "testbench.yaml").write_text(yaml.safe_dump({"project": "seal", "data": data, "plans": plans, **more},
                                                         sort_keys=False))

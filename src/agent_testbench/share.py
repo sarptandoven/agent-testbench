@@ -521,9 +521,11 @@ class GitBranch:
     def _git(self, *args, cwd=None, env=None, input=None, check=True):
         try:
             r = subprocess.run(["git", *args], cwd=cwd or getattr(self, "top", self.root), capture_output=True,
-                               text=True, timeout=300, env=env, input=input)
+                               timeout=300, env=env, input=None if input is None else input.encode("utf-8"))
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ShareError(f"git {args[0]} did not run ({exc}); is git installed?") from None
+        # bytes in and out: in text mode Windows would hand git "\r\n", and --index-info would read "path\r"
+        r.stdout, r.stderr = r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
         if check and r.returncode != 0:
             raise ShareError(f"git {' '.join(args[:2])} failed: {r.stderr.strip() or r.stdout.strip()}. Nothing was "
                              f"committed; branch {getattr(self, 'branch', '')} is as it was.", code=1)
@@ -640,8 +642,15 @@ def share(root: Path, cfg: dict, run: str | None, dest: str, *, dry_run: bool = 
                 raise ShareError("Nothing was published: publishing puts these files where others can read them, so it "
                                  "takes a person's yes. Run it in a terminal and answer y, or add --yes if a person "
                                  "read this list and agreed (an agent never adds it on its own).")
-            if ask(f"\nPublish these files to {place.describe(run_dir.name)}? Anyone who can read it sees them. "
-                   "[y/N] ").strip().lower() not in ("y", "yes"):
+            try:
+                answer = ask(f"\nPublish these files to {place.describe(run_dir.name)}? Anyone who can read it sees "
+                             "them. [y/N] ")
+            except EOFError:                                 # Windows' NUL says it is a terminal, then has no line
+                raise ShareError("Nothing was published: publishing puts these files where others can read them, so "
+                                 "it takes a person's yes, and nobody could answer here. Run it in a terminal and "
+                                 "answer y, or add --yes if a person read this list and agreed (an agent never adds "
+                                 "it on its own).") from None
+            if answer.strip().lower() not in ("y", "yes"):
                 say("Nothing was published.")
                 return 2
         lines, url = place.publish(Path(tmp), run_dir.name)

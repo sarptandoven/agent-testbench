@@ -54,8 +54,19 @@ def driver_gone(s: dict) -> bool:
 
 
 def all_runs(root: Path) -> list[Path]:
+    """Every run, oldest first. Names start with the second a run started; two runs started in the same second are
+    ordered by when each was created (its state's `created`), not by plan name, so `last` is the latest."""
     d = runs_dir(root)
-    return sorted((p for p in d.iterdir() if (p / "state.json").exists()), key=lambda p: p.name) if d.exists() else []
+    if not d.exists():
+        return []
+
+    def started(p: Path):
+        try:
+            created = float(json.loads((p / "state.json").read_text()).get("created") or 0)
+        except (OSError, ValueError, TypeError):
+            created = 0.0
+        return p.name[:15], created, p.name
+    return sorted((p for p in d.iterdir() if (p / "state.json").exists()), key=started)
 
 
 def resolve(root: Path, run: str | None) -> Path:

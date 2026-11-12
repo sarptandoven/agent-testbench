@@ -214,7 +214,7 @@ def test_the_scrub_covers_home_and_user_name(tmp_path, monkeypatch):
             f"key k-value-123456; " + json.dumps(str(root / 'a.csv')))
     out = s.text(text, counts)
     assert out.startswith("<project>/train.py line 3; ~/.venv/bin/python; /home/<user>/other; ")
-    assert "~/work/proj2/x" in out, "a longer name is not the project"
+    assert f"~{os.sep}work{os.sep}proj2/x" in out, "a longer name is not the project"   # the rest keeps its separators
     assert "<K>" in out and "k-value-123456" not in out and '"<project>/a.csv"' in out
     assert {label for label, _, _ in counts} == {"the project folder", "the home folder", "the user name",
                                                  "the value of secret K"}
@@ -377,3 +377,15 @@ def test_the_guard_asks_before_a_share_but_not_a_dry_run(tmp_path):
     assert "testbench share" in C.DEFAULTS["guard"]["ask"]
     assert "testbench share" in json.loads((REPO / "src" / "agent_testbench" / "schema" / "testbench.schema.json")
                                            .read_text())["properties"]["guard"]["properties"]["ask"]["default"]
+
+
+def test_a_terminal_with_no_line_to_read_is_a_refusal_not_a_traceback(proj, tmp_path):
+    """Windows' NUL device says it is a terminal, then input() finds no line: nothing goes out, and the person is told
+    why, as when there is no terminal at all."""
+    from agent_testbench import config as Cfg
+
+    def no_line(prompt):
+        raise EOFError
+    with pytest.raises(S.ShareError, match="nobody could answer here") as exc:
+        S.share(proj, Cfg.load(proj), None, str(tmp_path / "public"), ask=no_line, tty=True, say=lambda *a: None)
+    assert exc.value.code == 2 and not (tmp_path / "public").exists()

@@ -168,7 +168,7 @@ def test_each_resource_reads_what_the_project_has(project, monkeypatch):
     log, mime = read(f"testbench://runs/{kept}/evidence/01-backtest/log.txt")
     assert mime == "text/plain" and log.strip() == "score 2"
     csv, mime = read(f"testbench://runs/{kept}/evidence/steps/01-backtest/artifacts/out/equity.csv")
-    assert mime == "text/csv" and csv.startswith("time,equity\n2024-01-01,100.0\n")
+    assert mime == "text/csv" and csv.replace("\r\n", "\n").startswith("time,equity\n2024-01-01,100.0\n")
     png, mime = read(f"testbench://runs/{kept}/evidence/01-backtest/artifacts/out/plot.png")
     assert mime == "image/png" and png == PNG_1PX
 
