@@ -387,6 +387,7 @@ testbench loop stop
 testbench verify [RUN]                     # exit 0: every evidence file matches; 1: what changed, went missing or was added
                                            #   (and with data:, 1 when a data file is not what the run read)
 testbench report [RUN] --format html|junit [-o FILE]
+testbench report [RUN] --tearsheet [-o FILE]   # trading: the tear sheet page alone (tearsheet.html in the run folder)
 testbench history PLAN [-n N] [--json]     # each run's outcome and every number its checks found, oldest first
 testbench ui [--open]                      # .testbench/ui/index.html: plans, trend lines, runs, loops, sessions
 ```
@@ -412,6 +413,7 @@ progress.jsonl    one line per event
 report.json       machine-readable report (rewritten after each step; schema/report-v1.schema.json)
 report.md         the report
 report.html       the report as one page with the evidence images (`testbench report --format html`, `testbench ui`)
+tearsheet.html    a trading step's tear sheet alone (`testbench report --tearsheet`); report.html has it too
 driver.log        the background driver's own output
 steps/NN-name/    log.txt, result.json, executed.ipynb, cellNN_imageK.png, downloads/, artifacts/, screenshots,
                   data.json (with data:, what the step's data files held)
@@ -449,6 +451,7 @@ with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `ch
 | `estimate PLAN [--approve] [--json]` | a plan's worst case and whether it may launch now | 0 it may (2: it may not) |
 | `run PLAN [--wait SECONDS] [--detach] [--approve]` | run a plan and print its report | 0 passed, 1 failed, 3 still running after `--wait` (and always with `--detach`) |
 | `report [RUN] [--format md\|json\|html\|junit] [-o FILE]` | a run's report | 0, a failed run's report too |
+| `report [RUN] --tearsheet [-o FILE]` | only the [tear sheet](trading.md#tear-sheet) of the steps that kept an `equity.csv` among their artifacts: one page, to the run folder's `tearsheet.html` or FILE | 0; 1 no step kept one, or every one was refused (the reason is printed) |
 | `verify [RUN] [--attestation [--repo OWNER/REPO]]` | check the evidence against its recorded sha256 | 0 it matches, 1 it does not (2: it could not be checked) |
 | `ui [--open] [--serve [--port N]]` | every run as a page, or the live dashboard | 0 |
 | **work live, improve in a loop** | | |

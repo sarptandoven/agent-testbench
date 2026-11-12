@@ -268,6 +268,75 @@ prices.csv's closes for one symbol, taking at each equity row the last close at 
 the symbol is the only one in the file, or the only one traded, or the one named (`symbol="SPY"`, `--symbol SPY`).
 When prices.csv has no close at or before the first equity row, there is no benchmark, and a note says so.
 
+## Tear sheet
+
+One page a trader - or anyone who has never written a backtest - can read, made by testbench from the same standard
+files and never by the strategy:
+
+[![The tear sheet of a three-year moving-average crossover backtest. A header with the period (2022-01-03 to 2024-11-25, 756 daily bars, 252 a year), the equity from 100,000 to 153,562.54, and the sha256 of equity.csv, trades.csv and prices.csv it was computed from. Tiles: returns - total return +53.6%, CAGR +16.0%, buy and hold +52.1%, excess return +1.5%; risk - volatility 12%, Sharpe 1.25 (buy and hold 0.88), Sortino 1.97, max drawdown -13.4%, drawdown length 357 days (255 bars, recovered), Calmar 1.19; trading - 10 trades from 20 fills, win rate 50%, profit factor 4.12, fees 1,328.27, exposure 52%, turnover 6.6x a year. A chart of the account's growth in blue against buy and hold in grey, a drawdown chart in red with its deepest point marked -13.4%, and the monthly returns of 2022 to 2024 as a table of blue and red cells with each year's total and buy and hold's.](assets/tearsheet.png)](assets/tearsheet.png)
+
+It shows:
+
+- **the headline numbers** from [the table above](#the-numbers): total return, CAGR, buy and hold and the excess over
+  it; volatility, Sharpe, Sortino, max drawdown and how long it lasted, Calmar; trades, win rate, profit factor, fees,
+  exposure and turnover. Each says what it is when you hover it, and again in "What each number means" below;
+- **the growth of the account against buy and hold**, both from 0% on one axis (on a log scale when either grew or
+  shrank tenfold), and **the drawdown**: how far below its last peak the account was, its deepest point marked.
+  Hovering a chart shows the date, both returns and the drawdown there;
+- **the monthly returns** as a year by month table, each year's total and buy and hold's beside it. Gains are blue and
+  losses red, in three shades a side (under 2%, 2% to 5%, 5% or more), and every cell also has its sign, so neither
+  colour vision nor print loses it; the text on every colour keeps at least 4.5:1 contrast (WCAG AA), in light and
+  dark;
+- **the trades**: round trips won and lost, the largest win and loss, the average win, loss and trade, and how long
+  positions were held (mean, median, longest);
+- **the caveats**: the [notes](#the-numbers) - how the periods per year were chosen, too few trades or bars, no costs
+  charged, no benchmark - and always "Past results, on past data. Not financial advice."
+
+The page is self-contained: charts are inline SVG drawn by testbench, with no script, no font or library to fetch
+and nothing that reaches the network, so it opens the same from a CI artifact, an email or a laptop offline.
+
+**Where it appears.** A step that keeps its files among its `artifacts:` gets one - testbench finds an `equity.csv`
+by its header (a `time` and an `equity` column) and reads `trades.csv` and `prices.csv` from the same folder:
+
+```yaml
+      - name: backtest
+        run: python backtest.py                 # writes out/equity.csv, out/trades.csv, out/prices.csv
+        artifacts: [out/*.csv]
+```
+
+- `testbench report --format html`, the pages `testbench ui` writes and a run's page on the live dashboard
+  (`testbench ui --serve`) show it under the steps;
+- `testbench report RUN --tearsheet [-o FILE]` writes the tear sheet alone (to `tearsheet.html` in the run folder
+  unless `-o` says where), the page to send someone;
+- report.md - what an agent reads - gets a short Strategy section:
+
+```text
+## Strategy: backtest (out/equity.csv)
+
+testbench's numbers from `steps/01-backtest/artifacts/out/equity.csv`, `trades.csv` and `prices.csv`, not the strategy's (`testbench report 20261112-091352-backtest --tearsheet` draws them):
+- total return +53.6% (buy and hold +52.1%, excess +1.5%), CAGR +16.0%
+- Sharpe 1.25, Sortino 1.97, max drawdown -13.4% over 357 days (recovered), Calmar 1.19
+- 10 trades, win rate 50%, profit factor 4.12, fees 1,328.27, exposure 52%, turnover 6.6x a year
+- caveats: periods per year: 252 - daily bars; only 10 round trips; Sharpe and Sortino take the risk-free rate as 0% a year. Past results, on past data. Not financial advice.
+```
+
+A file the reader refuses gives a short note in its place, with the reader's message (``No tear sheet:
+steps/01-backtest/artifacts/out/equity.csv, line 3, column `equity`: -5 is negative; ...``), never a traceback; the
+rest of the report is unchanged. A prices.csv that cannot be the benchmark (several symbols and none named) is left
+out, with a caveat saying why.
+
+In a report the tear sheet uses the defaults: a risk-free rate of 0 and the calendar read from the times. For other
+settings, or for a folder outside any run, make the page directly:
+
+```
+python -m agent_testbench.trading.tearsheet FOLDER_OR_EQUITY_CSV [-o tearsheet.html] [--risk-free RATE]
+    [--calendar auto|stocks|crypto] [--periods-per-year N] [--symbol SYMBOL] [--log | --linear]
+```
+
+From Python, `tearsheet.sheet(equity, trades, prices, risk_free=0.04)` returns what the page shows (its `numbers` are
+`compute()`'s) or `{"ok": False, "note": ...}`, and `tearsheet.page(tearsheet.for_folder("out"))` is the page as text
+(`from agent_testbench.trading import tearsheet`).
+
 ## From Python
 
 ```python

@@ -15,7 +15,9 @@ command through `testbench` as a person would type it:
 4. a short loop (`testbench loop start`, two `loop try`, `loop stop`) so the checked number moves, then
    `testbench ui`;
 5. a copy of examples/web-ui (on a free port): `testbench run ui-check` passes, then fails once site/app.js calls
-   a function that does not exist.
+   a function that does not exist;
+6. a backtest: a plan whose step writes equity.csv, trades.csv and prices.csv (a moving-average crossover on a
+   seeded random walk, the same every time), then `testbench report --tearsheet`.
 
 Then it opens the pages in headless Chromium (Playwright; 1280x800 viewport, device scale 1, light colour scheme)
 and saves, each a PNG under 150 KB (Pillow quantises one that is larger):
@@ -26,6 +28,7 @@ and saves, each a PNG under 150 KB (Pillow quantises one that is larger):
 - ui-index.png       `testbench ui`: plans with trend lines, runs, the loop
 - ui-run.png         a run's page opened from the index: its evidence files and provenance
 - web-report.png     the failing web run's report: its checks and the screenshot of the page
+- tearsheet.png      the backtest's tear sheet, down to its monthly returns (device scale 2, under 300 KB)
 
 Nothing in a page is edited; a screenshot only chooses which part of the page to show (the main column, from one
 heading to another). Every command and its output is written to transcript.txt in the work folder, so a page
@@ -56,6 +59,36 @@ REPO = HERE.parents[1]
 VIEWPORT = {"width": 1280, "height": 800}
 COLUMN = {"x": 140, "width": 1000}       # a report page's main column (980 px, centred) and a little of its margin
 LIMIT = 150_000                          # bytes per image
+TEARSHEET_LIMIT = 300_000                # the tear sheet is shot at device scale 2
+BACKTEST = '''\
+import datetime as dt, random
+from agent_testbench.trading.files import write_equity, write_prices, write_trades
+
+rng, day, close, closes = random.Random(11), dt.date(2022, 1, 3), 100.0, []
+while len(closes) < 756:                                  # three years of weekdays
+    if day.weekday() < 5:
+        close *= 1 + rng.gauss(0.0005, 0.011)
+        closes.append((day, round(close, 2)))
+    day += dt.timedelta(days=1)
+cash, units, fills, bars = 100_000.0, 0, [], []
+for i, (day, c) in enumerate(closes):
+    fast = sum(x for _, x in closes[max(0, i - 9):i + 1]) / min(10, i + 1)
+    slow = sum(x for _, x in closes[max(0, i - 39):i + 1]) / min(40, i + 1)
+    if i >= 40 and fast > slow and not units:
+        units = int(cash * 0.95 / c)
+        fills.append({"time": day, "symbol": "SPY", "side": "buy", "quantity": units, "price": c,
+                      "fee": round(units * c * 0.0005, 2)})
+        cash -= units * c + fills[-1]["fee"]
+    elif fast < slow and units:
+        fills.append({"time": day, "symbol": "SPY", "side": "sell", "quantity": units, "price": c,
+                      "fee": round(units * c * 0.0005, 2)})
+        cash += units * c - fills[-1]["fee"]
+        units = 0
+    bars.append({"time": day, "equity": cash + units * c, "position_value": units * c})
+write_equity(bars, "out/equity.csv")
+write_trades(fills, "out/trades.csv")
+write_prices([{"time": d, "symbol": "SPY", "close": c} for d, c in closes], "out/prices.csv")
+'''
 RUN_ID = re.compile(r"^Run `([^`]+)`", re.MULTILINE)
 
 
@@ -146,7 +179,31 @@ def make_runs(tb: Bench) -> dict:
     tb(web, "report", "--format", "html")
     return {"demo": demo, "web": web, "failed": run_id(failed), "passed": run_id(passed),
             "best": best.group(1) if best else run_id(passed), "failed_output": failed,
-            "web_failed": run_id(web_failed)}
+            "web_failed": run_id(web_failed), **make_backtest(tb)}
+
+
+def make_backtest(tb: Bench) -> dict:
+    """A backtest plan's run and its tear sheet (tearsheet.html in the run folder)."""
+    folder = tb.work / "backtest"
+    (folder / "out").mkdir(parents=True)
+    (folder / "backtest.py").write_text(BACKTEST)
+    (folder / "testbench.yaml").write_text("project: backtest\nplans:\n  backtest:\n    steps:\n"
+                                           "      - name: sma crossover\n        run: python backtest.py\n"
+                                           "        max_minutes: 2\n        artifacts: [out/*.csv]\n")
+    run = run_id(tb(folder, "run", "backtest"))
+    tb(folder, "report", "--tearsheet")
+    return {"backtest": folder, "backtest_run": run}
+
+
+def shoot_tearsheet(browser, folder: Path, run: str, out: Path) -> Path:
+    """tearsheet.png: the tear sheet page from its top down to the monthly returns' colour scale, at device scale 2."""
+    page = browser.new_page(viewport=VIEWPORT, device_scale_factor=2, color_scheme="light")
+    page.goto((folder / ".testbench" / "runs" / run / "tearsheet.html").as_uri())
+    end = page.locator(".ts-scale").evaluate("e => e.getBoundingClientRect().bottom + window.scrollY")
+    path = out / "tearsheet.png"
+    page.screenshot(path=str(path), full_page=True, clip={**COLUMN, "y": 0, "height": end + 20})
+    page.close()
+    return path
 
 
 TERMINAL = """<!doctype html><html><head><meta charset=utf-8><style>
@@ -205,6 +262,7 @@ def shoot(runs: dict, out: Path) -> list[Path]:
         path = out / "terminal-fail.png"
         page.locator(".term").screenshot(path=str(path))
         made.append(path)
+        made.append(shoot_tearsheet(browser, runs["backtest"], runs["backtest_run"], out))
         browser.close()
     return made
 
@@ -213,14 +271,15 @@ def optimise(path: Path) -> None:
     """The screenshot as it is if it fits LIMIT, else a palette PNG with fewer colours until it does (max-coverage,
     no dithering: small coloured text such as FAIL keeps its colour, and text stays sharp)."""
     from PIL import Image
+    limit = TEARSHEET_LIMIT if path.name == "tearsheet.png" else LIMIT
     image = Image.open(path).convert("RGB")
     image.save(path, optimize=True)
     for colours in (256, 128, 64, 32):
-        if path.stat().st_size <= LIMIT:
+        if path.stat().st_size <= limit:
             return
         image.quantize(colors=colours, method=Image.Quantize.MAXCOVERAGE, dither=Image.Dither.NONE).save(
             path, optimize=True)
-    if path.stat().st_size > LIMIT:
+    if path.stat().st_size > limit:
         print(f"note: {path.name} is {path.stat().st_size // 1000} KB even with 32 colours")
 
 

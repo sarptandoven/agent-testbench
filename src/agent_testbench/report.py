@@ -110,7 +110,8 @@ def compare(prev: dict | None, cur: dict) -> dict:
             "still_failing": still, "metrics_moved": moved}
 
 
-def render(report: dict) -> str:
+def render(report: dict, run_dir: Path | None = None) -> str:
+    """report.md. With the run folder, a step whose artifacts hold an equity.csv also gets a Strategy section."""
     r = report
     when = dt.datetime.fromtimestamp(r["started"]).strftime("%Y-%m-%d %H:%M") if r.get("started") else "?"
     cost = r.get("cost_usd")
@@ -194,6 +195,7 @@ def render(report: dict) -> str:
     for name in r.get("skipped", []):
         lines += [f"| SKIPPED | {_cell(name)} | | | |"]
     lines += [""]
+    lines += _strategy(r, run_dir, "md")
     shown = []
     for s in r.get("steps", []):
         files = [f"{s['dir']}/{x}" for x in s.get("images", [])] + \
@@ -250,7 +252,26 @@ def holdout_line(r: dict) -> str:
 
 def write(run_dir: Path, report: dict) -> None:
     (Path(run_dir) / "report.json").write_text(json.dumps(report, indent=1, default=str))
-    (Path(run_dir) / "report.md").write_text(render(report))
+    (Path(run_dir) / "report.md").write_text(render(report, run_dir))
+
+
+def _strategy(report: dict, run_dir: Path | None, form: str):
+    """The tear sheets (trading/tearsheet.py) of the steps whose artifacts hold an equity.csv: report.md's Strategy
+    lines (form "md") or the HTML report's section. The trading pack is imported only for a run that has one, and
+    the report is made whatever happens in it."""
+    empty = [] if form == "md" else ""
+    steps = report.get("steps") if isinstance(report.get("steps"), list) else []
+    steps = [s for s in steps if isinstance(s, dict) and isinstance(s.get("artifacts"), list)]
+    if run_dir is None or not any(isinstance(a, str) and Path(a).name.lower() == "equity.csv"
+                                  for s in steps for a in s["artifacts"]):
+        return empty
+    try:
+        from .trading import tearsheet
+        return tearsheet.markdown(report, run_dir) if form == "md" else tearsheet.html_section(report, run_dir)
+    except Exception as exc:                          # never in the way of the report itself
+        import html
+        note = f"The tear sheet could not be made ({type(exc).__name__}: {exc})."
+        return [note, ""] if form == "md" else f"<p class=muted>{html.escape(note)}</p>"
 
 
 # ---- other formats: HTML (a page to look at), JUnit (for CI), history (a plan over time) -------------------------
@@ -372,6 +393,7 @@ def html_body(report: dict, run_dir: Path) -> str:
                 + "".join(f"<tr><td class='{'passed' if c['ok'] else 'failed'}'>{'ok' if c['ok'] else 'missed'}</td>"
                           f"<td>{e(n)}</td><td>{e(c['check'])}</td><td>{e(c['detail'])}</td></tr>" for n, c in checks)
                 + "</table></div>"]
+    out.append(_strategy(r, run_dir, "html"))
     import hashlib
     shown, seen, budget_left = [], set(), IMAGES_TOTAL
     for s in r.get("steps", []):

@@ -40,7 +40,8 @@ Windows, and stops with Ctrl-C. Run it from the project folder, in a terminal of
 **A run's page** (`/runs/RUN/`) follows the run while it goes: its steps and their status, the time and cost, and
 the log of the step running now, added to as it grows (only the new part is sent; a long log starts with its last
 64 KB). When the run ends the page turns into its report - the same as `testbench report --format html`, with the
-evidence images inline and links to every evidence file.
+evidence images inline, links to every evidence file and, for a step that kept an `equity.csv`, its
+[tear sheet](trading.md#tear-sheet).
 
 **The static pages** (`/ui/index.html`) are the ones `testbench ui` writes - every plan with a trend line per checked
 number, every run, the loops and the sessions - rebuilt when you open them.
@@ -59,8 +60,9 @@ What keeps it to you:
   page you visit cannot reach it by pointing a name of its own at 127.0.0.1 (DNS rebinding). Anything else gets
   403.
 - It serves files from the project's `.testbench` folder only, and of those only the static pages, the reports
-  (`report.html`, `report.md`, `report.json`) and the step folders' evidence (logs, images, artifacts). The path is
-  checked as asked and again where it leads, so `..`, encoded slashes and symbolic links cannot reach anything else.
+  (`report.html`, `report.md`, `report.json`, `tearsheet.html`) and the step folders' evidence (logs, images,
+  artifacts). The path is checked as asked and again where it leads, so `..`, encoded slashes and symbolic links
+  cannot reach anything else.
   Never served: `state.json`, `plan.json` (it holds the steps' `env:` values), the ledgers, `notify.log`, a run's
   `driver.log`, and the session folders (a session's kernel connection file holds its key).
 - Every name and text from the project - plans, steps, checks, loop tries, logs - is escaped, and a webhook is shown
