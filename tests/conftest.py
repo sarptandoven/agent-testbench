@@ -69,6 +69,28 @@ def one_serial_test_at_a_time(request, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def plugin_registries_restored():
+    """A test that registers a plug-in (plugins.register, backends.register) leaves it behind for every later test on
+    the same worker, so results depended on test order. Each loaded kind's table is put back as it was."""
+    from agent_testbench import plugins as P
+    def tables():
+        out = {}
+        for kind, module in P.KINDS.items():
+            k = getattr(sys.modules.get(module), "KIND", None)
+            if isinstance(k, P.Kind):
+                out[kind] = (k, None if k.loaded is None else dict(k.loaded), dict(k.broken))
+        return out
+    before = tables()
+    yield
+    for kind, (k, _, _) in tables().items():
+        if kind in before:
+            _, loaded, broken = before[kind]
+            k.loaded, k.broken = loaded, broken
+        else:
+            k.loaded, k.broken = None, {}
+
+
+@pytest.fixture(autouse=True)
 def machine_limits(tmp_path, monkeypatch) -> Path:
     """Every test gets its own ~/.testbench (limits for all projects, the machine's ledger), never the real one."""
     d = tmp_path / "user-testbench"

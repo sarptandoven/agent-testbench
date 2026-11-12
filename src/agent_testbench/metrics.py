@@ -104,7 +104,7 @@ class Reader:
         for pattern in (patterns,) if isinstance(patterns, str) else patterns:
             hits = [h for h in sorted(glob.glob(pattern, root_dir=workdir)) if (workdir / h).is_file()]
             if len(hits) > 1:
-                raise MetricsError(f"{len(hits)} files match {pattern} in {workdir} ({', '.join(hits[:5])}); name the "
+                raise MetricsError(f"{len(hits)} files match {pattern} in {workdir} ({', '.join(Path(h).as_posix() for h in hits[:5])}); name the "
                                    f"{label} to read")
             if hits:
                 return workdir / hits[0]

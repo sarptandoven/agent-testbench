@@ -8,9 +8,15 @@ import re
 import shutil
 import sys
 import textwrap
-import tomllib
 
 import pytest
+try:
+    import tomllib
+except ImportError:                    # Python 3.10: tomli if it is there, else the TOML tests skip
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
 
 from agent_testbench import config as C, expect as X, mocks as M, plugins as P
 from conftest import REPO, cli, write_config
@@ -44,6 +50,8 @@ def installed(tmp_path) -> dict:
     site = tmp_path / "site"
     shutil.copytree(EXAMPLE / "testbench_mock_example", site / "testbench_mock_example",
                     ignore=shutil.ignore_patterns("__pycache__"))
+    if tomllib is None:
+        pytest.skip("reading pyproject.toml needs Python 3.11+ (tomllib) or tomli")
     project = tomllib.loads((EXAMPLE / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     info = site / f"testbench_mock_example-{project['version']}.dist-info"
     info.mkdir()
@@ -373,6 +381,8 @@ def test_a_plan_runs_against_an_installed_mock_plug_in(tmp_path, installed):
 
 
 def test_the_example_package_is_a_complete_mock_plug_in(weatherkit):
+    if tomllib is None:
+        pytest.skip("reading pyproject.toml needs Python 3.11+ (tomllib) or tomli")
     project = tomllib.loads((EXAMPLE / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     assert project["entry-points"]["agent_testbench.mocks"] == {"weatherkit": "testbench_mock_example:mock"}
     assert P.check("mocks", weatherkit) == []

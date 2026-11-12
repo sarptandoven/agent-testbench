@@ -9,12 +9,18 @@ import os
 import re
 import threading
 import time
-import tomllib
 from pathlib import Path
 
 import jsonschema
 import pytest
 import yaml
+try:
+    import tomllib
+except ImportError:                    # Python 3.10: tomli if it is there, else the TOML tests skip
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
 
 from agent_testbench import config as C, export as X, notify as N, plugins as P
 from conftest import EXAMPLES, Webhook, cli, write_config
@@ -48,6 +54,8 @@ def install(site: Path, dist: str, modules: dict, entry_points: dict) -> dict:
 def install_example(site: Path, name: str) -> dict:
     """An example plug-in installed from its own pyproject.toml, so the entry point it declares is the one used."""
     folder = EXAMPLES / "plugins" / name
+    if tomllib is None:
+        pytest.skip("reading pyproject.toml needs Python 3.11+ (tomllib) or tomli")
     meta = tomllib.loads((folder / "pyproject.toml").read_text())
     modules = {m: (folder / f"{m}.py").read_text() for m in meta["tool"]["setuptools"]["py-modules"]}
     return install(site, meta["project"]["name"], modules, meta["project"]["entry-points"])

@@ -136,7 +136,7 @@ def test_a_plan_whose_tool_is_missing_is_skipped_with_the_command_that_installs_
     j = json.loads(cli(root, "check", "--json", env=env, timeout=120).stdout)
     cargo = next(e for e in j["plans"] if e["plan"] == "cargo-tests")
     assert cargo["status"] == "skipped" and cargo["run"] is None and cargo["install"], cargo
-    assert "cargo" in cargo["install"] or "rustup" in cargo["install"] or "nextest" in cargo["install"]
+    assert any(w in cargo["install"].lower() for w in ("cargo", "rustup", "nextest")), cargo
     assert not any("cargo-tests" in p.name for p in (root / ".testbench" / "runs").iterdir())
 
 

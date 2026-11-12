@@ -4,6 +4,7 @@ FileNotFoundError naming it and a refused one a ValueError saying what to change
 number, a bool or None. A package adds a reader by an entry point, and `testbench numbers` shows what any of them
 finds."""
 import json
+import re
 import math
 import os
 import shutil
@@ -75,7 +76,7 @@ def test_metrics_is_core_and_reads_json_without_the_trading_pack():
 @pytest.mark.parametrize("name, given", [("json", "out/metrics.json"), ("csv", "log.csv"), ("junit", "junit.xml"),
                                          ("trading", "out/equity.csv")])
 def test_a_missing_file_is_a_file_not_found_error_that_names_it(tmp_path, name, given):
-    with pytest.raises(FileNotFoundError, match=f"no such file in {tmp_path}"):
+    with pytest.raises(FileNotFoundError, match=f"no such file in {re.escape(str(tmp_path))}"):
         M.read(name, tmp_path, {"files": given})
     with pytest.raises(FileNotFoundError, match=given.replace(".", r"\.")):
         M.read(name, tmp_path, {"files": given})
