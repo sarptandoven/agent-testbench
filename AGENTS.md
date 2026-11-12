@@ -70,6 +70,10 @@
   Notebooks: `notebook.py` (forms, papermill parameters, percent-format .py, kernels).
 - From Python: `api.py` (`Testbench`, on the same launch paths as the CLI) and `tools.py` (the MCP tools as
   Anthropic / OpenAI tool definitions, read from the server's own tool table).
+- MCP resources and prompts: `mcp_resources.py` (testbench://plans, runs, a run's report, report.json and evidence,
+  the loop, the notes, the schema; the four prompts). The dashboard's rules hold there: read-only, only reports and
+  step evidence from .testbench, never state.json, plan.json, ledgers or limits, a client's run id or path checked as
+  asked and again as it resolves. Reading the loop never judges a try (`loop.judge` may revert code).
 - Rescue: `rescue.py` (`testbench rescue`: reads a notebook, runs it through `executor.run_step`, diagnoses the first
   failing cell; the import-to-pip-name table is there).
 - Data seal: `dataseal.py` (testbench.yaml `data:`, a plan's `holdout:` and `walk_forward:`; checked at load without

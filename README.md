@@ -269,6 +269,11 @@ session while a long cell runs), return plots and screenshots as images, and pas
 serves streamable HTTP on 127.0.0.1. In Claude Code: `claude mcp add agent-testbench -- testbench mcp`, or the
 plugin, which adds the `iterate` and `setup` skills.
 
+Resources, read without running anything: `testbench://plans`, `testbench://runs`, `testbench://runs/{run_id}/report`
+(and `report.json`, `evidence/{path}`), `testbench://loops/current`, `testbench://notes`, `testbench://config/schema`.
+They serve only reports and step evidence, as the dashboard does. Prompts: `prove-this-change`, `find-why-this-fails`,
+`tune-with-a-loop` and `check-a-strategy` ([docs/clients.md](docs/clients.md#resources-and-prompts)).
+
 ## Commands
 
 `testbench --help` shows the core, a dozen commands:

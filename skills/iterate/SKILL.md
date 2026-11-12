@@ -49,6 +49,9 @@ state built up by hand can hide a bug that a clean run exposes.
 ## The loop
 
 1. **Know the ground**: `testbench plans`, `testbench runs`, `testbench session list`, `.testbench/NOTES.md`.
+   Through the MCP server, read the same without running anything: `testbench://plans`, `testbench://runs`,
+   `testbench://runs/RUN_ID/report` (its `report.json`, its `evidence/PATH`), `testbench://loops/current`,
+   `testbench://notes`.
 2. **Reproduce cheaply**: the smallest data, fewest steps, local first. Use a GPU session only for what needs
    the GPU, with a short `--max-minutes`.
 3. **Look at the evidence yourself**: open the images (Read them), read the values. Numbers can pass while a
@@ -56,6 +59,10 @@ state built up by hand can hide a bug that a clean run exposes.
 4. **Change one thing**, rerun the cell or the plan, compare. Record what you learned:
    `testbench note "lr 1.0 diverges; 3e-4 converges in 2 epochs"`.
 5. **Prove it**: the plan that matters passes. Stop every session. Report.
+
+The MCP server offers these jobs as prompts, which a client shows as slash commands, with the same rules as this
+skill: `prove-this-change` (this loop, for a change), `find-why-this-fails` (from the latest failed report),
+`tune-with-a-loop` (below) and `check-a-strategy` (the trading ladder).
 
 ## Rules that are not yours to bend
 

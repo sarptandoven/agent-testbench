@@ -72,5 +72,9 @@ description: Set up agent-testbench in a project - install it, write testbench.y
    `testbench plans` so they see every plan's worst-case cost. If they use Modal or Colab, start and stop one
    short session there (`testbench session start check --backend modal --max-minutes 5`, `testbench exec "1+1"`,
    `testbench session stop check`) to prove the account works.
+11. **Other clients.** `testbench connect cursor` (or `codex`, `vscode`, `gemini`, `claude`) registers the MCP
+   server there. Besides its tools, the server has resources such as `testbench://plans` and `testbench://runs` and
+   prompts: `prove-this-change`, `find-why-this-fails`, `tune-with-a-loop` and `check-a-strategy`. Point the person
+   to the prompts as the way to start those jobs.
 
 Reference for every field: the README of https://github.com/sarptandoven/agent-testbench.

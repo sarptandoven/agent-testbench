@@ -80,6 +80,52 @@ or the day's limits, because no approval raises those. So keep the client's own 
 `session_start` and `loop_start` (for Gemini CLI, never set `trust: true` on the server), and review changes to
 `testbench.yaml` like any other diff. connect prints all of this each time it runs.
 
+## Resources and prompts
+
+Besides its tools, the server has resources, which an agent reads without running a command, and prompts: the
+common jobs as messages that clients offer as slash commands (Claude Code lists them as
+`/mcp__agent-testbench__prove-this-change` and so on).
+
+Resources read the project the server was started in: the nearest folder at or above the server's working folder
+that has a `testbench.yaml`. Every client above starts the server in the project folder. A client that starts it
+somewhere else gets a refusal that says so, and the tools still work there, since they take `project_dir`.
+
+| resource | what it holds |
+|---|---|
+| `testbench://plans` | each plan's backend, GPU, steps and worst-case cost, and whether launching it is free, needs a person's yes or is refused (JSON) |
+| `testbench://runs` | the latest 20 runs, one line each, as `testbench runs` prints them |
+| `testbench://runs/{run_id}/report` | a run's `report.md`. `run_id` is a run id, a prefix of one, `last` or `last~N` |
+| `testbench://runs/{run_id}/report.json` | the run's proof record |
+| `testbench://runs/{run_id}/evidence/{path}` | a file in the run's `steps/` folder, named as report.json's evidence list names it (`steps/` may be left out). Text comes back as text, the last 1 MB of a longer file. Images (png, jpeg, gif, webp, up to 2 MB) come back as images |
+| `testbench://loops/current` | the open loop as `testbench loop status` shows it, the luck line included. Reading it judges no try; `loop_status` does that |
+| `testbench://notes` | `.testbench/NOTES.md` |
+| `testbench://config/schema` | testbench.yaml's JSON Schema (`testbench schema`) |
+
+Resources follow the dashboard's rules. Only what testbench.yaml declares, run reports, step evidence, the loop and
+the notes are served. `state.json`, `plan.json` (which holds step env values), the ledgers, the machine's limits
+file and secrets are never served, and no URI names them. A read is refused with a message that says why when:
+
+- an evidence path has `..`, is absolute, names a drive, or holds a backslash, a NUL or a hidden name;
+- a link leads out of the run's `steps/` folder, or `report.md`, `report.json` or `NOTES.md` is a link at all;
+- a run folder is linked in from outside `.testbench/runs`;
+- the run is unknown. The message names the latest run, or the run of a plan that was named by mistake.
+
+A read launches, approves, cancels, writes and spends nothing. Completions offer plan names, run ids (newest first)
+and the evidence paths of the chosen run. When a run that `run_plan` or `wait_run` follows ends, clients that
+listen for changes (MCP's subscriptions, protocol 2026-07-28) are told that `testbench://runs` and that run's
+report changed. With mcp 1.x the evidence template is missing, because it needs mcp 2's `{+path}`.
+
+| prompt | arguments | what it asks the agent to do |
+|---|---|---|
+| `prove-this-change` | `plan` (optional) | explore in a session if needed, run the plan, read the report, fix one thing at a time, and finish with the run id that proves it and what it cost |
+| `find-why-this-fails` | `run` (optional; else the latest failed run) | read the failed report, name the failing check and line, reproduce it in a session, fix it, run again |
+| `tune-with-a-loop` | `plan`, `metric` | start a loop with a budget the person gives, make one change per try, stop on the rules, and report the luck line for a strategy |
+| `check-a-strategy` | `plan` (optional) | go up the trading ladder (backtest with costs, walk-forward, holdout once, paper), give the deflated Sharpe over every try and plain caveats, and never touch live money |
+
+Each prompt carries the working rules: the agent never sets `approved_by_person` itself, stops every session it
+starts, and never weakens an expectation to make a run pass. A plan or run named in an argument is checked against
+the project, and a near miss is named.
+
 ## Each client
 
 ### Claude Code
