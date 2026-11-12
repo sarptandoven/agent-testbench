@@ -37,7 +37,8 @@
   to the backends' built-in tables; a test checks).
 - Processes: `procs.py` (start, check and stop background work and lock files - the same on Linux, macOS and
   Windows; never `os.kill(pid, 0)` on Windows, it ends the process). `scaffold.py`: what `testbench init` writes.
-- CI: `action.yml` (the GitHub Action) and `.github/workflows/action.yml` (its self-test).
+- CI: `action.yml` (the GitHub Action) and `.github/workflows/action.yml` (its self-test); `ci/` holds the
+  `testbench ci --for gitlab|azure|circleci|shell` templates (one shared job.sh; no template ever approves a cost).
 - Loops: `loop.py` (`testbench loop`: tries on a git branch, kept or reverted by a plan run's metric; stopping
   rules --target, --patience, --max-tries).
 - Notifications: `notify.py` (testbench.yaml `notify:`; run_end from `runs.finalize`, once per run and not for a
@@ -72,7 +73,9 @@
   share `mock_clients/shared/_testbench_broker.py` (prices, the paper account, fills, the live-account refusal).
   Notebooks: `notebook.py` (forms, papermill parameters, percent-format .py, kernels).
 - From Python: `api.py` (`Testbench`, on the same launch paths as the CLI) and `tools.py` (the MCP tools as
-  Anthropic / OpenAI tool definitions, read from the server's own tool table).
+  Anthropic / OpenAI tool definitions, and as OpenAI Agents SDK, LangChain and Claude Agent SDK tools through
+  `for_openai_agents` / `for_langchain` / `for_claude_agent_sdk`, read from the server's own tool table, one call
+  path; the model is never offered an approval flag).
 - MCP resources and prompts: `mcp_resources.py` (testbench://plans, runs, a run's report, report.json and evidence,
   the loop, the notes, the schema; the four prompts). The dashboard's rules hold there: read-only, only reports and
   step evidence from .testbench, never state.json, plan.json, ledgers or limits, a client's run id or path checked as
