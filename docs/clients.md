@@ -227,3 +227,13 @@ google-gemini/gemini-cli.
   Register the same command (`/path/to/python -m agent_testbench mcp`, or
   `uvx --from "agent-testbench[all]" testbench mcp`) in the client's own MCP settings, and copy the `AGENTS.md`
   section into whatever rules file it reads.
+
+## Agents you build, and CI
+
+- **Your own agent**: the OpenAI Agents SDK, LangChain / LangGraph and the Claude Agent SDK get the same tools as
+  their own tool objects (`tools.for_openai_agents()`, `tools.for_langchain()`, `tools.for_claude_agent_sdk()`),
+  and the Anthropic and OpenAI APIs as tool definitions. The framework tools never let the model approve a cost:
+  only a person does, when the application asks them ([python-api.md](python-api.md#tools-for-agent-frameworks)).
+- **CI**: the GitHub Action ([github-action.md](github-action.md)), and `testbench ci --for gitlab|azure|circleci|shell`
+  for the rest: a job that runs `testbench check`, shows each step as a test and fails on a refusal
+  ([ci.md](ci.md)).

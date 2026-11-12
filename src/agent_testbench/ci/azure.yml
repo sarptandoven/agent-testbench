@@ -1,0 +1,54 @@
+# agent-testbench in Azure Pipelines, written by `testbench ci --for azure` (agent-testbench {{version}}).
+# It runs `testbench check` (every plan that is free and needs no approval), or `testbench run PLAN` for each plan
+# named in TESTBENCH_PLANS. The run's Tests tab shows each plan's steps as tests (PublishTestResults), and each
+# run's folder - report.md, report.html, the logs and evidence - is published as the pipeline artifact
+# testbench-runs. Anything but exit 0 fails the job: 1 failed, 2 refused (nothing ran), 3 still running.
+#
+# Budgets: this job never approves a cost. It runs testbench without its approve flag, and that must stay so: a plan
+# whose worst case needs a person's approval is refused here (exit 2), and that person runs it themselves. Plans on
+# paid machines (Modal, ...) need their credentials as secret variables, passed to the testbench step under env:
+# (secret variables are not in a script's environment otherwise).
+# Docs: https://sarptandoven.github.io/agent-testbench/ci/
+#
+# trigger: and pr: are left out, so every branch and pull request runs it.
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  # empty: testbench check; plan names, space-separated: testbench run each one
+  TESTBENCH_PLANS: "{{plans}}"
+  # how long to follow each named plan before cancelling it
+  TESTBENCH_WAIT_SECONDS: "3600"
+
+steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "3.12"
+
+  - bash: python -m pip install --disable-pip-version-check "agent-testbench=={{version}}"
+    displayName: install agent-testbench {{version}}
+  # - bash: python -m pip install -r requirements.txt     # what the project's plans need
+
+  - bash: |
+      {{job}}
+    displayName: testbench
+    # env:                                                # secret variables reach the step only through env:
+    #   MODAL_TOKEN_ID: $(MODAL_TOKEN_ID)
+    #   MODAL_TOKEN_SECRET: $(MODAL_TOKEN_SECRET)
+
+  - task: PublishTestResults@2
+    displayName: publish the JUnit results
+    condition: succeededOrFailed()
+    inputs:
+      testResultsFormat: JUnit
+      testResultsFiles: .testbench/junit/*.xml
+      testRunTitle: agent-testbench
+      failTaskOnFailedTests: false                       # the testbench step already fails the job
+
+  - task: PublishPipelineArtifact@1
+    displayName: keep the runs
+    condition: succeededOrFailed()
+    inputs:
+      targetPath: .testbench/runs
+      artifact: testbench-runs-$(System.JobAttempt)

@@ -85,11 +85,15 @@ outside Claude Code.
 **In CI**: `uses: sarptandoven/agent-testbench@v1` with `plan: smoke`; `comment: true` puts the verdict and the
 numbers' change since the base branch on the pull request, and `attest: true` signs the report so
 `testbench verify --attestation` shows which workflow and commit made it ([docs/github-action.md](docs/github-action.md)).
+GitLab, Azure Pipelines, CircleCI or any shell: `testbench ci --for gitlab -o .gitlab-ci.yml` writes a job that runs
+`testbench check` and shows each step as a test ([docs/ci.md](docs/ci.md)).
 
 **Your own agent or a notebook**: `from agent_testbench import Testbench` runs plans and live sessions from Python,
 and `agent_testbench.tools` gives the same tools to the Anthropic or OpenAI API (`tools.anthropic_tools()`,
 `tools.call(name, input)`), inside the same budget, approvals and machine limits
-([docs/python-api.md](docs/python-api.md), [examples/agent-loop](examples/agent-loop)).
+([docs/python-api.md](docs/python-api.md), [examples/agent-loop](examples/agent-loop)). The OpenAI Agents SDK,
+LangChain / LangGraph and the Claude Agent SDK get them as their own tools: `tools.for_openai_agents()`,
+`tools.for_langchain()`, `tools.for_claude_agent_sdk()`, where only a person approves a cost.
 
 **Any other agent** reads the working rules `testbench init` writes into `AGENTS.md`.
 
@@ -290,7 +294,7 @@ The rest, for setup, money, notebooks and more (`testbench help --all` lists eve
 
 | | |
 |---|---|
-| `testbench init [--recipe]` / `recipes` / `schema` / `connect` / `selftest` / `mcp [--http]` / `plugins` / `plugin test` | set up a project and your agents, editor autocomplete for testbench.yaml, check the promises hold here, serve MCP, list plug-ins and check one keeps its contract |
+| `testbench init [--recipe]` / `recipes` / `schema` / `connect` / `ci` / `selftest` / `mcp [--http]` / `plugins` / `plugin test` | set up a project, your agents and CI (GitLab, Azure, CircleCI, a shell script), editor autocomplete for testbench.yaml, check the promises hold here, serve MCP, list plug-ins and check one keeps its contract |
 | `testbench wait` / `status` / `runs` / `cancel` / `watch` | follow, list and stop runs; run a free plan again on every change |
 | `testbench diff` / `history` / `export` | what changed between runs, the checked numbers over time, MLflow / W&B / csv / jsonl |
 | `testbench files` / `notify test` | files on a session's machine; a test message to the `notify:` webhook |
@@ -322,6 +326,7 @@ refusal (exit 2) says what was refused, why, and the command or the testbench.ya
 - [docs/why.md](docs/why.md), [docs/use-cases.md](docs/use-cases.md), [docs/faq.md](docs/faq.md),
   [docs/troubleshooting.md](docs/troubleshooting.md)
 - [docs/github-action.md](docs/github-action.md) - the GitHub Action: inputs, outputs, what reviewers see
+- [docs/ci.md](docs/ci.md) - CI jobs for GitLab, Azure Pipelines, CircleCI and any shell (`testbench ci`)
 - [docs/demo-loop.md](docs/demo-loop.md), [docs/demo-sandbox.md](docs/demo-sandbox.md) and
   [docs/demo.md](docs/demo.md) - real agent runs, with what they did
 - [examples/](examples) - a Colab-style notebook with plans for every backend, and a web UI check

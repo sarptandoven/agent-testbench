@@ -1,0 +1,32 @@
+# agent-testbench in GitLab CI/CD, written by `testbench ci --for gitlab` (agent-testbench {{version}}).
+# It runs `testbench check` (every plan that is free and needs no approval), or `testbench run PLAN` for each plan
+# named in TESTBENCH_PLANS. The pipeline's and the merge request's test report show each plan's steps as tests
+# (artifacts:reports:junit), and each run's folder - report.md, report.html, the logs and evidence - is kept as an
+# artifact. Anything but exit 0 fails the job: 1 failed, 2 refused (nothing ran), 3 still running.
+#
+# Budgets: this job never approves a cost. It runs testbench without its approve flag, and that must stay so: a plan
+# whose worst case needs a person's approval is refused here (exit 2), and that person runs it themselves. Plans on
+# paid machines (Modal, ...) need their credentials as masked CI/CD variables (Settings > CI/CD > Variables), such as
+# MODAL_TOKEN_ID and MODAL_TOKEN_SECRET. Docs: https://sarptandoven.github.io/agent-testbench/ci/
+
+testbench:
+  image: python:3.12
+  variables:
+    # empty: testbench check; plan names, space-separated: testbench run each one
+    TESTBENCH_PLANS: "{{plans}}"
+    # how long to follow each named plan before cancelling it
+    TESTBENCH_WAIT_SECONDS: "3600"
+    PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  script:
+    - python -m pip install "agent-testbench=={{version}}"    # the version that wrote this job
+    # - python -m pip install -r requirements.txt             # what the project's plans need
+    - |
+      {{job}}
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - .testbench/runs/
+      - .testbench/junit/
+    reports:
+      junit: .testbench/junit/*.xml
