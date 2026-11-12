@@ -1,0 +1,19 @@
+# An example plug-in package for agent-testbench: the backend `nice` (testbench_nice.py). Installed next to
+# agent-testbench, `testbench plugins` lists it and `backend: nice` works in testbench.yaml.
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "testbench-backend-example"
+version = "0.1.0"
+description = "An example agent-testbench backend plug-in: plans on this machine under nice -n 10"
+requires-python = ">=3.10"
+dependencies = ["agent-testbench>=0.2"]
+
+# The entry point: its name is what testbench.yaml writes (backend: nice); its value is the object, module:attr.
+[project.entry-points."agent_testbench.backends"]
+nice = "testbench_nice:backend"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["testbench_nice.py"]

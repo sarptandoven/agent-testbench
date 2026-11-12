@@ -607,8 +607,7 @@ def cmd_doctor(a):
     checks.append(("backends", True, ", ".join(backends.names())))
     for b in backends.registry().values():
         checks += b.doctor()
-    for name, why in backends.broken().items():
-        checks.append((f"backend {name}", False, why))
+    checks += _plugin_checks()
     try:
         root = C.find_root()
         C.load(root)
@@ -618,6 +617,84 @@ def cmd_doctor(a):
     for name, ok, detail in checks:
         print(f"{'ok  ' if ok else 'no  '} {name}: {detail}")
     return 0
+
+
+def _plugin_checks() -> list[tuple[str, bool, str]]:
+    """`testbench doctor`'s lines about plug-ins: what is installed, and each broken one (any kind) with why."""
+    from . import plugins as P
+    out, installed = [], []
+    for row in P.inventory():
+        installed += [f"{p['name']} ({row['kind']})" for p in row["installed"] if p["from"]]
+        if row.get("error"):
+            out.append((f"{row['kind']} plug-ins", False, row["error"]))
+        for b in row["broken"]:
+            fix = f"; `testbench plugin test {b['package'].split()[0]}` says more" if b["package"] else ""
+            out.append((f"{row['one']} {b['name']}", False, f"{b['why']}{fix}"))
+        for w in row["waiting"]:
+            source = f"{w['from']} ({w['package']})" if w["package"] else w["from"]
+            out.append((f"{row['kind']} plug-in {w['name']}", False, f"{source}: this version of testbench does not "
+                        f"take {row['kind']} plug-ins yet, so it is not used; upgrade agent-testbench"))
+    if installed:
+        out.insert(0, ("plug-ins", True, f"{', '.join(installed)} (`testbench plugins` lists them)"))
+    return out
+
+
+def cmd_plugins(a):
+    from . import plugins as P
+    rows = P.inventory()
+    if a.json:
+        print(json.dumps({"kinds": rows}, indent=2))
+        return 0
+
+    def came(p: dict) -> str:
+        return (f"{p['from']}, {p['package']}" if p["package"] else p["from"]) or "added in this process"
+    for row in rows:
+        print(f"{row['kind']:<10} {row['what'] if row['open'] else 'not yet open to plug-ins'}")
+        lines = [("built in", ", ".join(row["builtin"]))] if row["builtin"] else []
+        lines += [("error", row["error"])] if row.get("error") else []
+        lines += [("installed", f"{p['name']} ({came(p)})") for p in row["installed"]]
+        lines += [("broken", f"{b['name']}: {b['why']}" + (f" ({b['package']})" if b["package"] else ""))
+                  for b in row["broken"]]
+        lines += [("waiting", f"{w['name']} ({came(w)}): not used until this kind takes plug-ins")
+                  for w in row["waiting"]]
+        for label, text in lines:
+            print(f"  {label:<10} {text}")
+    print(f"\nA package adds one with an entry point in {P.GROUP.format(kind='KIND')} (e.g. "
+          f"{P.GROUP.format(kind='backends')}).\n`testbench plugin test PACKAGE` checks it keeps its kind's contract.\n"
+          "How to write one: https://sarptandoven.github.io/agent-testbench/plugins/")
+    return 0
+
+
+def cmd_plugin(a):
+    from . import plugins as P
+    if a.target and a.installed:
+        print(f"testbench: test {a.target} or --installed, not both", file=sys.stderr)
+        return 2
+    try:
+        results = P.conformance(a.target or "", a.kind or "", a.installed)
+    except P.PluginError as exc:
+        print(f"testbench: {exc}", file=sys.stderr)
+        return 2
+    failed = [r for r in results if r["problems"]]
+    if a.json:
+        print(json.dumps({"ok": not failed, "results": results}, indent=2))
+        return 1 if failed else 0
+    for r in results:
+        where = r["source"] + (f", {r['package']}" if r["package"] else "")
+        label = f"{r['kind']} {r['name'] or '(no name)'} ({where})"
+        if not r["problems"]:
+            print(f"ok   {label}: keeps its kind's contract")
+            continue
+        print(f"FAIL {label}: {C.counted(len(r['problems']), 'problem')}")
+        for problem in r["problems"]:
+            print(f"     - {problem}")
+    if not results:
+        print("No plug-ins installed" + (f" for {a.kind}" if a.kind else "") + "; nothing to test.")
+    elif len(results) > 1:
+        print(f"\n{C.counted(len(results), 'plug-in')} tested: " + (
+            f"{len(failed)} {'does' if len(failed) == 1 else 'do'} not keep its kind's contract" if failed
+            else "each keeps its kind's contract"))
+    return 1 if failed else 0
 
 
 def _session_cmd(fn):
@@ -1021,6 +1098,8 @@ GROUPS = {   # `testbench help --all`: every command, in the groups README's Com
         "schema": "testbench.yaml's JSON Schema, for editors to autocomplete it",
         "connect": "set up Cursor, VS Code, Codex, Gemini or Claude Code to use it",
         "doctor": "check what this machine can run, and what to fix",
+        "plugins": "the kinds of plug-in: built in, installed, broken and why",
+        "plugin": "plugin test: check a plug-in keeps its kind's contract",
         "selftest": "a minute or so: check the main promises hold on this machine",
         "mcp": "serve these commands as MCP tools"},
     "plans": {
@@ -1215,6 +1294,16 @@ connect
   testbench connect claude --user
 doctor
   testbench doctor
+plugins
+  testbench plugins                      # built in, installed, broken
+  testbench plugins --json
+plugin
+  testbench plugin test testbench-backend-example  # each plug-in it declares
+  testbench plugin test --installed      # every installed plug-in
+plugin test
+  testbench plugin test testbench-backend-example  # each plug-in it declares
+  testbench plugin test testbench_nice:backend --kind backends
+  testbench plugin test --installed      # every installed plug-in
 mcp
   testbench mcp                          # stdio, for an MCP client's config
   testbench mcp --http --port 8765
@@ -1571,6 +1660,28 @@ def build_parser() -> argparse.ArgumentParser:
                    help="test: send one test message and say whether it was accepted")
     p.set_defaults(fn=cmd_notify)
     sub.add_parser("doctor", help="check what this machine can run; each `no` line says what to do").set_defaults(fn=cmd_doctor)
+    from .plugins import KINDS
+    p = sub.add_parser("plugins", help="each kind of plug-in: its built-ins, what is installed (and from which "
+                                       "package), what is broken and why")
+    _json(p, "every kind and its plug-ins")
+    p.set_defaults(fn=cmd_plugins)
+    p = sub.add_parser("plugin", help="plug-ins: `plugin test` checks one keeps its kind's contract")
+    psub = p.add_subparsers(dest="plugin_cmd", metavar="COMMAND", required=True)
+    q = psub.add_parser("test", help="check plug-ins keep their kind's contract: a line for each, and each problem "
+                                     "(exit 0 all do, 1 one does not)",
+                        description="The conformance kit: load each plug-in and check it against its kind's contract "
+                                    "(a backend prices its hardware, stops itself on the remote side, hands out "
+                                    "classes with the right methods, ...). TARGET is module:attr (one object), or an "
+                                    "installed package's name (every plug-in it declares); --installed tests every "
+                                    "installed plug-in. In a plug-in's own tests: "
+                                    "agent_testbench.plugins.assert_conforms(KIND, obj).")
+    q.add_argument("target", nargs="?", metavar="TARGET",
+                   help="module:attr, or an installed package's name (e.g. testbench-backend-example)")
+    q.add_argument("--installed", action="store_true", help="every installed plug-in, of every kind")
+    q.add_argument("--kind", metavar="KIND", help=f"test it as this kind: {', '.join(KINDS)} (default: the kind its "
+                                                  "entry point declares, or the only one that takes it)")
+    _json(q, "the results")
+    p.set_defaults(fn=cmd_plugin)
     p = sub.add_parser("selftest", help="a minute or so, local and free: check that the main promises hold on this "
                                         "machine, one line each")
     p.add_argument("--keep", action="store_true", help="keep the temporary project and its runs to look at")

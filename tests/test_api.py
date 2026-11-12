@@ -25,7 +25,7 @@ def priced(tmp_path, plugin, monkeypatch) -> Path:
     for p in reversed(paths.split(os.pathsep)):
         monkeypatch.syspath_prepend(p)                     # this process prices it ...
     monkeypatch.setenv("PYTHONPATH", paths)
-    monkeypatch.setattr(backends, "_loaded", None)         # ... and the driver it starts runs it
+    monkeypatch.setattr(backends.KIND, "loaded", None)     # ... and the driver it starts runs it
     root = tmp_path / "priced"
     root.mkdir()
     write_config(root, {"project": "priced", "budget": {"max_run_usd": 5, "ask_above_usd": 0.1, "max_day_usd": 10},

@@ -213,6 +213,7 @@ class Colab(Backend):
     built_in_gpus = ("T4", "L4", "G4", "A100", "H100")
     startup_minutes = 10.0     # assigning, installing and uploading, plus bringing the evidence back before the
                                # VM's own hard stop (at the time limit plus this) - so the estimate bounds it
+    hard_stop = "kernelkit's watchdog on the VM interrupts the work and releases the VM at the time limit"
     config_defaults = {"colab": {"pip": [], "requirements": None}}
 
     @property

@@ -357,6 +357,7 @@ class SSHSession:
 class SSH(Backend):
     name = "ssh"
     startup_minutes = 2.0            # copying the project and checking the virtualenv
+    hard_stop = "kernelkit's watchdog on the machine ends the work at the time limit (a session also when idle)"
     config_defaults = {"ssh": {"host": None, "usd_per_hour": 0.0, "python": "python3", "workdir": "~/.testbench-remote",
                                "setup": "venv", "pip": [], "command": ["ssh"]}}
 

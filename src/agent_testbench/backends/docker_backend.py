@@ -524,6 +524,7 @@ class DockerSession:
 class DockerBackend(Backend):
     name = "docker"
     startup_minutes = 2.0             # creating the container and copying the project (a first image build is extra)
+    hard_stop = "kernelkit's watchdog in the container ends the work at the time limit; the container removes itself"
     config_defaults = {"docker": {"image": "python:3.11-slim", "setup": "build", "pip": [], "network": "bridge",
                                   "gpus": None, "cpu": None, "memory_gb": None, "usd_per_hour": 0.0, "python": "python3",
                                   "run_args": [], "build_args": [], "ca_bundle": None, "command": ["docker"]}}

@@ -45,7 +45,6 @@ nav:
       - Docker: docker.md
       - ssh: ssh.md
       - Kubernetes: kubernetes.md
-      - Plugins: plugins.md
   - Loops: loops.md
   - "Watch: rerun on change": watch.md
   - Notifications: notify.md
@@ -55,6 +54,7 @@ nav:
   - CI: github-action.md
   - Python API and tools: python-api.md
   - "Architecture: core and plug-ins": architecture.md
+  - Plug-ins: plugins.md
   - Reference: reference.md
   - FAQ: faq.md
   - Troubleshooting: troubleshooting.md

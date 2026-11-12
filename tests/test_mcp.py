@@ -159,7 +159,7 @@ def test_a_person_asked_directly_is_notified_only_if_they_do_not_answer(tmp_path
     (root / "testbench.yaml").write_text((root / "testbench.yaml").read_text() + f"notify: {{webhook: '{webhook.url}'}}\n")
     for p in reversed(plugin["PYTHONPATH"].split(os.pathsep)):
         monkeypatch.syspath_prepend(p)                     # the server reads testbench.yaml too, as the CLI does
-    monkeypatch.setattr(backends, "_loaded", None)
+    monkeypatch.setattr(backends.KIND, "loaded", None)
     monkeypatch.setenv("PYTHONPATH", plugin["PYTHONPATH"])
     monkeypatch.setattr(mcp_server, "ASK_NOTICE_AFTER_S", 1.0)
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))      # where the held notice waits
