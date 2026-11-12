@@ -334,6 +334,8 @@ def cmd_report(a):
     run_dir = runs.resolve(root, a.run)
     fmt = "json" if a.json else a.format
     rep = R.load(run_dir)
+    if a.tearsheet:
+        return _tearsheet(run_dir, rep, a.output)
     if fmt == "md" or (rep is None and fmt != "json"):
         _print_report(run_dir)
         from .export import summary
@@ -355,6 +357,27 @@ def cmd_report(a):
     else:
         print(text)
     return 0
+
+
+def _tearsheet(run_dir: Path, rep: dict | None, output: str | None) -> int:
+    """`testbench report RUN --tearsheet`: the tear sheet page of the steps whose artifacts hold an equity.csv."""
+    if rep is None:
+        print(f"{run_dir.name} has no report yet, so no tear sheet: {runs.status_line(run_dir)}")
+        return 1
+    from .trading import tearsheet as TS
+    page, sheets = TS.run_page(rep, run_dir)
+    if not sheets:
+        print(f"{run_dir.name} has no tear sheet: no step kept an equity.csv with a time and an equity column among "
+              "its artifacts. Keep the backtest's files with the step's `artifacts:` (e.g. artifacts: [out/*.csv]); "
+              "docs/trading.md has their format.")
+        return 1
+    target = Path(output) if output else run_dir / "tearsheet.html"
+    target.write_text(page, encoding="utf-8")
+    for label, s in sheets:
+        if not s["ok"]:
+            print(f"{label}: no tear sheet: {s['note']}")
+    print(f"wrote {target} (the tear sheet: one self-contained page, open it in a browser)")
+    return 0 if any(s["ok"] for _, s in sheets) else 1
 
 
 def cmd_history(a):
@@ -1514,6 +1537,10 @@ def build_parser() -> argparse.ArgumentParser:
                            help="md (default), json, html (a page with the evidence images; written to the run "
                                 "folder) or junit (XML for CI)")
             p.add_argument("--json", action="store_true", help="same as --format json")
+            p.add_argument("--tearsheet", action="store_true",
+                           help="write only the tear sheet page of the steps that kept an equity.csv (trading: the "
+                                "numbers, growth against buy and hold, drawdowns, monthly returns, trades, caveats); "
+                                "to the run folder's tearsheet.html, or -o")
             p.add_argument("-o", "--output", metavar="FILE", help="write to this file")
         if name == "verify":
             p.add_argument("--attestation", action="store_true",

@@ -39,6 +39,7 @@ LOG_CHUNK = 512 * 1024        # the most of a log one update sends
 RECENT, SCAN = 15, 300        # runs listed; runs looked at for the ones going now (the latest)
 GOING = ("queued", "running")
 HTML, PLAIN, JSON = "text/html; charset=utf-8", "text/plain; charset=utf-8", "application/json"
+REPORTS = ("report.html", "report.md", "report.json", "tearsheet.html")      # a run's report files it serves
 IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
 TEXTS = {".txt", ".log", ".md", ".json", ".jsonl", ".csv", ".tsv", ".py", ".ipynb", ".yaml", ".yml", ".xml", ".svg",
          ".out", ".err"}
@@ -217,7 +218,7 @@ class Dashboard:
                 return False
             n = len(parts)
             return n >= 2 and ((parts[0] == "ui" and n == 2)
-                               or (parts[0] == "runs" and n == 3 and parts[2] in ("report.html", "report.md", "report.json"))
+                               or (parts[0] == "runs" and n == 3 and parts[2] in REPORTS)
                                or (parts[0] == "runs" and n >= 4 and parts[2] == "steps")
                                or (parts[0] == "loops" and n == 3 and parts[2] in ("report.html", "report.md")))
         if not allowed(seg):
