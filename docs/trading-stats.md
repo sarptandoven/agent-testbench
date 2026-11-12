@@ -84,6 +84,11 @@ per-period Sharpe ratio and `n_obs`), and it returns N, V, the best try, its DSR
 every try as an independent trial; tries that are near copies of each other are fewer independent trials, so the DSR
 it gives errs on the cautious side.
 
+`testbench loop` does this for you. A loop over a strategy keeps every try's returns, reverted tries included, and
+each `loop try`, `loop status`, `loop stop` report and loop notification adds the verdict for its best try (and
+PBO once 4 or more tries cover the same periods); `--min-deflated-sharpe 0.95` makes the loop's `--target` count
+only when the best try also clears that DSR. See [Loops: is the best try luck?](loops.md#is-the-best-try-luck).
+
 From Bailey & Lopez de Prado (2014), [The Deflated Sharpe Ratio: Correcting for Selection Bias, Backtest Overfitting
 and Non-Normality](https://ssrn.com/abstract=2460551), Journal of Portfolio Management 40(5). The paper's example
 (100 trials, 5 years of daily returns, an annualized Sharpe of 2.5) gives a DSR of 0.90: not significant at 0.95.

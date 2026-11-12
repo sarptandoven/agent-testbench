@@ -876,7 +876,7 @@ def cmd_loop(a):
         if a.loop_cmd == "start":
             state = LP.start(root, cfg, a.plan, a.metric, a.budget_usd, goal=a.goal, max_hours=a.max_hours,
                              min_delta=a.min_delta, approve=a.approve, target=a.target, patience=a.patience,
-                             max_tries=a.max_tries)
+                             max_tries=a.max_tries, returns=a.returns, min_deflated_sharpe=a.min_deflated_sharpe)
             print(f"[testbench] loop {state['id']} started on branch {state['branch']}; running the baseline "
                   f"(run {state['tries'][0]['run']})", flush=True)
         elif a.loop_cmd == "try":
@@ -902,6 +902,13 @@ def cmd_loop(a):
         return 3
     last = state["tries"][-1]
     print("\n" + last["verdict"])
+    if last.get("returns_found"):
+        print(f"returns for the luck check: {state['returns']}, the one equity.csv the plan keeps as evidence (each "
+              "try's own; --returns at loop start names another)")
+    if last.get("returns_missing"):
+        print(f"no returns from this try for the luck check: {last['returns_missing']}")
+    for line in LP.luck_lines(state):
+        print(line)
     return 0 if last.get("kept") else 1
 
 
@@ -1720,6 +1727,13 @@ def build_parser() -> argparse.ArgumentParser:
                                                                  "max, <= for min): further tries are refused")
     q.add_argument("--patience", type=int, metavar="N", help="refuse a try after N tries in a row were not kept")
     q.add_argument("--max-tries", type=int, metavar="N", help="refuse a try after N tries (the baseline not counted)")
+    q.add_argument("--returns", metavar="PATH",
+                   help="a strategy's equity.csv (or a CSV of per-period returns, one column) in each try's run, e.g. "
+                        "out/equity.csv: every report then says whether the best try is better than luck (default: "
+                        "the one equity.csv the plan keeps as evidence, if there is one)")
+    q.add_argument("--min-deflated-sharpe", type=_number, metavar="P",
+                   help="with --target: the target counts only once the best try's deflated Sharpe over all tries so "
+                        "far is at least P (0.5 to 1, e.g. 0.95)")
     q.add_argument("--wait", type=_number, metavar="SECONDS",
                    help="follow the baseline run at most this many seconds (default: until it ends)")
     q = lsub.add_parser("try", help="commit the edits as a try, run the plan, keep it or revert it",

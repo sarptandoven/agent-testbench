@@ -416,16 +416,23 @@ async def session_stop(session: str = "", project_dir: str = ".", all_sessions: 
                          "contains it, e.g. check:val_loss) beats the best so far, else reverts it. budget_usd bounds the "
                          "whole loop. Stopping rules, for a loop left to run: target (done once the best reaches it; "
                          "null for none), patience (refuse a try after that many in a row were not kept) and "
-                         "max_tries (0 for none). Above the approval threshold the person is asked directly when the "
+                         "max_tries (0 for none). For a trading strategy, returns names each try's equity.csv (e.g. "
+                         "out/equity.csv; default: the one the plan keeps as evidence), and every report says whether "
+                         "the best try is better than luck (its deflated Sharpe over all tries, reverted ones too); "
+                         "min_deflated_sharpe (e.g. 0.95) makes target count only once the best try also clears it. "
+                         "Above the approval threshold the person is asked directly when the "
                          "client supports it; otherwise it needs approved_by_person=true, set only after the person "
                          "agreed.")
 async def loop_start(plan: str, metric: str, budget_usd: float, goal: str = "max", max_hours: float = 8.0,
                      min_delta: float = 0.0, target: float | None = None, patience: int = 0, max_tries: int = 0,
-                     project_dir: str = ".", approved_by_person: bool = False, ctx: Context = None) -> str:
+                     returns: str = "", min_deflated_sharpe: float | None = None, project_dir: str = ".",
+                     approved_by_person: bool = False, ctx: Context = None) -> str:
     argv = ["loop", "start", _name(plan, "plan"), f"--metric={metric}", "--budget-usd", str(budget_usd), f"--goal={goal}",
             "--max-hours", str(max_hours), "--min-delta", str(min_delta)] \
         + ([f"--target={target}"] if target is not None else []) \
         + (["--patience", str(patience)] if patience else []) + (["--max-tries", str(max_tries)] if max_tries else []) \
+        + ([f"--returns={returns}"] if returns else []) \
+        + ([f"--min-deflated-sharpe={min_deflated_sharpe}"] if min_deflated_sharpe is not None else []) \
         + (["--approve"] if approved_by_person else [])
     return _text(*await _with_approval(ctx, project_dir, argv))
 
@@ -443,7 +450,8 @@ async def loop_try(description: str, wait_seconds: int = 0, new_direction: bool 
     return _text(*await _cli(project_dir, argv, on_line=_progress(ctx)))
 
 
-@server.tool(description="The loop's tries: kept or reverted, the metric, the cost, the best so far and what is left.")
+@server.tool(description="The loop's tries: kept or reverted, the metric, the cost, the best so far and what is left; "
+                         "for a strategy, whether the best try is better than luck.")
 async def loop_status(project_dir: str = ".") -> str:
     return _text(*await _cli(project_dir, ["loop", "status"]))
 
