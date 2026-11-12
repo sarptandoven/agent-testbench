@@ -38,8 +38,9 @@
 - Setup: `recipes/` (the YAML ladders `testbench recipes` and `init --recipe` use; recipes never set budget:,
   pricing: or guard:), `connect.py` (`testbench connect`: other clients' MCP configs, merged as text).
 - Plans for LLM apps: `mocks.py` and `mock_clients/` (the mock `openai` / `anthropic` packages a step's `mocks:` puts
-  first on PYTHONPATH; they never touch the network). Notebooks: `notebook.py` (forms, papermill parameters,
-  percent-format .py, kernels).
+  first on PYTHONPATH; they never touch the network). The broker mocks `alpaca` / `ccxt` / `ib_async` (+ `ib_insync`)
+  share `mock_clients/shared/_testbench_broker.py` (prices, the paper account, fills, the live-account refusal).
+  Notebooks: `notebook.py` (forms, papermill parameters, percent-format .py, kernels).
 - From Python: `api.py` (`Testbench`, on the same launch paths as the CLI) and `tools.py` (the MCP tools as
   Anthropic / OpenAI tool definitions, read from the server's own tool table).
 - Rescue: `rescue.py` (`testbench rescue`: reads a notebook, runs it through `executor.run_step`, diagnoses the first

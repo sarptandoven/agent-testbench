@@ -18,21 +18,25 @@ moment code tries a paid call nobody planned for.
 Every accepted call is appended to $TESTBENCH_MOCK_LOG (a JSON list), so expectations can count them.
 
 For the two most used LLM SDKs there is nothing to write: `mocks: [openai, anthropic]` on a step puts the mock
-`openai` and `anthropic` packages of mock_clients/ first on its PYTHONPATH (docs/mocks.md).
+`openai` and `anthropic` packages of mock_clients/ first on its PYTHONPATH (docs/mocks.md). The same goes for the
+broker SDKs trading code uses, `mocks: [alpaca]`, `[ccxt]` or `[ib_async]` (which also answers `import ib_insync`):
+paper accounts answered from a prices file, and a live account refused (docs/mocks.md#brokers).
 """
 from __future__ import annotations
 
 import importlib.util
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .expect import MOCK_SDKS
+from .expect import BROKER_SDKS, MOCK_SDKS
 
 SDKS = MOCK_SDKS
+BROKERS = BROKER_SDKS
 CLIENTS = Path(__file__).parent / "mock_clients"
-_core = None
+_core = _broker = None
 
 
 class UnexpectedCall(RuntimeError):
@@ -97,17 +101,39 @@ def client_core():
     return _core
 
 
+def broker_core():
+    """The mock brokers' shared module, loaded from its file like client_core() (it imports that one, which is
+    lent to it under its own name only while it loads)."""
+    global _broker
+    if _broker is None:
+        saved = sys.modules.get("_testbench_mock")
+        sys.modules["_testbench_mock"] = client_core()
+        try:
+            path = CLIENTS / "shared" / "_testbench_broker.py"
+            spec = importlib.util.spec_from_file_location("_testbench_broker", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        finally:
+            if saved is None:
+                sys.modules.pop("_testbench_mock", None)
+            else:
+                sys.modules["_testbench_mock"] = saved
+        _broker = module
+    return _broker
+
+
 def client_paths(names) -> list[str]:
-    """Put first on PYTHONPATH, these make `import openai` / `import anthropic` load the mocks."""
+    """Put first on PYTHONPATH, these make `import openai` / `import anthropic` / `import alpaca` load the mocks."""
     return [str(CLIENTS / n) for n in names] + [str(CLIENTS / "shared")]
 
 
 def client_env(mocks: dict, workdir: Path) -> dict:
-    """What the mocks read: their options as JSON, with the replies file's path made absolute."""
+    """What the mocks read: their options as JSON, with the replies and prices files' paths made absolute."""
     env = {}
     for name, opts in mocks.items():
         opts = dict(opts or {})
-        if opts.get("replies"):
-            opts["replies"] = str((Path(workdir) / opts["replies"]).resolve())
+        for key in ("replies", "prices"):
+            if opts.get(key):
+                opts[key] = str((Path(workdir) / opts[key]).resolve())
         env[f"TESTBENCH_MOCK_{name.upper()}"] = json.dumps(opts)
     return env

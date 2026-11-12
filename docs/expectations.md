@@ -32,8 +32,9 @@ expect:
   image:
     plots/loss.png: {like: golden/loss.png, max_diff: 0.02}
   duration: {minutes: "<= 5"}
-  mock_calls:                           # steps with mocks: [anthropic, openai]
+  mock_calls:                           # steps with mocks: [anthropic, openai], [alpaca], [ccxt], [ib_async]
     anthropic: {calls: "<= 5", output_tokens: "<= 2000"}
+    alpaca: {orders: "<= 20", orders_without_limit: 0}
 ```
 
 Paths are relative to the folder the step runs in (the project folder, or its scratch copy).
@@ -381,6 +382,18 @@ mock_calls:
 ```
 - expected mock anthropic refused 0: 1 (wanted == 0); call 1: BadRequestError: messages[0] has role 'system': put the system prompt in the top-level system= parameter (...)
 - expected mock anthropic calls <= 3: 5 (wanted <= 3.0); messages.create claude-opus-5-5 x5
+```
+
+Steps with `mocks: [alpaca]`, `[ccxt]` or `[ib_async]` (the mock brokers, [docs/mocks.md](mocks.md#brokers)) count
+what the trading code did instead: `calls`, `refused`, `orders`, `fills`, `cancels`, `orders_without_limit`,
+`max_order_value`, `fees` and `live` (calls on a live account). `refused: 0` is checked here too, so a live account
+refused, an order the broker rejected or a method the mock does not model fails the step even when the code caught
+the error.
+
+```yaml
+mock_calls:
+  alpaca: {orders: "<= 20", orders_without_limit: 0, max_order_value: "<= 10000", live: 0}
+  ccxt: {orders: 0}                              # this signal must not trade
 ```
 
 ## The numbers, over time
