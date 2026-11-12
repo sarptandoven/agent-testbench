@@ -46,6 +46,8 @@ INSTRUCTIONS = (
 )
 MAX_IMAGES = 6
 MAX_IMAGE_BYTES = 2_000_000
+APPROVAL_HINT = ("\nThrough this server the approval is approved_by_person=true on this tool: set it only after the "
+                 "person said yes to this cost.")     # tools.py puts its own words in its place for agent frameworks
 ASK_NOTICE_AFTER_S = 60.0     # a person asked directly who has not answered by then may be away: notify: tells them
 
 try:                                         # the version clients see in initialize (mcp 2 takes it here)
@@ -122,8 +124,7 @@ async def _with_approval(ctx, project_dir: str, argv: list[str]) -> tuple[int, s
     if "--approve" in argv or not _can_ask(ctx):
         code, out = await _cli(project_dir, argv)
         if code == 2 and "Needs approval:" in out and "--approve" not in argv:     # the CLI's words, as this tool
-            out += ("\nThrough this server the approval is approved_by_person=true on this tool: set it only after "
-                    "the person said yes to this cost.")
+            out += APPROVAL_HINT
         return code, out
     fd, name = tempfile.mkstemp(prefix="testbench-approval-", suffix=".json")
     os.close(fd)

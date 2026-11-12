@@ -52,7 +52,9 @@ nav:
   - Proof records: proof-records.md
   - Live dashboard: dashboard.md
   - "Exports: MLflow, W&B, csv": export.md
-  - CI: github-action.md
+  - CI:
+      - GitHub Action: github-action.md
+      - "GitLab, Azure, CircleCI, shell": ci.md
   - Python API and tools: python-api.md
   - "Architecture: core and plug-ins": architecture.md
   - Plug-ins: plugins.md

@@ -285,21 +285,44 @@ def cmd_estimate(a):
 
 def cmd_check(a):
     from .check import main
-    return main(a.plan, as_json=a.json)
+    return main(a.plan, as_json=a.json, junit=a.junit)
+
+
+def _run_junit(a, run_dir: Path | None = None, why: str = "", config_error: bool = False) -> None:
+    """`testbench run --junit FILE`: the run's steps as test cases, or why it did not start (ci.junit)."""
+    if not a.junit:
+        return
+    from .ci import write_junit
+    if config_error:
+        write_junit(a.junit, [], why, title=a.plan)
+    elif run_dir is None:
+        write_junit(a.junit, [{"plan": a.plan, "status": "refused", "why": why}])
+    else:
+        status = runs.read_state(run_dir).get("status")
+        write_junit(a.junit, [{"plan": a.plan, "status": status if status in runs.DONE else "running",
+                               "run_dir": run_dir}])
 
 
 def cmd_run(a):
-    root, cfg = _root_cfg()
+    try:
+        root, cfg = _root_cfg()
+    except C.ConfigError as exc:
+        _run_junit(a, why=str(exc), config_error=True)
+        raise
     try:
         run_dir = runs.launch(root, cfg, a.plan, approve=a.approve, foreground=a.foreground)
     except runs.LaunchRefused as exc:
         print(str(exc))
+        _run_junit(a, why=str(exc))
         return 2
     print(f"[testbench] run {run_dir.name} started ({runs.read_state(run_dir)['budget_message']})", flush=True)
     if a.detach:
         print(f"Follow it with `testbench wait {run_dir.name}`; read it with `testbench report {run_dir.name}`.")
-        return 3
-    return _follow(run_dir, a.wait)
+        code = 3
+    else:
+        code = _follow(run_dir, a.wait)
+    _run_junit(a, run_dir)
+    return code
 
 
 def _follow(run_dir: Path, timeout: float) -> int:
@@ -1110,6 +1133,11 @@ def cmd_connect(a):
     return connect(a.clients, user=a.user, dry_run=a.dry_run, list_=a.list)
 
 
+def cmd_ci(a):
+    from .ci import main as ci
+    return ci(a.kind, a.plan, a.output, force=a.force)
+
+
 class _Parser(argparse.ArgumentParser):
     """No abbreviated options: `--appr` must not mean `--approve` to testbench while the guard hook sees no
     `--approve` (every subcommand, at every level, is one of these). Help keeps the examples' lines as written, and a
@@ -1179,6 +1207,7 @@ GROUPS = {   # `testbench help --all`: every command, in the groups README's Com
         "recipes": "ready plans for a goal, each with its worst-case cost",
         "schema": "testbench.yaml's JSON Schema, for editors to autocomplete it",
         "connect": "set up Cursor, VS Code, Codex, Gemini or Claude Code to use it",
+        "ci": "a CI job for GitLab, Azure, CircleCI or a shell script",
         "doctor": "check what this machine can run, and what to fix",
         "plugins": "the kinds of plug-in: built in, installed, broken and why",
         "plugin": "plugin test: check a plug-in keeps its kind's contract",
@@ -1259,6 +1288,7 @@ check
   testbench check                        # every free plan, or what init finds
   testbench check --plan tests           # only this plan (repeatable)
   testbench check --json                 # a summary for scripts and agents
+  testbench check --junit .testbench/junit/check.xml    # and JUnit for CI
 plans
   testbench plans
 estimate
@@ -1382,6 +1412,10 @@ demo
   testbench demo                         # tiny-model, into ./testbench-demo
   testbench demo llm-app                 # a bot tested against the mock SDK
   testbench demo --list
+ci
+  testbench ci                           # the templates: gitlab, azure, ...
+  testbench ci --for gitlab -o .gitlab-ci.yml
+  testbench ci --for shell --plan smoke  # testbench run smoke, not check
 connect
   testbench connect --list               # each client, and what is set up
   testbench connect cursor --dry-run
@@ -1522,6 +1556,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--plan", action="append", default=[], metavar="NAME",
                    help="only this plan (repeatable); a plan that costs money is still only listed")
     _json(p, "the summary")
+    p.add_argument("--junit", metavar="FILE", help="also write JUnit XML for CI: each run's steps as test cases, a "
+                                                    "plan refused or with nothing to run as an error, one that costs "
+                                                    "money or needs a tool as skipped")
     p.set_defaults(fn=cmd_check)
     sub.add_parser("plans", help="list plans, their hardware and worst-case cost").set_defaults(fn=cmd_plans)
     p = sub.add_parser("estimate", help="worst-case cost of a plan and whether it may launch (exit 0 yes, 2 no)")
@@ -1540,6 +1577,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--wait", type=_number, default=540, metavar="SECONDS",
                    help="follow for at most this many seconds (default 540)")
     p.add_argument("--foreground", action="store_true", help="run in this process (no background driver)")
+    p.add_argument("--junit", metavar="FILE", help="also write JUnit XML for CI: the steps as test cases, or why the "
+                                                    "run did not start as an error")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("wait", help="follow a run until it ends or the timeout passes",
                        description="Follow a run until it ends, then print its report. Exit 0 passed, 1 failed, 3 still "
@@ -1842,6 +1881,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="show what would change; write nothing")
     p.add_argument("--list", action="store_true", help="each client: on this machine?, set up here?, for the user?")
     p.set_defaults(fn=cmd_connect)
+    from .ci import TEMPLATES
+    p = sub.add_parser("ci", help="a ready CI job (GitLab, Azure Pipelines, CircleCI, a shell script) that runs "
+                                  "testbench check",
+                       description="Print (or write, with -o) a CI job that installs this version of agent-testbench, "
+                                   "runs `testbench check` - every plan that is free and needs no approval - or "
+                                   "`testbench run PLAN` for each --plan, publishes the JUnit results the CI shows "
+                                   "(GitLab's test report, Azure's and CircleCI's Tests tab), keeps .testbench/runs/ as "
+                                   "artifacts, and fails on anything but exit 0: a refusal (exit 2, nothing ran) "
+                                   "fails too. No job approves a cost: a plan above the approval threshold is refused "
+                                   "in CI and a person runs it. With no --for: the templates. GitHub has the Action "
+                                   "(docs/github-action.md).")
+    p.add_argument("--for", dest="kind", choices=list(TEMPLATES), metavar="CI",
+                   help=f"the CI: {', '.join(TEMPLATES)}")
+    p.add_argument("--plan", action="append", default=[], metavar="NAME",
+                   help="run this plan with `testbench run` instead of `testbench check` (repeatable)")
+    p.add_argument("-o", "--output", metavar="FILE", help="write it to FILE (such as .gitlab-ci.yml) instead of "
+                                                          "printing it")
+    p.add_argument("--force", action="store_true", help="with -o: replace a file that is there already")
+    p.set_defaults(fn=cmd_ci)
     _finish(ap)
     return ap
 

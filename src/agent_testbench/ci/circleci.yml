@@ -1,0 +1,44 @@
+# agent-testbench in CircleCI, written by `testbench ci --for circleci` (agent-testbench {{version}}).
+# It runs `testbench check` (every plan that is free and needs no approval), or `testbench run PLAN` for each plan
+# named in TESTBENCH_PLANS. The job's Tests tab shows each plan's steps as tests (store_test_results), and each run's
+# folder - report.md, report.html, the logs and evidence - is kept under Artifacts (store_artifacts). Anything but
+# exit 0 fails the job: 1 failed, 2 refused (nothing ran), 3 still running.
+#
+# Budgets: this job never approves a cost. It runs testbench without its approve flag, and that must stay so: a plan
+# whose worst case needs a person's approval is refused here (exit 2), and that person runs it themselves. Plans on
+# paid machines (Modal, ...) need their credentials as project environment variables or in a context, such as
+# MODAL_TOKEN_ID and MODAL_TOKEN_SECRET. Docs: https://sarptandoven.github.io/agent-testbench/ci/
+
+version: 2.1
+
+jobs:
+  testbench:
+    docker:
+      - image: cimg/python:3.12
+    environment:
+      # empty: testbench check; plan names, space-separated: testbench run each one
+      TESTBENCH_PLANS: "{{plans}}"
+      # how long to follow each named plan before cancelling it
+      TESTBENCH_WAIT_SECONDS: "3600"
+    steps:
+      - checkout
+      - run:
+          name: install agent-testbench {{version}}
+          command: pip install --disable-pip-version-check "agent-testbench=={{version}}"
+      # - run: pip install -r requirements.txt            # what the project's plans need
+      - run:
+          name: testbench
+          command: |
+            {{job}}
+      - store_test_results:
+          path: .testbench/junit
+          when: always
+      - store_artifacts:
+          path: .testbench/runs
+          destination: testbench-runs
+          when: always
+
+workflows:
+  testbench:
+    jobs:
+      - testbench

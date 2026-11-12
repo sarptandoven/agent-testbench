@@ -19,6 +19,9 @@ as one comment that later pushes edit ([Pull request comments](#pull-request-com
 GitHub sign report.json and the evidence, so anyone can check that a report came from your workflow at that commit
 ([Attestations](#attestations)).
 
+Not on GitHub? `testbench ci --for gitlab|azure|circleci|shell` writes a job for that CI: it runs `testbench check`
+(or named plans), shows each step as a test, keeps the runs and fails on a refusal ([ci.md](ci.md)).
+
 ## What reviewers see
 
 - **The job summary**: one line with the status, the cost, the run id and the commit the run proved, then the

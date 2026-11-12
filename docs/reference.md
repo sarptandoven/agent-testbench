@@ -444,12 +444,12 @@ with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `ch
 |---|---|---|
 | **start** | | |
 | `demo [NAME] [DIR]`, `demo --list` | copy an example project to a new folder and run its free plan | 0 the plan did what the example expects (the `test-suite` plan fails on purpose), 1 it did not, 3 still running |
-| `check [--plan NAME]... [--json]` | run every plan that is free and needs no approval, and list each other plan with its worst case and `testbench run NAME`; with no testbench.yaml, run the plans `init` would write for what it finds, on this machine, keeping what it found in `.testbench/check.json` (so `report`, `runs`, `verify`, `ui` and `diff` work there); a plan whose tool is missing is skipped with the command that installs it | 0 every plan that ran passed, 1 one failed, 2 nothing to check, 3 still running |
+| `check [--plan NAME]... [--json] [--junit FILE]` | run every plan that is free and needs no approval, and list each other plan with its worst case and `testbench run NAME`; with no testbench.yaml, run the plans `init` would write for what it finds, on this machine, keeping what it found in `.testbench/check.json` (so `report`, `runs`, `verify`, `ui` and `diff` work there); a plan whose tool is missing is skipped with the command that installs it; `--junit` also writes JUnit XML for CI (each run's steps as test cases, a refusal as an error, a paid plan or a missing tool as skipped) | 0 every plan that ran passed, 1 one failed, 2 nothing to check, 3 still running |
 | `doctor` | what this machine can run; each `no` line says what to do | 0, whatever it found |
 | **prove it with a plan** | | |
 | `plans` | the plans, their hardware and worst case | 0 |
 | `estimate PLAN [--approve] [--json]` | a plan's worst case and whether it may launch now | 0 it may (2: it may not) |
-| `run PLAN [--wait SECONDS] [--detach] [--approve]` | run a plan and print its report | 0 passed, 1 failed, 3 still running after `--wait` (and always with `--detach`) |
+| `run PLAN [--wait SECONDS] [--detach] [--approve] [--junit FILE]` | run a plan and print its report (`--junit`: also as JUnit XML, or why it did not start) | 0 passed, 1 failed, 3 still running after `--wait` (and always with `--detach`) |
 | `report [RUN] [--format md\|json\|html\|junit] [-o FILE]` | a run's report | 0, a failed run's report too |
 | `report [RUN] --tearsheet [-o FILE]` | only the [tear sheet](trading.md#tear-sheet) of the steps that kept an `equity.csv` among their artifacts: one page, to the run folder's `tearsheet.html` or FILE | 0; 1 no step kept one, or every one was refused (the reason is printed) |
 | `verify [RUN] [--attestation [--repo OWNER/REPO]]` | check the evidence against its recorded sha256 | 0 it matches, 1 it does not (2: it could not be checked) |
@@ -468,6 +468,7 @@ with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `ch
 | `recipes [NAME]` | ready plans for a goal, with their worst case; or print one | 0 |
 | `schema` | print the JSON Schema of testbench.yaml (for editor autocomplete; `init` points the file at it) | 0 |
 | `connect CLIENT... [--user] [--dry-run]`, `connect --list` | register the MCP server in a client's config and write AGENTS.md | 0 |
+| `ci [--for gitlab\|azure\|circleci\|shell] [--plan NAME]... [-o FILE] [--force]` | a CI job that installs this version, runs `testbench check` (or `testbench run` for each `--plan`), publishes JUnit and keeps the runs; no `--for`: the templates ([ci.md](ci.md)) | 0 (2: an unknown CI or plan, or `-o` names a file that is there) |
 | `selftest [--keep]` | check the main promises hold on this machine, in a temporary folder (a minute or so, local and free) | 0 they all held, 1 one did not |
 | `mcp [--http]` | serve the commands as MCP tools, with resources (plans, runs, reports, evidence, the loop, notes) and prompts ([clients.md](clients.md#resources-and-prompts)) | 0 when it stops |
 | `plugins [--json]` | each kind of plug-in: its built-ins, what is installed and from which package, what is broken and why ([plugins.md](plugins.md)) | 0 |

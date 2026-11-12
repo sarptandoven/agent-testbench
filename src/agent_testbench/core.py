@@ -57,7 +57,7 @@ LAYER_MODULES = (
     # ways in
     "agent_testbench.__main__", "agent_testbench.cli", "agent_testbench.mcp_server", "agent_testbench.api",
     "agent_testbench.tools", "agent_testbench.connect", "agent_testbench.dashboard", "agent_testbench.ui",
-    "agent_testbench.github_action",
+    "agent_testbench.github_action", "agent_testbench.ci",
     # machines: the remote backends, and live sessions on any backend
     "agent_testbench.backends.modal_backend", "agent_testbench.backends.colab_backend",
     "agent_testbench.backends.ssh_backend", "agent_testbench.backends.docker_backend",

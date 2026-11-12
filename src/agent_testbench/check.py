@@ -415,7 +415,15 @@ def outcome(e: dict) -> str:
     return f"{e['status']}: {e['why'].rstrip(' .;')}" + (f". Install: `{e['install']}`" if e.get("install") else "")
 
 
-def main(names: list[str] | None = None, as_json: bool = False) -> int:
+def _junit(path: str, s: dict) -> bool:
+    """--junit FILE: each run's steps as test cases, and each plan that did not run with why (ci.junit)."""
+    from .ci import write_junit
+    entries = [{**e, "run_dir": Path(e["report"]).parent if e["run"] and e.get("report") else None}
+               for e in s["plans"]]
+    return write_junit(path, entries, s["message"])
+
+
+def main(names: list[str] | None = None, as_json: bool = False, junit: str | None = None) -> int:
     tty, started = sys.stdout.isatty() and not as_json, set()
 
     def show(event, x):
@@ -429,7 +437,14 @@ def main(names: list[str] | None = None, as_json: bool = False) -> int:
         elif event == "end":
             print(outcome(x) if x["plan"] in started else line(x), flush=True)
 
-    s = run(".", names, show)
+    try:
+        s = run(".", names, show)
+    except C.ConfigError as exc:                  # a testbench.yaml that does not load: the CI shows why too
+        if junit:
+            _junit(junit, {"plans": [], "message": str(exc)})
+        raise
+    if junit and not _junit(junit, s):
+        junit = None
     if as_json:
         print(json.dumps(s, indent=1))
         return s["exit_code"]
@@ -449,5 +464,7 @@ def main(names: list[str] | None = None, as_json: bool = False) -> int:
         whose = "its" if len(ids) == 1 else "a run's"
         print(f"Run{'s' * (len(ids) > 1)} {', '.join(ids)}: `{tb()} verify {ids[0]}` checks {whose} evidence "
               "against the sha256 its report recorded.")
+    if junit:
+        print(f"JUnit results: {junit}")
     print(f"Next: {s['next']}")
     return s["exit_code"]

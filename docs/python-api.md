@@ -5,7 +5,8 @@ SDK, LangGraph, a plain loop) and for notebooks:
 
 - **`agent_testbench.Testbench`**: plans, runs, live sessions and spending as Python objects.
 - **`agent_testbench.tools`**: the MCP server's tools as tool definitions for the Anthropic and OpenAI APIs, and
-  `call()` to run the one the model asked for.
+  `call()` to run the one the model asked for; and the same tools as the OpenAI Agents SDK's, LangChain's (and
+  LangGraph's) and the Claude Agent SDK's own tool objects ([Tools for agent frameworks](#tools-for-agent-frameworks)).
 
 Both go through the same code as the CLI and the MCP server, so the guardrails are exactly the same (below).
 
@@ -148,12 +149,87 @@ while calls := [o for o in response.output if o.type == "function_call"]:
 print(response.output_text)
 ```
 
+## Tools for agent frameworks
+
+The same tools as each framework's own tool objects: read from the MCP server's tool table, and each call goes
+through the same path as `tools.call()`, so every guardrail below holds. One thing differs, and it is stricter:
+**the model cannot approve a cost.** These tools never offer `approved_by_person`, drop it if a model sends it, and
+say so in the descriptions of the tools that had it. Only a person approves: pass `ask=`, a function that puts the
+question to the person and returns `True` or `False`. Without it, a launch above `ask_above_usd` comes back
+refused with what it would cost, for the model to tell the person.
+
+| framework | call | gives | checked against |
+|---|---|---|---|
+| OpenAI Agents SDK | `tools.for_openai_agents()` | `agents.FunctionTool`s | openai-agents 0.24: its own `Runner` with a scripted model |
+| LangChain, LangGraph | `tools.for_langchain()` | `langchain_core` `StructuredTool`s | langchain-core 1.8 |
+| Claude Agent SDK | `tools.for_claude_agent_sdk()` | an in-process MCP server for `ClaudeAgentOptions(mcp_servers=...)` | claude-agent-sdk 0.2 |
+
+Each takes `project_dir` (the model is then not offered one), `only=[...]`, `ask` and `on_progress`, as `call()`
+does. The framework's package is imported only when asked for; tests/test_agent_frameworks.py runs each against a
+stand-in, and against the real package when it is installed. `tools.agent_definitions()` lists the definitions
+they use: the MCP server's, less `approved_by_person`.
+
+### OpenAI Agents SDK
+
+```python
+from agents import Agent, Runner        # pip install openai-agents
+from agent_testbench import tools
+
+project = "path/to/project"
+agent = Agent(name="prover", instructions="Prove changes with agent-testbench plans.",
+              tools=tools.for_openai_agents(project_dir=project, ask=lambda q: input(f"{q} [y/N] ") == "y"))
+print(Runner.run_sync(agent, "Make the smoke plan pass and prove it.").final_output)
+```
+
+The tools are not strict (their schemas have optional arguments with defaults). Plots and screenshots come back as
+the SDK's image outputs.
+
+### LangChain and LangGraph
+
+```python
+from langchain.agents import create_agent        # pip install langchain langchain-anthropic
+from agent_testbench import tools
+
+agent = create_agent("anthropic:claude-opus-5-5", tools=tools.for_langchain(project_dir="path/to/project"))
+result = agent.invoke({"messages": [{"role": "user", "content": "Make the smoke plan pass and prove it."}]})
+print(result["messages"][-1].content)
+```
+
+The list works anywhere LangChain takes tools: LangGraph's `ToolNode(tools)`, `model.bind_tools(tools)`. Each tool
+runs with `invoke` and `ainvoke`; its `args_schema` is the MCP tool's JSON schema. Images come back as LangChain's
+standard image blocks (`{"type": "image", "base64": ..., "mime_type": ...}`), which the chat model packages pass on.
+
+### Claude Agent SDK
+
+```python
+import asyncio
+from claude_agent_sdk import ClaudeAgentOptions, query        # pip install claude-agent-sdk
+from agent_testbench import tools
+
+project = "path/to/project"
+server = tools.for_claude_agent_sdk(project_dir=project, ask=lambda q: input(f"{q} [y/N] ") == "y")
+options = ClaudeAgentOptions(cwd=project, mcp_servers={"testbench": server},
+                             allowed_tools=[f"mcp__testbench__{d['name']}" for d in tools.agent_definitions()])
+
+
+async def main():
+    async for message in query(prompt="Make the smoke plan pass and prove it.", options=options):
+        print(message)
+
+asyncio.run(main())
+```
+
+The server runs in your process. The SDK does not pass MCP elicitation on to you, which is why a cost is put to
+the person through `ask`. The SDK can also start the MCP server itself over stdio
+(`mcp_servers={"testbench": {"command": "testbench", "args": ["mcp"]}}`, no code from this package): that is the
+server every MCP client sees, `approved_by_person` included, so prefer the in-process one.
+
 ## What `call()` takes
 
 | argument | |
 |---|---|
 | `project_dir` | run in this project whatever the model passed (use it with `*_tools(project_dir=...)`) |
-| `format` | `"anthropic"` (default), `"openai-responses"`, `"openai"` or `"text"`: how images come back |
+| `format` | `"anthropic"` (default), `"openai-responses"`, `"openai"` or `"text"`: how images come back (`"openai-agents"`, `"langchain"` and `"mcp"` are the frameworks' blocks) |
 | `ask` | `ask(question) -> bool`: how a person is asked about a cost above the approval threshold, as MCP clients ask with elicitation. With it, only the person approves: the model's `approved_by_person` is ignored. Without it, the tool says what needs approval and the model may pass `approved_by_person=true` only after the person said yes, as over MCP |
 | `on_progress` | `on_progress(line)` gets the progress lines of a long run |
 
@@ -172,3 +248,6 @@ own tool function: a tool added to the server is offered here too, and a tool be
   this machine's `~/.testbench/limits.yaml` still refuse, and nothing in the API or the tools can raise a limit
   (testbench.yaml and limits.yaml are read from disk at every launch).
 - Plans and sessions have the same hard stops on the machine doing the work.
+- A tool argument that reaches the command line is a value, never an option: a plan named `--approve` is refused
+  as a name, and a backend, GPU or metric goes in as `--backend=VALUE`. The framework tools never offer the model
+  `approved_by_person` (above).
