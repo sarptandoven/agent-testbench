@@ -118,10 +118,14 @@ def stop_session(session: str, args: list[str]) -> str:
         return f"could not stop Colab session {session}: {exc} - stop it with `colab stop -s {session}`"
 
 
+def _has_data_filter() -> bool:
+    return hasattr(tarfile, "data_filter")
+
+
 def extract_inside(tar, dest) -> None:
     """Unpack the run's results from the VM into dest and nowhere else. Pythons with tarfile's data filter use it;
     older ones (before 3.10.12) get the same rule here: plain files and folders only, every path inside dest."""
-    if hasattr(tarfile, "data_filter"):
+    if _has_data_filter():
         tar.extractall(dest, filter="data")
         return
     root = Path(dest).resolve()

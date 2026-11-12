@@ -29,7 +29,8 @@ def _tar(tmp_path, members) -> tarfile.TarFile:
 @pytest.mark.parametrize("with_filter", [True, False])
 def test_results_from_the_vm_unpack_only_inside_the_run_folder(tmp_path, monkeypatch, with_filter):
     if not with_filter:
-        monkeypatch.delattr(tarfile, "data_filter", raising=False)      # a Python before 3.10.12
+        monkeypatch.setattr(CB, "_has_data_filter", lambda: False)     # as on a Python before 3.10.12 (tarfile itself
+                                                                        # is left alone: 3.14 uses its filter inside)
     elif not hasattr(tarfile, "data_filter"):
         pytest.skip("this Python has no tarfile data filter")
     run = tmp_path / "run"

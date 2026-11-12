@@ -215,7 +215,7 @@ def test_the_scrub_covers_home_and_user_name(tmp_path, monkeypatch):
     out = s.text(text, counts)
     assert out.startswith("<project>/train.py line 3; ~/.venv/bin/python; /home/<user>/other; ")
     assert f"~{os.sep}work{os.sep}proj2/x" in out, "a longer name is not the project"   # the rest keeps its separators
-    assert "<K>" in out and "k-value-123456" not in out and '"<project>/a.csv"' in out
+    assert "<K>" in out and "k-value-123456" not in out and json.dumps(f"<project>{os.sep}a.csv") in out
     assert {label for label, _, _ in counts} == {"the project folder", "the home folder", "the user name",
                                                  "the value of secret K"}
     found = s.found(f"{root}/x and k-value-123456".encode())
@@ -269,7 +269,8 @@ def test_a_git_branch_gets_a_commit_and_nothing_else_changes(proj, tmp_path):
     out = tmp_path / "checkout"
     out.mkdir()
     tar = tmp_path / "pages.tar"
-    subprocess.run(["git", "archive", "-o", str(tar), "gh-pages"], cwd=proj, check=True)
+    subprocess.run(["git", "-c", "core.autocrlf=true", "archive", "-o", str(tar), "gh-pages"], cwd=proj,
+                   check=True)                              # as Git for Windows does by default: still the same bytes
     with tarfile.open(tar) as t:
         t.extractall(out, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
     r = cli(tmp_path, "verify", "--from", str(out / "runs" / run))

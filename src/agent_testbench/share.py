@@ -567,6 +567,10 @@ class GitBranch:
             blobs = self._git("hash-object", "-w", "--no-filters", "--stdin-paths",
                               input="".join(f"{p}\n" for p in files)).stdout.split()
             entries = [f"100644 {sha}\t{where}/{p.relative_to(bundle).as_posix()}\n" for p, sha in zip(files, blobs)]
+            # git checks out and archives these bytes as they are, even with core.autocrlf (Git for Windows' default),
+            # so a checkout still matches the manifest's sha256s; verify skips hidden files
+            exact = self._git("hash-object", "-w", "--stdin", input="* -text\n").stdout.strip()
+            entries.append(f"100644 {exact}\t{where}/.gitattributes\n")
             if not parent:                                  # a new branch: GitHub Pages serves the files as they are
                 empty = self._git("hash-object", "-w", "--stdin", input="").stdout.strip()
                 entries.append(f"100644 {empty}\t.nojekyll\n")

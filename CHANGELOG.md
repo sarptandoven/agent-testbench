@@ -108,7 +108,9 @@ a strategy good until it survives costs, look-ahead, an untouched holdout and th
 - `init --recipe trading-backtest` writes a starter `backtest.py` (fees, no look-ahead, the standard files) when
   there is none; `python -m agent_testbench.trading.files --check FOLDER` says what a backtest's own CSVs need.
 - Fixed: every command crashed at start-up on Python 3.14 ("badly formed help string"); runs started in the same
-  second are ordered by when they were made, so `last` is the latest; `share` to a git branch works on Windows.
+  second are ordered by when they were made, so `last` is the latest; `share` to a git branch works on Windows,
+  and each shared run folder carries a `.gitattributes` (`* -text`) so a checkout or `git archive` with
+  `core.autocrlf` (Git for Windows' default) still passes `testbench verify --from`.
 
 **Trust**
 - docs/threat-model.md: who can do what, what each cannot, how, and the test that proves it.
