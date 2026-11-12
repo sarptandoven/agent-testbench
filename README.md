@@ -268,7 +268,7 @@ The rest, for setup, money, notebooks and more (`testbench help --all` lists eve
 
 | | |
 |---|---|
-| `testbench init [--recipe]` / `recipes` / `connect` / `selftest` / `mcp [--http]` | set up a project and your agents, check the promises hold here, serve MCP |
+| `testbench init [--recipe]` / `recipes` / `schema` / `connect` / `selftest` / `mcp [--http]` | set up a project and your agents, editor autocomplete for testbench.yaml, check the promises hold here, serve MCP |
 | `testbench wait` / `status` / `runs` / `cancel` / `watch` | follow, list and stop runs; run a free plan again on every change |
 | `testbench diff` / `history` / `export` | what changed between runs, the checked numbers over time, MLflow / W&B / csv / jsonl |
 | `testbench files` / `notify test` | files on a session's machine; a test message to the `notify:` webhook |

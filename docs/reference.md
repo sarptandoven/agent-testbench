@@ -426,6 +426,7 @@ with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`); ev
 | **set up** (the rest: `testbench help --all`) | | |
 | `init [--recipe NAME] [--add] [--force]` | write testbench.yaml (a plan for each thing it finds) and AGENTS.md | 0 |
 | `recipes [NAME]` | ready plans for a goal, with their worst case; or print one | 0 |
+| `schema` | print the JSON Schema of testbench.yaml (for editor autocomplete; `init` points the file at it) | 0 |
 | `connect CLIENT... [--user] [--dry-run]`, `connect --list` | register the MCP server in a client's config and write AGENTS.md | 0 |
 | `selftest [--keep]` | check the main promises hold on this machine, in a temporary folder (a minute or so, local and free) | 0 they all held, 1 one did not |
 | `mcp [--http]` | serve the commands as MCP tools | 0 when it stops |

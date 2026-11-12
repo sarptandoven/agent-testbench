@@ -50,7 +50,7 @@ def test_launches_follow_the_exit_code_table(project):
     ("report", 0), ("report last~1", 0), ("report --format junit", 0), ("verify", 0), ("history smoke", 0),
     ("runs", 0), ("spend", 0), ("cancel", 0), ("diff last~1 last", 0), ("prices", 0), ("recipes", 0),
     ("lint nb.ipynb", 0), ("note found it", 0), ("doctor", 0), ("connect --list", 0), ("demo --list", 0),
-    ("session list", 0), ("session stop", 0), ("session stop --all", 0), ("nb fields nb.ipynb", 0),
+    ("session list", 0), ("session stop", 0), ("session stop --all", 0), ("nb fields nb.ipynb", 0), ("schema", 0),
     # refused or bad input: nothing ran
     ("estimate nope", 2), ("history nope", 2), ("report nope", 2), ("exec 1+1", 2), ("files ls", 2),
     ("loop status", 2), ("loop try x", 2), ("loop stop", 2), ("notify test", 2), ("export", 2), ("init", 2),
