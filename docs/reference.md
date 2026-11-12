@@ -30,6 +30,9 @@ that works offline; put its path in place of the URL):
 }
 ```
 
+The [VS Code extension](vscode.md) does this for every testbench.yaml with the schema of the version you have
+installed, kept so that it works offline (a `$schema` first line still wins).
+
 Under `expect:` the shipped schema allows any plain name besides the built-ins, since a check can come from a
 plug-in package ([Check plug-ins](plugins.md#checks)). testbench itself refuses a name no installed check has when the
 file loads, and `testbench schema` adds the installed plug-ins' own descriptions.
@@ -448,8 +451,12 @@ rnu smoke`: did you mean `testbench run smoke`?), words in the wrong order get t
 run`: the command comes first), a mistyped plan, session, recipe, client or example name gets the closest one, and
 so does a file that is not there (`testbench lint trian.ipynb`: did you mean `testbench lint train.ipynb`?). A value
 an option cannot take gets an example of that option. `--json` and `--format json` are the same on every command
-with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `check`); every session command takes `-s NAME`
-(also `--session NAME`).
+with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `check`, `plans`, `runs`, `spend`,
+`loop status`); every session command takes `-s NAME` (also `--session NAME`). The JSON forms of `plans`, `runs`,
+`spend` and `loop status` are what editors read ([the VS Code extension](vscode.md)): `plans --json` says for each
+plan whether it may launch now (`allowed`, `needs_approval` or `refused`, with testbench's message), `runs --json`
+gives each run's folder, and `loop status --json` only reads - it never keeps or reverts a try whose run has ended,
+which `loop status` does.
 
 | command | what it does | exit codes besides 2 |
 |---|---|---|
@@ -458,7 +465,7 @@ with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `ch
 | `check [--plan NAME]... [--json]` | run every plan that is free and needs no approval, and list each other plan with its worst case and `testbench run NAME`; with no testbench.yaml, run the plans `init` would write for what it finds, on this machine, keeping what it found in `.testbench/check.json` (so `report`, `runs`, `verify`, `ui` and `diff` work there); a plan whose tool is missing is skipped with the command that installs it | 0 every plan that ran passed, 1 one failed, 2 nothing to check, 3 still running |
 | `doctor` | what this machine can run; each `no` line says what to do | 0, whatever it found |
 | **prove it with a plan** | | |
-| `plans` | the plans, their hardware and worst case | 0 |
+| `plans [--json]` | the plans, their hardware and worst case (and whether each may launch now) | 0 |
 | `estimate PLAN [--approve] [--json]` | a plan's worst case and whether it may launch now | 0 it may (2: it may not) |
 | `run PLAN [--wait SECONDS] [--detach] [--approve]` | run a plan and print its report | 0 passed, 1 failed, 3 still running after `--wait` (and always with `--detach`) |
 | `report [RUN] [--format md\|json\|html\|junit] [-o FILE]` | a run's report | 0, a failed run's report too |
@@ -473,7 +480,7 @@ with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `ch
 | `exec CODE \| -f FILE \| --cells NB[:CELLS]` | run code in the session's kernel | 0 ok, 1 the code raised, 3 interrupted at `--timeout` (the kernel and its variables are kept) |
 | `loop start PLAN --metric FILE:KEY --budget-usd N` | start a loop and run the baseline | 0 the baseline passed, 1 it did not (the loop still started), 3 still running |
 | `loop try "WHAT"` | commit the edits as a try and run the plan | 0 kept, 1 reverted, 3 still running |
-| `loop status`, `loop stop` | the tries so far; the report | 0; `status`: 3 while a try runs |
+| `loop status [--json]`, `loop stop` | the tries so far (`--json`: as data, read-only); the report | 0; `status`: 3 while a try runs |
 | **set up** (the rest: `testbench help --all`) | | |
 | `init [--recipe NAME] [--add] [--force]` | write testbench.yaml (a plan for each thing it finds) and AGENTS.md | 0 |
 | `recipes [NAME]` | ready plans for a goal, with their worst case; or print one | 0 |
@@ -486,7 +493,7 @@ with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `ch
 | **runs** | | |
 | `wait [RUN] [--timeout SECONDS]` | follow a run (`--wait` is the same as `--timeout`) | 0 passed, 1 failed, 3 still running |
 | `status [RUN]` | one line about a run | 0 passed, 1 failed, cancelled, error or lost, 3 still running |
-| `runs [-n N]` | recent runs | 0 |
+| `runs [-n N] [--json]` | recent runs | 0 |
 | `cancel [RUN]` | stop a run, here and on its remote machine | 0, also when it had already ended (the message says how to read it instead) |
 | `watch PLAN [--max-runs N]` | run a free plan again on every change | 0 stopped, or the last of `--max-runs` passed; 1 it did not |
 | **proof** | | |
@@ -498,7 +505,7 @@ with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `ch
 | `files ls\|get\|put PATH...` | files on the session's machine | 0 |
 | `notify test` | one test message to the `notify:` webhook | 0 accepted, 1 refused by the service |
 | **money** | | |
-| `spend [-n N] [--modal]` | what runs and sessions have cost | 0 |
+| `spend [-n N] [--modal] [--json]` | what runs and sessions have cost (`--json`: today against the day limits) | 0 |
 | `prices [--update]` | the prices behind every estimate | 0 |
 | **notebooks and the lab notebook** | | |
 | `lint NOTEBOOK... [--strict]` | Colab and headless pitfalls | 0; with `--strict`, 1 when anything is found |

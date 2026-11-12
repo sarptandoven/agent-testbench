@@ -242,9 +242,41 @@ def cmd_schema(a):
     return 0
 
 
+def _plain(v):
+    """A --json value with NaN and infinity as null: JSON has neither, and an editor's JSON.parse refuses them."""
+    if isinstance(v, float) and not math.isfinite(v):
+        return None
+    if isinstance(v, dict):
+        return {k: _plain(x) for k, x in v.items()}
+    return [_plain(x) for x in v] if isinstance(v, (list, tuple)) else v
+
+
+def _print_json(data) -> int:
+    print(json.dumps(_plain(data), indent=1))
+    return 0
+
+
+def _plans_json(root: Path, cfg: dict, lim: dict) -> dict:
+    """`testbench plans --json`: each plan's hardware and worst case, and whether it may launch now: allowed as it
+    is, only once a person approves it (`testbench run PLAN --approve`), or refused whatever anyone says."""
+    plans = []
+    for name, plan in cfg["plans"].items():
+        est = budget.worst_case(cfg, name)
+        ok, msg, _ = budget.check_launch(cfg, name, approve=False)
+        launch = "allowed" if ok else "needs_approval" if budget.check_launch(cfg, name, approve=True)[0] else "refused"
+        plans.append({"name": name, "backend": plan["backend"], "gpu": plan.get("gpu"),
+                      "description": plan.get("description") or None, "steps": [s["name"] for s in plan["steps"]],
+                      "max_minutes": est["max_minutes"], "worst_case_usd": est["worst_case_usd"], "launch": launch,
+                      "message": msg})
+    return {"project": cfg["project"], "spent_today_usd": budget.spent_today(root),
+            "limits": {k: {"usd": v, "where": w} for k, (v, w) in lim.items()}, "plans": plans}
+
+
 def cmd_plans(a):
     root, cfg = _root_cfg()
     lim = budget.limits(cfg)
+    if a.json:
+        return _print_json(_plans_json(root, cfg, lim))
     print(f"project {cfg['project']}: runs over ${lim['max_run_usd'][0]:.2f} refused, over "
           f"${lim['ask_above_usd'][0]:.2f} need approval, ${budget.spent_today(root):.2f} of "
           f"${cfg['budget']['max_day_usd']:.2f} committed today")
@@ -331,8 +363,23 @@ def cmd_status(a):
     return 3 if status in ("queued", "running") and "  lost (" not in line else 1
 
 
+def _run_json(run_dir: Path) -> dict:
+    """A run as `testbench runs --json` lists it: what its state says, `lost` for one whose driver is gone."""
+    s = runs.read_state(run_dir)
+    step = next((e for e in reversed(runs.progress(run_dir)) if e.get("event") == "step_start"), None)
+    going = s.get("status") in ("queued", "running")
+    return {"run_id": run_dir.name, "plan": s.get("plan"),
+            "status": "lost" if runs.driver_gone(s) else s.get("status"), "backend": s.get("backend"),
+            "gpu": s.get("gpu"), "created": s.get("created"), "cost_usd": s.get("cost_usd"),
+            "worst_case_usd": s.get("worst_case_usd"), "approved": s.get("approved"),
+            "step": step.get("step") if step and going else None, "dir": str(run_dir.resolve()),
+            "has_report": (run_dir / "report.json").is_file(), "line": runs.status_line(run_dir)}
+
+
 def cmd_runs(a):
     root, _ = _root_cfg()
+    if a.json:
+        return _print_json({"runs": [_run_json(p) for p in runs.all_runs(root)[-a.n:]]})
     for p in runs.all_runs(root)[-a.n:]:
         print(runs.status_line(p))
     return 0
@@ -585,6 +632,19 @@ def cmd_spend(a):
     rows = budget.entries(root)
     finished = [e for e in rows if e["event"] == "finish"]
     total = sum(e["usd"] for e in finished)
+    if a.json:
+        if a.modal:
+            print("testbench: --modal reads Modal's bill as text; `testbench spend --modal` without --json shows it",
+                  file=sys.stderr)
+            return 2
+        return _print_json({          # committed today (finished at their cost, going at their worst case) and limits
+            "project": {"today_usd": budget.spent_today(root), "day_limit_usd": float(cfg["budget"]["max_day_usd"]),
+                        "where": f"budget.max_day_usd in {C.CONFIG_NAME}"},
+            "machine": {"today_usd": budget.spent_today_everywhere(),
+                        "day_limit_usd": budget.user_limits().get("max_day_usd"), "where": str(budget.limits_path())},
+            "total_usd": round(total, 4), "finished": len(finished),
+            "latest": [{k: e.get(k) for k in ("time", "run", "backend", "status", "minutes", "usd")}
+                       for e in finished[-a.n:]]})
     print(f"today: ${budget.spent_today(root):.3f} committed (budget ${cfg['budget']['max_day_usd']:.2f}); "
           f"all time: ${total:.3f} over {len(finished)} finished run(s) (estimates from time x price)")
     machine = budget.user_limits()
@@ -925,6 +985,8 @@ def cmd_loop(a):
             print(f"[testbench] loop try {t['n']} committed as {t['commit'][:9]}; run {t['run']} started (loop spent "
                   f"${LP.spent(state):.3f} of ${state['budget_usd']:.2f})", flush=True)
         elif a.loop_cmd == "status":
+            if a.json:
+                return _loop_json(root)
             state = LP.judge(root, cfg, LP._current(root))
             print(LP.describe(state))
             return 3 if state["pending"] is not None else 0
@@ -950,6 +1012,48 @@ def cmd_loop(a):
     for line in LP.luck_lines(state):
         print(line)
     return 0 if last.get("kept") else 1
+
+
+def _loop_json(root: Path) -> int:
+    """`testbench loop status --json`: the running loop (else the latest one) as it stands. It only reads: a try whose
+    run has ended is kept or reverted by `testbench loop status` without --json (or `loop try`), never here, so an
+    editor can show the loop while an agent works in it. Exit 3 while a try runs, as `loop status` does."""
+    import time
+    from . import loop as LP
+    found = []
+    for p in sorted(LP.loops_dir(root).glob("*/state.json")) if LP.loops_dir(root).is_dir() else []:
+        try:
+            found.append(json.loads(p.read_text()))
+        except (OSError, ValueError):
+            continue
+    found = [s for s in found if isinstance(s, dict) and isinstance(s.get("tries"), list)]
+    if not found:
+        return _print_json({"loop": None})
+    s = next((x for x in reversed(found) if x.get("status") == LP.ACTIVE), found[-1])
+    active, tries, pending = s.get("status") == LP.ACTIVE, s["tries"], s.get("pending")
+    ended = False
+    if active and isinstance(pending, int) and 0 <= pending < len(tries):
+        try:
+            ended = runs.read_state(runs.runs_dir(root) / str(tries[pending].get("run"))).get("status") in runs.DONE
+        except (OSError, ValueError):
+            pass
+    luck, halt = LP.luck_lines(s), LP._halt(s) if active else None
+    left = max(0.0, (float(s.get("deadline") or 0) - time.time()) / 3600) if active else None
+    marks = [("baseline" if t.get("n") == 0 else "running" if t.get("status") == "running" else
+              "kept" if t.get("kept") else "reverted") for t in tries]
+    _print_json({"loop": {
+        "id": s.get("id"), "status": s.get("status"), "plan": s.get("plan"), "goal": s.get("goal"),
+        "metric": s.get("metric"), "key": s.get("key"), "best": s.get("best"), "budget_usd": s.get("budget_usd"),
+        "spent_usd": LP.spent(s), "hours_left": left,
+        "branch": s.get("branch"), "original_branch": s.get("original_branch"), "ended_by": s.get("ended_by"),
+        "rules": LP._rules(s) or None, "halt": halt[1] if halt else None, "luck": luck,
+        "luck_why": None if luck or not (s.get("strategy") or s.get("returns")) else
+        LP._luck_of(s).get("why") or "no try has finished", "pending": pending, "pending_run_ended": ended,
+        "tries": [{"n": t.get("n"), "mark": mark, "value": t.get("value"), "cost_usd": t.get("cost_usd"),
+                   "worst_case_usd": t.get("worst_case_usd"), "run": t.get("run"),
+                   "description": t.get("description"), "verdict": t.get("verdict")}
+                  for t, mark in zip(tries, marks)]}})
+    return 3 if active and pending is not None else 0
 
 
 def cmd_notify(a):
@@ -1263,6 +1367,7 @@ check
   testbench check --json                 # a summary for scripts and agents
 plans
   testbench plans
+  testbench plans --json                 # with whether each may launch now
 estimate
   testbench estimate smoke               # its worst case; may it launch now?
   testbench estimate train-gpu --json
@@ -1279,6 +1384,7 @@ status
 runs
   testbench runs
   testbench runs -n 30
+  testbench runs --json                  # each with its folder, for editors
 cancel
   testbench cancel                       # the latest run
   testbench cancel 20261101-0916         # a run, by a prefix of its id
@@ -1350,7 +1456,8 @@ loop start
 loop try
   testbench loop try "lower the learning rate to 0.01"
 loop status
-  testbench loop status
+  testbench loop status                  # judges a try whose run has ended
+  testbench loop status --json           # only reads, for editors and scripts
 loop stop
   testbench loop stop                    # its report; back on the first branch
 notify
@@ -1358,6 +1465,7 @@ notify
 spend
   testbench spend
   testbench spend --modal                # also Modal's own bill
+  testbench spend --json                 # today against the day limits
 prices
   testbench prices
   testbench prices --update              # fetch the price catalog
@@ -1525,7 +1633,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="only this plan (repeatable); a plan that costs money is still only listed")
     _json(p, "the summary")
     p.set_defaults(fn=cmd_check)
-    sub.add_parser("plans", help="list plans, their hardware and worst-case cost").set_defaults(fn=cmd_plans)
+    p = sub.add_parser("plans", help="list plans, their hardware and worst-case cost")
+    _json(p, "each plan, its worst case and whether it may launch now (allowed, needs_approval or refused)")
+    p.set_defaults(fn=cmd_plans)
     p = sub.add_parser("estimate", help="worst-case cost of a plan and whether it may launch (exit 0 yes, 2 no)")
     p.add_argument("plan", metavar="PLAN", help=PLAN)
     p.add_argument("--approve", action="store_true", help="as if a person approved the cost: may it launch then?")
@@ -1655,10 +1765,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_numbers)
     p = sub.add_parser("runs", help="recent runs, one line each")
     p.add_argument("-n", type=_count, default=10, help="the latest N runs (default 10)")
+    _json(p, "the runs, oldest first")
     p.set_defaults(fn=cmd_runs)
     p = sub.add_parser("spend", help="what runs and sessions have cost, today and in all")
     p.add_argument("-n", type=_count, default=10, help="list the latest N (default 10)")
     p.add_argument("--modal", action="store_true", help="also read Modal's own bill for this project's app")
+    _json(p, "today's spend against the day limits, and the latest finished runs")
     p.set_defaults(fn=cmd_spend)
     p = sub.add_parser("lint", help="check notebooks (.ipynb, percent-format .py) for Colab and headless pitfalls")
     p.add_argument("notebooks", nargs="+", metavar="NOTEBOOK")
@@ -1790,7 +1902,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="follow the run at most this many seconds (default: until it ends)")
     q.add_argument("--new-direction", action="store_true", help="after --patience refused a try: this one is "
                                                                  "different in kind, and the count starts again")
-    lsub.add_parser("status", help="the loop's tries: kept or reverted, the metric, the cost (exit 3 while one runs)")
+    q = lsub.add_parser("status", help="the loop's tries: kept or reverted, the metric, the cost (exit 3 while one runs)")
+    _json(q, "the running loop (else the latest) as it stands, read-only: a try whose run ended is not judged")
     lsub.add_parser("stop", help="write the loop's report and go back to the branch it started from")
     p.set_defaults(fn=cmd_loop)
     p = sub.add_parser("notify", help="notifications (testbench.yaml `notify:`): `notify test` sends one test message")

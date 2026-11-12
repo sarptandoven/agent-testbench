@@ -33,6 +33,7 @@ nav:
   - Examples: examples.md
   - Recipes: recipes.md
   - Other coding agents: clients.md
+  - VS Code extension: vscode.md
   - Expectations: expectations.md
   - Notebooks: notebooks.md
   - Mock clients (LLMs, brokers): mocks.md

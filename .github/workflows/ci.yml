@@ -45,3 +45,23 @@ jobs:
           else python -m pytest -q -p no:warnings -n logical; fi
         env:
           PYTHONUTF8: "1"           # Windows: in-process tests too (the CLI switches itself)
+  vscode:
+    # the VS Code extension (editors/vscode): type-check, compile, and its unit tests with node --test. No VS Code
+    # is downloaded; the test against the real CLI skips here (no Python package installed in this job).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - name: install
+        run: npm ci --no-audit --no-fund
+      - name: type-check
+        run: npm run typecheck
+      - name: tests
+        run: npm test

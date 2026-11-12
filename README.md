@@ -314,6 +314,8 @@ refusal (exit 2) says what was refused, why, and the command or the testbench.ya
   notifications, exports to MLflow and W&B
 - [docs/clients.md](docs/clients.md), [docs/python-api.md](docs/python-api.md) - other coding agents, the Python API
   and LLM tool definitions
+- [docs/vscode.md](docs/vscode.md) - the VS Code extension: plans, runs, the loop and today's spend in the editor; a
+  cost that needs approval runs only after you click Approve and run
 - [docs/tour.md](docs/tour.md) - a five-minute tour with real screenshots, from install to a proved fix
 - [docs/examples.md](docs/examples.md) - the examples: an LLM app on a mock SDK, a web form in headless Chromium, a
   failing test suite for your agent to fix, a Colab-style notebook
