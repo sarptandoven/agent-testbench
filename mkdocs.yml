@@ -34,6 +34,7 @@ nav:
   - Recipes: recipes.md
   - Other coding agents: clients.md
   - Expectations: expectations.md
+  - Check plug-ins: plugins-checks.md
   - Notebooks: notebooks.md
   - Mock LLM clients: mocks.md
   - Trading:

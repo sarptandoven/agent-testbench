@@ -30,6 +30,10 @@ that works offline; put its path in place of the URL):
 }
 ```
 
+Under `expect:` the shipped schema allows any plain name besides the built-ins, since a check can come from a
+plug-in package ([Check plug-ins](plugins-checks.md)). testbench itself refuses a name no installed check has when the
+file loads, and `testbench schema` adds the installed plug-ins' own descriptions.
+
 ## Top level
 
 | field | default | |

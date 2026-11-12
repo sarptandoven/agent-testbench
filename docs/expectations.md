@@ -38,6 +38,8 @@ expect:
 
 Paths are relative to the folder the step runs in (the project folder, or its scratch copy).
 
+A package can add kinds of check of its own: [Check plug-ins](plugins-checks.md).
+
 ## Rules
 
 Wherever an expectation compares a value (json, media, web status, junit, metrics, gpu, duration), the rule is

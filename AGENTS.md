@@ -50,6 +50,9 @@
   a command) become the long form there (`config.long_form`), so nothing downstream sees them.
   `schema/testbench.schema.json` is its JSON Schema for editors (`testbench schema`): a new key needs an entry
   there too (tests/test_schema.py fails otherwise).
+- Checks: each `expect:` kind is a `Check` in `expect.py` (`validate` when testbench.yaml loads, `check` after the
+  step), registered like a package's plug-in of kind `checks` (`docs/plugins-checks.md`). A new built-in goes in
+  `KINDS`, `RUN_ORDER`, the schema and docs/expectations.md, and keeps the contract (tests/test_checks_plugins.py).
 - Plans for LLM apps: `mocks.py` and `mock_clients/` (the mock `openai` / `anthropic` packages a step's `mocks:` puts
   first on PYTHONPATH; they never touch the network). Notebooks: `notebook.py` (forms, papermill parameters,
   percent-format .py, kernels).

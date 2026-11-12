@@ -29,9 +29,42 @@ finding ("accuracy 0.71, wanted >= 0.9") rather than a bare FAIL. A check that m
         anthropic: {calls: "<= 5", output_tokens: "<= 2000"}       # refused: 0 unless said otherwise
 
 Any rule can also be a tolerance ("~= 0.93 +- 0.01", "~= 100 +- 5%") or an inclusive range ("between 0.8 and 0.95").
+
+Every kind of check is a plug-in of kind "checks" (agent_testbench.plugins), the thirteen above included, so a package
+can add one that works exactly like a built-in (docs/plugins-checks.md):
+
+    # pyproject.toml of a package
+    [project.entry-points."agent_testbench.checks"]
+    max_log_lines = "testbench_check_example:MaxLogLines"
+
+A check is an object (or a class that takes no arguments; subclassing Check is optional) with:
+
+    name        the key under `expect:`, e.g. max_log_lines; a plain YAML key (the entry point's name if it has none)
+    validate(where: str, value) -> None
+                refuse a malformed value when testbench.yaml loads, before anything runs: raise config.ConfigError
+                with a message that starts with `where` (the field, e.g. `plans.train.steps[0].expect.max_log_lines`)
+                and says what to write instead. validate_table() and validate_rule() below do the common shapes
+    check(value, *, workdir: Path, result: dict, add) -> None
+                after the step ran: add(name, ok, detail) once per finding, where detail says what was found, the
+                measured number first ("0.71 (wanted >= 0.9)"; compare() writes that). workdir is the folder the step
+                ran in: read from it, never write. result is the step's outcome: kind (run, notebook or web),
+                exit_code, stdout (everything it printed), seconds, run_started (a file older than this is an old
+                result), step_dir, command, error, web, gpu, mocks. A missing or unreadable file is a failing
+                finding, never an exception
+    example     a value validate accepts: the contract (`testbench plugin test`) tries check() with it
+    keys        optional: the names its value takes, for messages and the docs, e.g. ("minutes", "seconds")
+    schema      optional: the JSON Schema of its value; `testbench schema` adds it under $defs.expect (it may use
+                testbench.schema.json's own $defs, e.g. {"$ref": "#/$defs/rule"})
+    default     optional: the value check() gets for a step that does not name it, so it applies to every step;
+                without one it runs only where named (exit_code, no_errors, web and mock_calls have one)
+
+The built-ins' findings come first (RUN_ORDER), then the plug-ins' in the order the step names them. A plug-in check
+that raises fails its step with a finding that says so; it never stops the run or another step. One that cannot run
+where the step is checked (not installed there, or broken) fails the step too: a check is never skipped in silence.
 """
 from __future__ import annotations
 
+import copy
 import glob
 import json
 import math
@@ -39,9 +72,14 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
-from .config import counted
+import yaml
+
+from . import plugins
+from .config import ConfigError, counted, near
 
 OPS = {">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b, "!=": lambda a, b: a != b, "==": lambda a, b: a == b,
        ">": lambda a, b: a > b, "<": lambda a, b: a < b}
@@ -49,7 +87,9 @@ RULE = re.compile(r"^\s*(>=|<=|!=|==|>|<)\s*(.+?)\s*$")
 NEAR = re.compile(r"^\s*~=\s*(\S+?)\s*(?:\+-|\+/-|±)\s*(\S+?)\s*(%?)\s*$")
 BETWEEN = re.compile(r"^\s*between\s+(\S+)\s+and\s+(\S+)\s*$", re.I)
 KINDS = ("exit_code", "no_errors", "files", "json", "text", "media", "web", "junit", "metrics", "gpu", "image",
-         "duration", "mock_calls")
+         "duration", "mock_calls")                       # the built-ins, in the order testbench.yaml is validated
+RUN_ORDER = ("exit_code", "no_errors", "files", "json", "text", "media", "web", "junit", "metrics", "image", "gpu",
+             "duration", "mock_calls")                   # ... and the order their findings come in
 MOCK_SDKS = ("anthropic", "openai")
 MOCK_KEYS = ("calls", "refused", "injected", "input_tokens", "output_tokens", "tool_calls")
 MOCK_LOG = "mock_calls.jsonl"
@@ -201,82 +241,286 @@ def _read(source: str, workdir: Path, result: dict) -> tuple[str | None, str | N
         return None, f"cannot be read: {exc}"
 
 
+# ---- checking a step, and validating its expect:, through the "checks" registry -------------------------------------
+
 def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
-    """result: the step's outcome (kind, exit_code, stdout, notebook error, web observations, gpu window, seconds
-    it ran, run_started, the command it ran)."""
+    """Every finding for a step's `expect:`: each check it names (and each one with a default), through the "checks"
+    registry. result: the step's outcome (kind, exit_code, stdout, notebook error, web observations, gpu window,
+    seconds it ran, run_started, step_dir, mocks, the command it ran)."""
     out = []
     add = lambda name, ok, detail: out.append({"check": name, "ok": bool(ok), "detail": detail})
-    kind = result.get("kind")
-    if kind == "run" or "exit_code" in expect:
-        want = expect.get("exit_code", 0)
-        add(f"exit code {want}", result.get("exit_code") == want, f"exited {result.get('exit_code')}")
-    if kind == "notebook" and expect.get("no_errors", True):
-        err = result.get("error")
-        add("every cell ran without an error", not err,
-            "all cells ran" if not err else f"cell {err.get('cell')}: {err.get('ename')}: {str(err.get('evalue'))[:300]}")
-    since = result.get("run_started")
-    for pattern in expect.get("files", []):
-        hits = sorted(glob.glob(str(workdir / pattern), recursive=True))
-        fresh = [h for h in hits if not _stale(Path(h), since)]
-        add(f"file {pattern}", fresh, f"{len(fresh)} found" if fresh else
-            f"{len(hits)} found, all last written before this run started: old results, not this run's" if hits
-            else "missing")
-    for path, rules in (expect.get("json") or {}).items():
-        f = workdir / path
-        if any(c in str(path) for c in "*?["):           # a pattern, e.g. **/metrics.json: it must name one file
-            hits = sorted({os.path.realpath(h): h for h in glob.glob(str(workdir / path), recursive=True)}.values())
-            if len(hits) != 1:
-                found = ", ".join(Path(h).relative_to(workdir).as_posix() for h in hits[:5])
-                for key in rules:
-                    add(f"{path}: {key}", False, f"{len(hits)} files match ({found}); the pattern must match exactly one"
-                        if hits else "file missing (nothing matches)")
-                continue
-            f = Path(hits[0])
+    found = plugins.registry("checks")
+    named = [n for n in expect if n not in RUN_ORDER]
+    for name in [*RUN_ORDER, *named, *(n for n in found if n not in RUN_ORDER and n not in named)]:
+        chk = found.get(name)
+        if chk is None:
+            if name in expect:                           # validated where testbench.yaml loaded, but not here
+                add(str(name), False, _not_here(name))
+            continue
+        if name in expect:
+            value = expect[name]
+        elif hasattr(chk, "default"):
+            value = chk.default
+        else:
+            continue
+        if plugins.builtin("checks", name):
+            chk.check(value, workdir=workdir, result=result, add=add)
+            continue
+        try:                                             # a plug-in's bug fails its step, never the run
+            chk.check(copy.deepcopy(value), workdir=workdir, result=result,
+                      add=lambda name, ok, detail="": add(str(name), ok, str(detail)))
+        except Exception as exc:
+            add(str(name), False, f"the check plug-in {name!r} failed: {type(exc).__name__}: {str(exc)[:300]}. That is "
+                                  "a bug in the plug-in, not in the step; `testbench plugin test` shows it - fix or "
+                                  "reinstall that package")
+    return out
+
+
+def validate(where: str, expect: dict) -> None:
+    """Refuse a malformed `expect:` when testbench.yaml loads (config._expect), before anything runs: a name no check
+    has, or one whose plug-in did not load; then each check's own validate(), in the registry's order."""
+    names = plugins.names("checks")
+    for key in expect:
+        if key not in names:
+            raise ConfigError(_unknown(where, key, names))
+    present = [(name, plugins.get("checks", name)) for name in names if name in expect]
+    for name, chk in present:                            # a path that is not text first, as it always was
+        if getattr(chk, "keyed_by", None):
+            _path_keys(f"{where}.{name}", expect[name], chk.keyed_by)
+    for name, chk in present:
+        if plugins.builtin("checks", name):
+            chk.validate(f"{where}.{name}", expect[name])
+            continue
         try:
-            stale = _stale(f, result.get("run_started"))
-            data = None if stale else json.loads(f.read_text())
-        except FileNotFoundError:
-            stale = "file missing"
-        except OSError as exc:
-            add(f"{path}", False, f"cannot be read: {exc}")
-            continue
-        except (ValueError, RecursionError) as exc:      # bad JSON, not UTF-8, a number too long to read
-            add(f"{path}", False, f"not valid JSON: {exc}")
-            continue
-        if stale:
-            for key in rules:
-                add(f"{path}: {key}", False, stale)
-            continue
-        for key, rule in rules.items():
+            chk.validate(f"{where}.{name}", copy.deepcopy(expect[name]))
+        except ConfigError:
+            raise
+        except Exception as exc:
+            raise ConfigError(f"`{where}.{name}`: the check plug-in {name!r} failed while reading this value "
+                              f"({type(exc).__name__}: {str(exc)[:300]}). That is a bug in the plug-in; `testbench "
+                              "plugin test` shows it - fix or reinstall that package") from None
+
+
+def _unknown(where: str, key, names: list[str]) -> str:
+    broken = plugins.broken("checks")
+    if key in broken:
+        return (f"`{where}.{key}`: the check {key!r} is installed but did not load ({broken[key]}); `testbench "
+                "plugins` shows it - reinstall or fix that package")
+    start = [n for n in names if isinstance(key, str) and len(key) > 2 and (n.startswith(key) or key.startswith(n))]
+    hint = f" (did you mean {start[0]}?)" if len(start) == 1 else near(key, names) or (
+        "; a check from a plug-in package works once that package is installed here (`testbench plugins` lists them)")
+    return f"`{where}` has no {key!r} check; expectations are {', '.join(names)}{hint}"
+
+
+def _not_here(name) -> str:
+    broken = plugins.broken("checks").get(name)
+    if broken:
+        return f"the check {name!r} is installed where this step was checked but did not load ({broken})"
+    return (f"no check {name!r} is installed where this step was checked, so it was not checked: install the package "
+            "that provides it there too (a remote backend's machine needs it as well as this one)")
+
+
+def validate_rule(where: str, rule) -> None:
+    """Refuse a rule that cannot be checked (`where` names the field)."""
+    bad = rule_error(rule)
+    if bad:
+        raise ConfigError(f"`{where}`: {bad}")
+
+
+def validate_table(where: str, value, example: str, keys=None, some=False) -> dict:
+    """A mapping; with keys, each of its values is a rule and only those keys are allowed; with some, not empty."""
+    if not isinstance(value, dict):
+        raise ConfigError(f"`{where}` must be a mapping, e.g. {example}")
+    if some and not value:                               # {metrics.json: {}} would check nothing, even a missing file
+        raise ConfigError(f"`{where}` is empty, so nothing would be checked; e.g. {example}")
+    for k, rule in value.items() if keys else ():
+        if k not in keys:
+            raise ConfigError(f"`{where}` has no {k!r}; use {', '.join(keys)}, e.g. {example}")
+        validate_rule(f"{where}.{k}", rule)
+    return value
+
+
+def _path_keys(where: str, value, keyed_by: str) -> None:
+    for k in value if isinstance(value, dict) else ():
+        if not isinstance(k, str) or not k.strip():
+            raise ConfigError(f"`{where}` has {k!r} where {keyed_by} goes; write the path in quotes")
+
+
+# ---- Check, and the built-in checks: each one a Check in the same registry as plug-ins -----------------------------
+
+class Check:
+    """One kind of `expect:` check (the module's docstring has the interface). Subclassing it is optional: any object
+    with name, validate, check and example will do."""
+    name: str = ""
+    keys: tuple[str, ...] | None = None
+    schema: dict | None = None
+    keyed_by: str | None = None          # built-ins keyed by a file: today's first message for a key that is no path
+
+    def __repr__(self) -> str:
+        return f"<check {self.name}>"
+
+
+class ExitCodeCheck(Check):
+    name, example, default = "exit_code", 0, None          # None: run steps must exit 0
+
+    def validate(self, where, value):
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ConfigError(f"`{where}` is the code the command must exit with, a whole number such as 0")
+
+    def check(self, value, *, workdir, result, add):
+        if result.get("kind") == "run" or value is not None:
+            want = 0 if value is None else value
+            add(f"exit code {want}", result.get("exit_code") == want, f"exited {result.get('exit_code')}")
+
+
+class NoErrorsCheck(Check):
+    name, example, default = "no_errors", True, True
+
+    def validate(self, where, value):
+        if not isinstance(value, bool):
+            raise ConfigError(f"`{where}` is true or false")
+
+    def check(self, value, *, workdir, result, add):
+        if result.get("kind") == "notebook" and value:
+            err = result.get("error")
+            add("every cell ran without an error", not err, "all cells ran" if not err else
+                f"cell {err.get('cell')}: {err.get('ename')}: {str(err.get('evalue'))[:300]}")
+
+
+class FilesCheck(Check):
+    name, example = "files", ["outputs/model.pt", "plots/*.png"]
+
+    def validate(self, where, value):
+        if not isinstance(value, list) or not all(isinstance(f, str) and f.strip() for f in value):
+            raise ConfigError(f"`{where}` is a list of paths or globs, e.g. [outputs/model.pt, \"plots/*.png\"]")
+
+    def check(self, value, *, workdir, result, add):
+        since = result.get("run_started")
+        for pattern in value:
+            hits = sorted(glob.glob(str(workdir / pattern), recursive=True))
+            fresh = [h for h in hits if not _stale(Path(h), since)]
+            add(f"file {pattern}", fresh, f"{len(fresh)} found" if fresh else
+                f"{len(hits)} found, all last written before this run started: old results, not this run's" if hits
+                else "missing")
+
+
+class JsonCheck(Check):
+    name, keyed_by = "json", "a file's path"
+    example = {"outputs/metrics.json": {"accuracy": ">= 0.9", "losses.-1": "< 0.5"}}
+
+    def validate(self, where, value):
+        _path_keys(where, value, self.keyed_by)
+        for path, rules in validate_table(where, value or {}, '{metrics.json: {accuracy: ">= 0.9"}}').items():
+            for key, rule in validate_table(f"{where}.{path}", rules, '{accuracy: ">= 0.9", "losses.-1": "< 0.5"}',
+                                            some=True).items():
+                validate_rule(f"{where}.{path}.{key}", rule)
+
+    def check(self, value, *, workdir, result, add):
+        for path, rules in (value or {}).items():
+            f = workdir / path
+            if any(c in str(path) for c in "*?["):           # a pattern, e.g. **/metrics.json: it must name one file
+                hits = sorted({os.path.realpath(h): h for h in glob.glob(str(workdir / path), recursive=True)}.values())
+                if len(hits) != 1:
+                    found = ", ".join(Path(h).relative_to(workdir).as_posix() for h in hits[:5])
+                    for key in rules:
+                        add(f"{path}: {key}", False, f"{len(hits)} files match ({found}); the pattern must match "
+                                                     "exactly one" if hits else "file missing (nothing matches)")
+                    continue
+                f = Path(hits[0])
             try:
-                ok, detail = compare(dig(data, key), rule)
-            except (KeyError, IndexError):
-                ok, detail = False, f"no {key!r} in the file"
-            add(f"{path}: {key} {rule}", ok, detail)
-    for source, needles in (expect.get("text") or {}).items():
-        text, why = _read(source, workdir, result)       # a log left by an earlier run does not count
-        for needle in ([needles] if isinstance(needles, str) else needles):
-            if text is None:
-                add(f"{source} contains {needle!r}", False, why)
-            else:
-                add(f"{source} contains {needle!r}", needle in text, "found" if needle in text else "not found")
-    for path, rules in (expect.get("media") or {}).items():
-        stale = (workdir / path).is_file() and _stale(workdir / path, since)
-        info = {"error": stale} if stale else probe_media(workdir / path)
-        for key, rule in rules.items():
-            if "error" in info:
-                add(f"{path}: {key}", False, info["error"])
+                stale = _stale(f, result.get("run_started"))
+                data = None if stale else json.loads(f.read_text())
+            except FileNotFoundError:
+                stale = "file missing"
+            except OSError as exc:
+                add(f"{path}", False, f"cannot be read: {exc}")
                 continue
-            ok, detail = compare(info.get(key), rule)
-            add(f"{path}: {key} {rule}", ok, detail)
-    if kind == "web":
-        web = result.get("web") or {}
-        rules = expect.get("web") or {}
+            except (ValueError, RecursionError) as exc:      # bad JSON, not UTF-8, a number too long to read
+                add(f"{path}", False, f"not valid JSON: {exc}")
+                continue
+            if stale:
+                for key in rules:
+                    add(f"{path}: {key}", False, stale)
+                continue
+            for key, rule in rules.items():
+                try:
+                    ok, detail = compare(dig(data, key), rule)
+                except (KeyError, IndexError):
+                    ok, detail = False, f"no {key!r} in the file"
+                add(f"{path}: {key} {rule}", ok, detail)
+
+
+class TextCheck(Check):
+    name, keyed_by, example = "text", "a file's path (or stdout)", {"stdout": ["epoch 10"]}
+
+    def validate(self, where, value):
+        _path_keys(where, value, self.keyed_by)
+        for source, needles in validate_table(where, value or {}, '{stdout: ["epoch 10"]}').items():
+            needles = [needles] if isinstance(needles, str) else needles
+            if not isinstance(needles, list) or not needles or not all(isinstance(n, str) and n for n in needles):
+                raise ConfigError(f"`{where}.{source}` is the text to find, or a list of texts, e.g. [\"epoch 10\"] "
+                                  "(an empty text is found in anything)")
+
+    def check(self, value, *, workdir, result, add):
+        for source, needles in (value or {}).items():
+            text, why = _read(source, workdir, result)       # a log left by an earlier run does not count
+            for needle in ([needles] if isinstance(needles, str) else needles):
+                if text is None:
+                    add(f"{source} contains {needle!r}", False, why)
+                else:
+                    add(f"{source} contains {needle!r}", needle in text, "found" if needle in text else "not found")
+
+
+class MediaCheck(Check):
+    name, keyed_by, keys = "media", "a file's path", MEDIA_KEYS
+    example = {"out/video.mp4": {"frames": ">= 120", "width": 1920, "audio": True}}
+
+    def validate(self, where, value):
+        _path_keys(where, value, self.keyed_by)
+        for path, rules in validate_table(where, value or {}, '{out/video.mp4: {frames: ">= 120"}}').items():
+            validate_table(f"{where}.{path}", rules, '{frames: ">= 120", width: 1920, audio: true}', MEDIA_KEYS,
+                           some=True)
+
+    def check(self, value, *, workdir, result, add):
+        since = result.get("run_started")
+        for path, rules in (value or {}).items():
+            stale = (workdir / path).is_file() and _stale(workdir / path, since)
+            info = {"error": stale} if stale else probe_media(workdir / path)
+            for key, rule in rules.items():
+                if "error" in info:
+                    add(f"{path}: {key}", False, info["error"])
+                    continue
+                ok, detail = compare(info.get(key), rule)
+                add(f"{path}: {key} {rule}", ok, detail)
+
+
+class WebCheck(Check):
+    name, keys, default = "web", WEB_KEYS, None             # every web step: no console errors unless said otherwise
+    example = {"status": 200, "text": ["Count: 2"], "no_console_errors": True}
+
+    def validate(self, where, value):
+        web = validate_table(where, value or {}, '{status: 200, text: ["Count: 2"]}')
+        for k in web:
+            if k not in WEB_KEYS:
+                raise ConfigError(f"`{where}` has no {k!r}; use {', '.join(WEB_KEYS)}")
+        validate_rule(f"{where}.status", web.get("status"))
+        if not isinstance(web.get("text", []), list) or not all(isinstance(t, str) and t for t in web.get("text", [])):
+            raise ConfigError(f"`{where}.text` is a list of texts the page must show, e.g. [\"Count: 2\"]")
+        if "title" in web and not (isinstance(web["title"], str) and web["title"]):
+            raise ConfigError(f"`{where}.title` is text the page's title contains, e.g. Counter")
+        if not isinstance(web.get("no_console_errors", True), bool):
+            raise ConfigError(f"`{where}.no_console_errors` is true or false")
+
+    def check(self, value, *, workdir, result, add):
+        if result.get("kind") != "web":
+            return
+        web, rules = result.get("web") or {}, value or {}
         if "status" in rules:
             ok, detail = compare(web.get("status"), rules["status"])
             add(f"page status {rules['status']}", ok, detail)
         for needle in rules.get("text", []):
-            add(f"page shows {needle!r}", needle in web.get("text", ""), "found" if needle in web.get("text", "") else "not found")
+            add(f"page shows {needle!r}", needle in web.get("text", ""), "found" if needle in web.get("text", "") else
+                "not found")
         if rules.get("title"):
             add(f"title contains {rules['title']!r}", rules["title"] in web.get("title", ""), repr(web.get("title")))
         if rules.get("no_console_errors", True):
@@ -284,46 +528,299 @@ def check(expect: dict, *, workdir: Path, result: dict) -> list[dict]:
             add("no console or page errors", not errs, "none" if not errs else "; ".join(errs)[:500])
         if web.get("action_errors"):
             add("every action worked", False, "; ".join(web["action_errors"])[:500])
-    for spec in junit_specs(expect.get("junit")):
-        _junit(spec, workdir, result, add)
-    for source, patterns in (expect.get("metrics") or {}).items():
-        text, why = _read(source, workdir, result)
-        for pattern, rule in patterns.items():
-            name = f"{source} /{pattern}/ {rule}"
-            hits = list(re.finditer(pattern, text, re.M)) if text is not None else []
-            if text is None or not hits:
-                add(name, False, why or f"no match in {source} ({counted(len(text.splitlines()), 'line')})")
+
+
+class JunitCheck(Check):
+    name, keys, example = "junit", ("path", *JUNIT_KEYS), {"path": "report.xml", "tests": ">= 10"}
+
+    def validate(self, where, value):
+        example = '{path: report.xml, failures: 0, tests: ">= 10"}'
+        if value is not None and not isinstance(value, (str, dict, list)):
+            raise ConfigError(f"`{where}` is the report's path or {example}")
+        for i, spec in enumerate(junit_specs(value) or ([None] if isinstance(value, (str, dict)) else [])):
+            at = where + (f"[{i}]" if isinstance(value, list) else "")
+            if not isinstance(spec, dict) or not isinstance(spec.get("path"), str) or not spec["path"].strip():
+                raise ConfigError(f"`{at}` needs `path:`, the JUnit XML file the test command writes, e.g. {example} "
+                                  "(pytest: --junitxml=report.xml)")
+            validate_table(at, {k: v for k, v in spec.items() if k != "path"}, example, JUNIT_KEYS)
+
+    def check(self, value, *, workdir, result, add):
+        for spec in junit_specs(value):
+            _junit(spec, workdir, result, add)
+
+
+class MetricsCheck(Check):
+    name, keyed_by = "metrics", "a file's path (or stdout)"
+    example = {"stdout": {"val_loss=([0-9.eE+-]+)": "< 0.3"}}
+
+    def validate(self, where, value):
+        _path_keys(where, value, self.keyed_by)
+        example = '{"val_loss=([0-9.eE+-]+)": "< 0.3"}'
+        for source, patterns in validate_table(where, value or {}, f"{{stdout: {example}}}").items():
+            for pattern, rule in validate_table(f"{where}.{source}", patterns, example, some=True).items():
+                if not isinstance(pattern, str):
+                    raise ConfigError(f"`{where}.{source}` has {pattern!r} where a regular expression goes; write it "
+                                      f"in quotes, e.g. {example}")
+                try:
+                    re.compile(pattern)
+                except re.error as exc:
+                    raise ConfigError(f"`{where}.{source}`: {pattern!r} is not a regular expression ({exc}); its "
+                                      "first group is the number, e.g. \"val_loss=([0-9.eE+-]+)\"") from None
+                validate_rule(f"{where}.{source}.{pattern}", rule)
+
+    def check(self, value, *, workdir, result, add):
+        for source, patterns in (value or {}).items():
+            text, why = _read(source, workdir, result)
+            for pattern, rule in patterns.items():
+                name = f"{source} /{pattern}/ {rule}"
+                hits = list(re.finditer(pattern, text, re.M)) if text is not None else []
+                if text is None or not hits:
+                    add(name, False, why or f"no match in {source} ({counted(len(text.splitlines()), 'line')})")
+                    continue
+                last = hits[-1]
+                ok, detail = compare(_number(last.group(1) if last.re.groups else last.group(0)), rule)
+                add(name, ok, f"{detail}; {'the only match' if len(hits) == 1 else f'the last of {len(hits)} matches'}"
+                              f": {last.group(0).strip()[:80]!r}")
+
+
+class GpuCheck(Check):
+    name, keys, example = "gpu", GPU_KEYS, {"busy_pct": ">= 50", "max_mem_mib": "<= 15000"}
+
+    def validate(self, where, value):
+        validate_table(where, value or {}, '{busy_pct: ">= 50", max_mem_mib: "<= 15000"}', GPU_KEYS)
+
+    def check(self, value, *, workdir, result, add):
+        gpu = result.get("gpu")
+        for key, rule in (value or {}).items():
+            if not gpu:
+                add(f"gpu {key} {rule}", False, NO_GPU)
                 continue
-            last = hits[-1]
-            ok, detail = compare(_number(last.group(1) if last.re.groups else last.group(0)), rule)
-            add(name, ok, f"{detail}; {'the only match' if len(hits) == 1 else f'the last of {len(hits)} matches'}: "
-                          f"{last.group(0).strip()[:80]!r}")
-    for path, spec in (expect.get("image") or {}).items():
-        most = spec.get("max_diff", 0.02)
-        diff, note = image_diff(workdir / path, workdir / str(spec.get("like")), result.get("run_started"))
-        if diff is None:
-            add(f"{path} looks like {spec.get('like')}", False, note)
-        else:
-            ok, detail = compare(round(diff, 4), f"<= {most}")
-            add(f"{path} looks like {spec.get('like')}", ok,
-                f"{detail}, the mean difference per pixel and channel (0 identical, 1 opposite){note}")
-    gpu = result.get("gpu")
-    for key, rule in (expect.get("gpu") or {}).items():
-        if not gpu:
-            add(f"gpu {key} {rule}", False, NO_GPU)
+            ok, detail = compare(gpu.get(key), rule)
+            add(f"gpu {key} {rule}", ok, f"{detail} on {gpu.get('gpu') or 'the GPU'}, {gpu.get('readings', '?')} "
+                                         "reading(s)")
+
+
+class ImageCheck(Check):
+    name, keyed_by, keys = "image", "a file's path", ("like", "max_diff")
+    example = {"outputs/plot.png": {"like": "golden/plot.png", "max_diff": 0.02}}
+
+    def validate(self, where, value):
+        _path_keys(where, value, self.keyed_by)
+        example = "{like: golden/plot.png, max_diff: 0.02}"
+        for path, spec in validate_table(where, value or {}, f"{{outputs/plot.png: {example}}}").items():
+            at = f"{where}.{path}"
+            if not isinstance(spec, dict) or not isinstance(spec.get("like"), str) or set(spec) - {"like", "max_diff"}:
+                raise ConfigError(f"`{at}` is {example}: the known-good image and the largest mean pixel difference "
+                                  "(0..1)")
+            most = spec.get("max_diff", 0.02)
+            if not isinstance(most, (int, float)) or isinstance(most, bool) or not 0 <= most <= 1:
+                raise ConfigError(f"`{at}.max_diff` is a number from 0 (identical) to 1, e.g. 0.02")
+
+    def check(self, value, *, workdir, result, add):
+        for path, spec in (value or {}).items():
+            most = spec.get("max_diff", 0.02)
+            diff, note = image_diff(workdir / path, workdir / str(spec.get("like")), result.get("run_started"))
+            if diff is None:
+                add(f"{path} looks like {spec.get('like')}", False, note)
+            else:
+                ok, detail = compare(round(diff, 4), f"<= {most}")
+                add(f"{path} looks like {spec.get('like')}", ok,
+                    f"{detail}, the mean difference per pixel and channel (0 identical, 1 opposite){note}")
+
+
+class DurationCheck(Check):
+    name, keys, example = "duration", DURATION_KEYS, {"minutes": "<= 5"}
+
+    def validate(self, where, value):
+        validate_table(where, value or {}, '{minutes: "<= 5"}', DURATION_KEYS)
+
+    def check(self, value, *, workdir, result, add):
+        secs = result.get("seconds")
+        for key, rule in (value or {}).items():
+            ok, detail = compare(None if secs is None else round(secs / 60, 3) if key == "minutes" else round(secs, 2),
+                                 rule)
+            add(f"duration {key} {rule}", ok, detail)
+
+
+class MockCallsCheck(Check):
+    name, keys, default = "mock_calls", MOCK_KEYS, None     # a step with mocks: refuses no call unless said otherwise
+    example = {"anthropic": {"calls": "<= 5", "output_tokens": "<= 2000"}}
+
+    def validate(self, where, value):
+        example = '{calls: "<= 5", output_tokens: "<= 2000"}'
+        for sdk, rules in validate_table(where, value or {}, f"{{anthropic: {example}}}").items():
+            if sdk not in MOCK_SDKS:
+                raise ConfigError(f"`{where}` names {sdk!r}; the mock clients are {', '.join(MOCK_SDKS)}")
+            validate_table(f"{where}.{sdk}", rules, example, MOCK_KEYS)
+
+    def check(self, value, *, workdir, result, add):
+        spec, mocked = value or {}, result.get("mocks") or {}
+        for sdk in [*spec, *(s for s in mocked if s not in spec)]:
+            _mock_calls(sdk, {**(spec.get(sdk) or {}), "refused": (spec.get(sdk) or {}).get("refused", 0)}, workdir,
+                        result, add)
+
+
+BUILTIN = {c.name: c for c in (ExitCodeCheck, NoErrorsCheck, FilesCheck, JsonCheck, TextCheck, MediaCheck, WebCheck,
+                               JunitCheck, MetricsCheck, GpuCheck, ImageCheck, DurationCheck, MockCallsCheck)}
+
+
+def _prepare(obj, name: str):
+    """What the registry holds for an entry point: the check itself, or one made from its class."""
+    chk = obj() if isinstance(obj, type) else obj
+    missing = [m for m in ("validate", "check") if not callable(getattr(chk, m, None))]
+    if missing:
+        raise TypeError(f"{obj!r} is not a check: it has no {' and no '.join(m + '()' for m in missing)} "
+                        "(agent_testbench.expect.Check)")
+    if not getattr(chk, "name", None):
+        chk.name = name
+    return chk
+
+
+# ---- the contract: what `testbench plugin test` checks for a check -----------------------------------------------
+
+WRONG = (("nothing (null)", None, False), ("a list", [{"no_such_key": 1}], True),
+         ("a mapping with a key nobody uses", {"no_such_key_at_all": [1]}, True))
+RESULTS = {"run": {"exit_code": 0, "command": "python train.py"}, "notebook": {"error": None},
+           "web": {"web": {"status": 200, "title": "", "text": "", "console_errors": [], "page_errors": []}}}
+
+
+def contract(chk) -> list[str]:
+    """Problems with one check, in plain words ([] = it keeps the contract): a name that is a plain YAML key; validate
+    accepts its example and refuses an obviously wrong value with a ConfigError naming the field; check() on an empty
+    folder records a finding, raises nothing and writes nothing outside the folder; a schema, if given, is one."""
+    problems, name = [], getattr(chk, "name", None)
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", name) or \
+            yaml.safe_load(f"{name}: 1") != {name: 1}:
+        problems.append(f"its name {name!r} is not a plain YAML key: use letters, digits and _ (starting with a letter, "
+                        "and not a word YAML reads as true, false or null, such as on, off, yes or no), e.g. "
+                        "max_log_lines")
+        name = "your_check"
+    elif name in BUILTIN and not isinstance(chk, BUILTIN[name]):
+        problems.append(f"{name!r} is a built-in check's name, and a plug-in cannot replace a built-in; pick another")
+    missing = [m for m in ("validate", "check") if not callable(getattr(chk, m, None))]
+    if missing:
+        return problems + [f"it has no {m}() (agent_testbench.expect.Check says what it takes)" for m in missing]
+    where = f"plans.p.steps[0].expect.{name}"
+    example = getattr(chk, "example", None)
+    if example is None:
+        problems.append("it has no `example`: a value its validate() accepts, which this test tries check() with (and "
+                        "docs can show), e.g. example = 200")
+    else:
+        try:
+            chk.validate(where, copy.deepcopy(example))
+        except Exception as exc:
+            problems.append(f"validate() refuses its own example {example!r}: {type(exc).__name__}: {exc}")
+            example = None
+    for label, wrong, refuse in WRONG:
+        try:
+            chk.validate(where, copy.deepcopy(wrong))
+        except ConfigError as exc:
+            if where not in str(exc):
+                problems.append(f"validate() refused {label}, but its message does not name the field (start it with "
+                                f"`{where}`, the `where` it was given): {exc}")
             continue
-        ok, detail = compare(gpu.get(key), rule)
-        add(f"gpu {key} {rule}", ok, f"{detail} on {gpu.get('gpu') or 'the GPU'}, {gpu.get('readings', '?')} "
-                                     "reading(s)")
-    secs = result.get("seconds")
-    for key, rule in (expect.get("duration") or {}).items():
-        ok, detail = compare(None if secs is None else round(secs / 60, 3) if key == "minutes" else round(secs, 2), rule)
-        add(f"duration {key} {rule}", ok, detail)
-    spec, mocked = expect.get("mock_calls") or {}, result.get("mocks") or {}
-    for sdk in [*spec, *(s for s in mocked if s not in spec)]:      # a step with mocks: on refuses no call unless said
-        _mock_calls(sdk, {**(spec.get(sdk) or {}), "refused": (spec.get(sdk) or {}).get("refused", 0)}, workdir,
-                    result, add)
-    return out
+        except Exception as exc:
+            problems.append(f"validate() raised {type(exc).__name__} for {label} ({exc}); refuse a wrong value with "
+                            "agent_testbench.config.ConfigError, naming the field and what to write instead")
+            continue
+        if refuse:
+            problems.append(f"validate() accepted {label} ({wrong!r}); refuse it with a ConfigError that names the field "
+                            "and says what to write, so a mistake shows when testbench.yaml loads, not after a run")
+    if example is not None:
+        problems += _try_check(chk, example)
+    problems += _schema_problems(chk, example)
+    return problems
+
+
+def _try_check(chk, example) -> list[str]:
+    """check() with the example on an empty folder, as each kind of step: it records a finding (for at least one kind),
+    raises nothing and writes nothing outside the folder."""
+    problems, findings, here = [], 0, os.getcwd()
+    for kind, extra in RESULTS.items():
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            workdir, cwd = base / "workdir", base / "cwd"
+            workdir.mkdir()
+            cwd.mkdir()
+            before = _files(base, workdir)
+            got = []
+            result = {"kind": kind, "stdout": "", "seconds": 1.0, "run_started": time.time() - 1, **copy.deepcopy(extra)}
+            try:
+                os.chdir(cwd)                            # a relative path written by mistake lands here, where we look
+                chk.check(copy.deepcopy(example), workdir=workdir, result=result,
+                          add=lambda *a, **kw: got.append((a, kw)))
+            except Exception as exc:
+                problems.append(f"check() raised {type(exc).__name__} ({exc}) for a {kind} step on an empty folder; a "
+                                "missing or unreadable file is a failing finding - add(name, False, \"file missing\") - "
+                                "never an exception")
+            finally:
+                os.chdir(here)
+            wrote = sorted(p for p, stamp in _files(base, workdir).items() if before.get(p) != stamp)
+            if wrote:
+                problems.append(f"check() wrote {', '.join(wrote[:3])} outside the step's folder; a check only reads")
+            for args, kw in got:
+                a = dict(zip(("name", "ok", "detail"), args), **kw)
+                if set(a) != {"name", "ok", "detail"} or not isinstance(a["name"], str) or not a["name"] or \
+                        not isinstance(a["detail"], str):
+                    problems.append(f"check() called add() with {args!r} {kw or ''}; call add(name, ok, detail): name "
+                                    "and detail are text, ok is true or false")
+                    break
+            findings += len(got)
+    if not findings:
+        problems.append("check() recorded no finding for its example on an empty folder (as a run, notebook or web "
+                        "step); a missing file is a failing finding, and a check with nothing to check says so with "
+                        "add(name, True, \"nothing to check\")")
+    return problems
+
+
+def _files(base: Path, skip: Path) -> dict:
+    return {p.relative_to(base).as_posix(): (p.stat().st_size, p.stat().st_mtime_ns) for p in base.rglob("*")
+            if p.is_file() and skip not in p.parents}
+
+
+def _schema_problems(chk, example) -> list[str]:
+    schema = getattr(chk, "schema", None)
+    if schema is None:
+        return []
+    if not isinstance(schema, (dict, bool)):
+        return [f"its schema is {type(schema).__name__}; give a JSON Schema (a dict) for its value, or none"]
+    try:
+        import jsonschema
+    except ImportError:                                  # an optional package: the shape is all that can be checked
+        return []
+    try:
+        jsonschema.Draft202012Validator.check_schema(schema)
+    except jsonschema.SchemaError as exc:
+        return [f"its schema is not valid JSON Schema (draft 2020-12): {exc.message}"]
+    if example is None:
+        return []
+    from .config import SCHEMA
+    defs = json.loads(SCHEMA.read_text(encoding="utf-8"))["$defs"]
+    try:
+        bad = next(jsonschema.Draft202012Validator({"$defs": defs, **schema} if isinstance(schema, dict) else schema)
+                   .iter_errors(copy.deepcopy(example)), None)
+    except Exception as exc:                             # e.g. a $ref to nothing in testbench.schema.json
+        return [f"its schema cannot be used: {type(exc).__name__}: {exc}"]
+    return [f"its own example does not match its schema: {bad.message}"] if bad else []
+
+
+def schema_text() -> str:
+    """testbench.yaml's JSON Schema (`testbench schema`), with each installed check plug-in's `schema` added under
+    $defs.expect; exactly the shipped file when no plug-in gives one."""
+    from .config import SCHEMA
+    text = SCHEMA.read_text(encoding="utf-8")
+    extra = {name: chk.schema for name, chk in plugins.registry("checks").items()
+             if not plugins.builtin("checks", name) and isinstance(getattr(chk, "schema", None), (dict, bool))}
+    if not extra:
+        return text
+    data = json.loads(text)
+    data["$defs"]["expect"]["properties"].update(extra)
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
+KIND = plugins.Kind("checks", "check", "what a step's `expect:` can check",
+                    {name: f"{__name__}:{cls.__name__}" for name, cls in BUILTIN.items()},
+                    prepare=_prepare, contract=contract)
 
 
 # ---- calls to the mock LLM clients (docs/mocks.md) -----------------------------------------------------------
