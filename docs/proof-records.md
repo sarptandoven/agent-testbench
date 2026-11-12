@@ -120,3 +120,8 @@ What each part reads from the two reports:
 `minutes`, `code` and `environment`. MCP clients have it as the `diff_runs` tool, and from Python it is
 `agent_testbench.diff.compare(report_a, report_b, root)`. `testbench watch` prints its one-line summary after each
 run ([watch.md](watch.md)).
+
+When the two runs are of the same plan on the same code and data and their outputs still differ, the Evidence part
+says so and names the command that reads each difference: `testbench repro --compare A B` - which files differ, how,
+and why (times, paths, order, a random seed, the platform). [Reproducibility](reproducibility.md) has it, and
+`testbench repro PLAN`, which runs a plan again to see whether it gives the same evidence.

@@ -213,6 +213,8 @@ platform and packages where it ran, and the sha256 of every evidence file, in a 
 [JSON Schema](src/agent_testbench/schema/report-v1.schema.json). `testbench verify` says whether the evidence still
 matches, and `testbench diff A B` says what changed between two runs - each checked number old -> new and whether
 that is better by its rule, checks that flipped, evidence that changed, the commits, packages that changed version.
+`testbench repro <plan>` runs a plan again (`--on docker` elsewhere) and says which evidence files are the same and
+why the others are not - times, paths, order, a random seed, the platform ([docs/reproducibility.md](docs/reproducibility.md)).
 `testbench watch smoke` reruns a free plan whenever you save, one run at a time. `report --format html` writes one page with the plots inline, `--format junit` feeds CI test reports,
 `testbench history <plan>` shows how the checked numbers moved, and `testbench ui` writes static pages for every
 run with a trend line per number; `testbench ui --serve` shows them live at http://127.0.0.1:8770/ - what is
@@ -298,7 +300,7 @@ The rest, for setup, money, notebooks and more (`testbench help --all` lists eve
 |---|---|
 | `testbench init [--recipe]` / `recipes` / `schema` / `connect` / `ci` / `selftest` / `mcp [--http]` / `plugins` / `plugin test` | set up a project, your agents and CI (GitLab, Azure, CircleCI, a shell script), editor autocomplete for testbench.yaml, check the promises hold here, serve MCP, list plug-ins and check one keeps its contract |
 | `testbench wait` / `status` / `runs` / `cancel` / `watch` | follow, list and stop runs; run a free plan again on every change |
-| `testbench diff` / `history` / `export` / `share` / `badge` | what changed between runs, the checked numbers over time, MLflow / W&B / csv / jsonl, a run as a page others can check, a README badge |
+| `testbench diff` / `repro` / `history` / `export` / `share` / `badge` | what changed between runs, whether the same plan gives the same evidence again (and why not), the checked numbers over time, MLflow / W&B / csv / jsonl, a run as a page others can check, a README badge |
 | `testbench files` / `notify test` | files on a session's machine; a test message to the `notify:` webhook |
 | `testbench spend [--modal]` / `prices [--update]` | money |
 | `testbench lint` / `rescue` / `nb split/build/fields` / `note` | notebooks and the lab notebook |

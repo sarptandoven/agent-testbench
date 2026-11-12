@@ -11,10 +11,10 @@ Anywhere, it keeps the limits out of the agent's hands:
      hooks off or takes agent-testbench out of Claude Code's settings (.claude/settings.json);
   2. editing or deleting a ledger (.testbench/ledger.jsonl, ~/.testbench/ledger.jsonl) is refused, and so is a
      command that points testbench at another limits folder (TESTBENCH_USER_DIR, HOME, USERPROFILE);
-  3. a run, watch, session or loop with --approve (or approved_by_person=true) becomes a question to the person, and
-     so do `testbench prices --update --url` (prices from somewhere else) and `testbench share` without --dry-run
-     (it publishes a run where others can read it); commands are read with their quoting taken off, so --approve
-     in quotes, with backslashes, in a variable, through xargs, `bash -c` or Python asks too;
+  3. a run, repro, watch, session or loop with --approve (or approved_by_person=true) becomes a question to the
+     person, and so do `testbench prices --update --url` (prices from somewhere else) and `testbench share` without
+     --dry-run (it publishes a run where others can read it); commands are read with their quoting taken off, so
+     --approve in quotes, with backslashes, in a variable, through xargs, `bash -c` or Python asks too;
 Inside a project with a testbench.yaml, it also acts on:
   4. raw cloud launches (`modal run/deploy/serve/shell`, `colab new/run/ssh/exec`) are refused, because
      `testbench run` is what enforces the budget and keeps the evidence;
@@ -285,7 +285,7 @@ def check_limits_reach(cmd: str) -> None:
 PROGRAM = re.compile(r"(?:^|(?<=[\s;&|(){}`/='\"\\]))(?:testbench|agent-testbench|agent_testbench(?:\.cli)?)(?=\s|$)")
 SEGMENTS = re.compile(r"[;&|\n(){}`]+")
 MENTION = re.compile(r"(?<![\w-])(?:agent[-_])?testbench(?![\w-]|\.ya?ml)")
-LAUNCH_WORD = re.compile(r"(?<![\w-])(?:run|watch)(?![\w-])|(?<![\w-])(?:loop|session)\s+start(?![\w-])|"
+LAUNCH_WORD = re.compile(r"(?<![\w-])(?:run|repro|watch)(?![\w-])|(?<![\w-])(?:loop|session)\s+start(?![\w-])|"
                          r"\blaunch\s*\(|\.run\s*\(|\bloop_start\b|\bsession_start\b|\brun_plan\b")
 APPROVAL = re.compile(r"(?<![\w-])--approve(?![\w-])|\bapprove(?:d_by_person)?\s*[:=]\s*(?:True|true|1|yes)\b")
 ARGS_FROM_ELSEWHERE = re.compile(r"\b(?:xargs|parallel)\b|\s-exec(?:dir)?\s")
@@ -317,7 +317,7 @@ def check_approvals(cmd: str, root) -> None:
             decide("ask", "agent-testbench: `testbench share` publishes a run's report and evidence where other people "
                           "can read them (a folder, a branch to push, a bucket). Approve only if you want this run "
                           "published there; `testbench share ... --dry-run` lists every file it would publish first.")
-        launches = sub in ("run", "watch") or (sub in ("loop", "session") and names[:1] == ["start"])
+        launches = sub in ("run", "repro", "watch") or (sub in ("loop", "session") and names[:1] == ["start"])
         approving = any(w == "--approve" or w.startswith("--approve=") for w in rest)
         maybe = not approving and bool(re.search(r"[$`]", " ".join(rest)) or ARGS_FROM_ELSEWHERE.search(before))
         if not launches or not (approving or maybe):         # $FLAG or xargs could be --approve; the person decides
@@ -327,6 +327,12 @@ def check_approvals(cmd: str, root) -> None:
             decide("ask", "agent-testbench: a run with --approve spends money above the approval threshold"
                    + (" (this one's arguments come from a variable or another command, so it could)." if maybe else ".")
                    + (estimate(root, plan) if root else "") + " Approve only if you agreed to this cost.")
+        if sub == "repro":
+            plan = names[0] if names else ""
+            each = estimate(root, plan).replace(" can cost up to", ": each run can cost up to") if root else ""
+            decide("ask", "agent-testbench: `testbench repro --approve` runs a plan several times (--times, default "
+                          "2), and the total of those runs is above the approval threshold, so it costs what that "
+                          "many runs cost." + each + " Approve only if you agreed to that total.")
         if sub == "watch":
             plan = names[0] if names else ""
             decide("ask", "agent-testbench: `testbench watch --approve` runs a plan that costs money again every time "

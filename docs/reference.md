@@ -300,7 +300,7 @@ between runs (put downloaded weights there); `python` and `testbench` are the en
 ## Expectations
 
 The common ones are below; every expectation - `junit:`, `metrics:`, `numbers:`, `strategy:`, `gpu:`, `image:`,
-`duration:`, tolerances (`"~= 0.93 +- 0.01"`) and ranges (`"between 0.8 and 0.95"`) - with what its failure looks
+`deterministic:`, `duration:`, tolerances (`"~= 0.93 +- 0.01"`) and ranges (`"between 0.8 and 0.95"`) - with what its failure looks
 like is in [expectations.md](expectations.md).
 
 ```yaml
@@ -405,6 +405,8 @@ testbench history PLAN [-n N] [--json]     # each run's outcome and every number
 testbench ui [--open]                      # .testbench/ui/index.html: plans, trend lines, runs, loops, sessions
 testbench share [RUN] --to DEST [--dry-run]   # the run as a page others open and check (docs/share.md)
 testbench verify --from URL_OR_FOLDER      # a shared run, with no project: files, manifest and recorded hashes
+testbench repro PLAN [--times N] [--on B]  # run it again; is the evidence the same, and if not, why (docs/reproducibility.md)
+testbench repro --compare A B [C...]       # runs that exist: ids, run folders, shared bundles
 ```
 
 ## Prices
@@ -439,6 +441,8 @@ work/             on local, the copy of the project a `workdir: copy` plan runs 
 `.testbench/ledger.jsonl` records every launch (worst case) and finish (estimated cost);
 `.testbench/holdout.jsonl` every opening of the sealed holdout (run, time, commit, the data's sha256 and last time);
 `.testbench/NOTES.md` is the lab notebook (`testbench note`), the one file there worth committing.
+`.testbench/repro/<id>/` holds each `testbench repro`: `repro.json` (the comparison as data) and `repro.md` (in
+words); `testbench ui` lists them.
 `.testbench/check.json` is what `testbench check` found in a folder with no testbench.yaml, the plans `init`
 would write there; commands in that folder read their plans from it (only plans that run on this machine, with
 the default budget) until a testbench.yaml takes over.
@@ -453,8 +457,8 @@ rnu smoke`: did you mean `testbench run smoke`?), words in the wrong order get t
 run`: the command comes first), a mistyped plan, session, recipe, client or example name gets the closest one, and
 so does a file that is not there (`testbench lint trian.ipynb`: did you mean `testbench lint train.ipynb`?). A value
 an option cannot take gets an example of that option. `--json` and `--format json` are the same on every command
-with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `check`, `plans`, `runs`, `spend`,
-`loop status`); every session command takes `-s NAME` (also `--session NAME`). The JSON forms of `plans`, `runs`,
+with a JSON form (`report`, `diff`, `repro`, `history`, `estimate`, `exec`, `rescue`, `check`, `plans`, `runs`,
+`spend`, `loop status`); every session command takes `-s NAME` (also `--session NAME`). The JSON forms of `plans`, `runs`,
 `spend` and `loop status` are what editors read ([the VS Code extension](vscode.md)): `plans --json` says for each
 plan whether it may launch now (`allowed`, `needs_approval` or `refused`, with testbench's message), `runs --json`
 gives each run's folder, and `loop status --json` only reads - it never keeps or reverts a try whose run has ended,
@@ -504,6 +508,8 @@ which `loop status` does.
 | `share [RUN] --to DEST [--dry-run] [--yes] [--keep-paths]` | publish a run's proof as a static page others open and check, in DEST/RUN/: a folder, `git:BRANCH/FOLDER` (committed, never pushed) or `s3://BUCKET/PREFIX` (the aws CLI); lists every file first and needs a person's yes ([share.md](share.md)) | 0 published or listed, 1 it failed or the evidence changed |
 | `badge [PLAN] [-o SVG] [--link URL]` | a README badge of the plan's latest run: checks passed, failed, or no runs | 0 |
 | `diff [A B \| PLAN \| RUN] [--json]` | what changed between two runs | 0 |
+| `repro PLAN [--times N] [--on BACKEND]... [--approve] [--wait SECONDS] [--json]` | run a plan N times (default 2; each run in a fresh copy of the project, priced on the backend it goes to, the total checked and approved once) and compare the runs' evidence file by file: identical, differs (how, and why: times, paths, ids, order, encoding, rounding, a seed, the platform) or missing ([reproducibility.md](reproducibility.md)) | 0 the outputs are the same and every run passed, 1 they are not or a run did not pass, 3 a run is still going after `--wait` |
+| `repro --compare RUN RUN [RUN...] [--json]` | the same comparison for runs that exist: ids, run folders, or bundles `share` made (a folder or URL) | 0 the outputs are the same and every run passed, 1 they are not or a run did not pass |
 | `history PLAN [-n N] [--json]` | a plan's runs over time | 0 |
 | `export [RUN\|all] [--to mlflow\|wandb\|csv\|jsonl]` | a run in a tracker or a file | 0, 1 a target failed |
 | `numbers [READER [PATH...]] [--opt KEY=VALUE] [--json]` | the named numbers a metric reader (json, csv, junit, trading or an installed one) finds in evidence files, to write rules with; no READER: the readers and the files each reads ([metric readers](plugins.md#metrics)) | 0 (2: a file is missing or refused) |

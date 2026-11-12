@@ -32,6 +32,7 @@ finding ("accuracy 0.71, wanted >= 0.9") rather than a bare FAIL. A check that m
       gpu: {busy_pct: ">= 50", max_mem_mib: "<= 15000"}
       image:
         outputs/plot.png: {like: golden/plot.png, max_diff: 0.02}
+      deterministic: [out/model.json, "out/*.csv"]    # byte for byte what the last passing run on this code made
       duration: {minutes: "<= 5"}
       mock_calls:                            # calls the step made to the mock clients (mocks: on the step)
         anthropic: {calls: "<= 5", output_tokens: "<= 2000"}       # refused: 0 unless said otherwise
@@ -39,7 +40,7 @@ finding ("accuracy 0.71, wanted >= 0.9") rather than a bare FAIL. A check that m
 
 Any rule can also be a tolerance ("~= 0.93 +- 0.01", "~= 100 +- 5%") or an inclusive range ("between 0.8 and 0.95").
 
-Every kind of check is a plug-in of kind "checks" (agent_testbench.plugins), the fifteen above included, so a package
+Every kind of check is a plug-in of kind "checks" (agent_testbench.plugins), the sixteen above included, so a package
 can add one that works exactly like a built-in (docs/plugins.md#checks). `strategy:` lives in the trading pack, a layer:
 the registry names it ("agent_testbench.trading.checks:StrategyCheck") and imports it when checks are first used.
 
@@ -98,9 +99,9 @@ RULE = re.compile(r"^\s*(>=|<=|!=|==|>|<)\s*(.+?)\s*$")
 NEAR = re.compile(r"^\s*~=\s*(\S+?)\s*(?:\+-|\+/-|±)\s*(\S+?)\s*(%?)\s*$")
 BETWEEN = re.compile(r"^\s*between\s+(\S+)\s+and\s+(\S+)\s*$", re.I)
 KINDS = ("exit_code", "no_errors", "files", "json", "text", "media", "web", "junit", "metrics", "numbers", "strategy",
-         "gpu", "image", "duration", "mock_calls")       # the built-ins, in the order testbench.yaml is validated
+         "gpu", "image", "duration", "mock_calls", "deterministic")    # the built-ins, in the order they are validated
 RUN_ORDER = ("exit_code", "no_errors", "files", "json", "text", "media", "web", "junit", "metrics", "numbers",
-             "strategy", "image", "gpu", "duration", "mock_calls")    # ... and the order their findings come in
+             "strategy", "image", "deterministic", "gpu", "duration", "mock_calls")    # ... and their findings come in
 STRATEGY = "agent_testbench.trading.checks:StrategyCheck"           # a layer's built-in: imported by name, when used
 NUMBERS_KEYS = ("reader", "files", "options", "rules")
 NUMBERS_EXAMPLE = '{reader: trading, files: out/equity.csv, rules: {sharpe: ">= 1"}}'
@@ -712,6 +713,28 @@ class DurationCheck(Check):
             add(f"duration {key} {rule}", ok, detail)
 
 
+class DeterministicCheck(Check):
+    """Files that must be byte for byte what the latest passing run of the plan on the same code (commit and
+    uncommitted changes) and data made. runs.launch puts that run's hashes in the value the step gets
+    (repro.with_reference: {files, against, none}); the files are kept as the step's artifacts, so each run is the
+    next one's reference. The comparison and its words are repro.py's (a layer, loaded only for steps that name it)."""
+    name, example = "deterministic", ["out/model.json", "out/*.csv"]
+
+    def validate(self, where, value):
+        if not isinstance(value, list) or not value or not all(isinstance(f, str) and f.strip() for f in value):
+            raise ConfigError(f"`{where}` is a list of files (paths or globs) that must be byte for byte the same in "
+                              "every run of the plan on the same code and data, e.g. [out/model.json, \"out/*.csv\"]")
+        for f in value:
+            parts = f.replace("\\", "/").split("/")
+            if f.startswith(("/", "\\", "~")) or re.match(r"[A-Za-z]:", f) or ".." in parts:
+                raise ConfigError(f"`{where}`: {f!r} is compared with the same file in earlier runs, so it is a path "
+                                  "inside the folder the step runs in, e.g. out/model.json")
+
+    def check(self, value, *, workdir, result, add):
+        from .repro import check_deterministic          # a layer: only for steps that name it
+        check_deterministic(value, workdir=workdir, result=result, add=add)
+
+
 class MockCallsCheck(Check):
     name, keys, default = "mock_calls", MOCK_KEYS, None     # a step with mocks: refuses no call unless said otherwise
     example = {"anthropic": {"calls": "<= 5", "output_tokens": "<= 2000"}}
@@ -734,7 +757,7 @@ class MockCallsCheck(Check):
 
 BUILTIN = {c.name: c for c in (ExitCodeCheck, NoErrorsCheck, FilesCheck, JsonCheck, TextCheck, MediaCheck, WebCheck,
                                JunitCheck, MetricsCheck, NumbersCheck, GpuCheck, ImageCheck, DurationCheck,
-                               MockCallsCheck)}     # this module's; strategy is the trading pack's (STRATEGY)
+                               MockCallsCheck, DeterministicCheck)}     # this module's; strategy is the trading pack's (STRATEGY)
 REFS = {name: STRATEGY if name == "strategy" else f"{__name__}:{BUILTIN[name].__name__}" for name in KINDS}
 
 

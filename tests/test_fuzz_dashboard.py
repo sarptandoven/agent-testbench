@@ -49,7 +49,8 @@ def watched(tmp_path_factory):
 
 PARTS = ["", ".", "..", "...", "runs", "RUN", "steps", "STEP", "log.txt", "state.json", "plan.json", "report.json",
          "report.md", "report.html", "state-link.txt", "plan-link.txt", "out-link.txt", "dir-link", "connection.json",
-         "sessions", "main", "ledger.jsonl", "ui", "index.html", "loops", "live", "overview", ".testbench", "outside.txt",
+         "sessions", "main", "ledger.jsonl", "ui", "index.html", "loops", "repro", "repro.md", "repro.json", "live",
+         "overview", ".testbench", "outside.txt",
          "%2e%2e", "%2E%2E%2F", "..%2f", "%2F", "%5c", "..\\", "C:", "\x00", "%00", "~", "dashboard.js", "p", "x" * 300]
 
 
@@ -72,7 +73,7 @@ def test_the_dashboard_serves_only_its_pages_reports_and_evidence(watched, parts
     if hasattr(body, "read_bytes"):
         real = body.resolve()
         rel = real.relative_to(dash.tb.resolve())                # raises if outside .testbench
-        assert rel.parts[0] in ("ui", "runs", "loops") and real.name not in ("state.json", "plan.json"), rel
+        assert rel.parts[0] in ("ui", "runs", "loops", "repro") and real.name not in ("state.json", "plan.json"), rel
         assert "sessions" not in rel.parts and not real.name.startswith("ledger"), rel
         text = real.read_bytes().decode("utf-8", "replace")
     else:

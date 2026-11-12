@@ -111,6 +111,9 @@ def launch(root: Path, cfg: dict, plan_name: str, approve: bool = False, foregro
         except C.ConfigError as exc:
             raise LaunchRefused(str(exc)) from None
         plan = sealed["plan"]
+    if any("deterministic" in (s.get("expect") or {}) for s in plan["steps"]):     # each such step is given the
+        from . import repro                                                        # hashes of the run it compares with
+        plan = repro.with_reference(root, plan_name, plan, source, sealed["data"] if sealed else None)
     with budget.launching():
         opened, refused = (dataseal.holdout(root, cfg, plan_name) if sealed and sealed["opening"] else (None, None))
         ok, message, est = (False, refused, {}) if refused else budget.check_launch(cfg, plan_name, approve)

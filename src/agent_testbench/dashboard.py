@@ -231,7 +231,8 @@ class Dashboard:
             return n >= 2 and ((parts[0] == "ui" and n == 2)
                                or (parts[0] == "runs" and n == 3 and parts[2] in REPORTS)
                                or (parts[0] == "runs" and n >= 4 and parts[2] == "steps")
-                               or (parts[0] == "loops" and n == 3 and parts[2] in ("report.html", "report.md")))
+                               or (parts[0] == "loops" and n == 3 and parts[2] in ("report.html", "report.md"))
+                               or (parts[0] == "repro" and n == 3 and parts[2] in ("report.html", "repro.md")))
         if not allowed(seg):
             return None
         try:

@@ -488,6 +488,28 @@ def cmd_diff(a):
     return 0
 
 
+def cmd_repro(a):
+    from . import repro as RP
+    try:
+        if a.compare:
+            if a.plan or a.times or a.on or a.approve:
+                print("testbench: --compare compares runs that exist; PLAN, --times, --on and --approve start new "
+                      "ones. Use one or the other: `testbench repro PLAN` or `testbench repro --compare A B`",
+                      file=sys.stderr)
+                return 2
+            return RP.main_compare(a.compare, as_json=a.json or a.format == "json")
+        if not a.plan:
+            print("testbench: name a plan to run again (`testbench repro PLAN`), or runs to compare (`testbench repro "
+                  "--compare A B`)", file=sys.stderr)
+            return 2
+        root, cfg = _root_cfg()
+        return RP.repro(root, cfg, a.plan, times=a.times, on=a.on, approve=a.approve, wait=a.wait,
+                        as_json=a.json or a.format == "json")
+    except RP.ReproError as exc:
+        print(f"testbench: {exc}" if not str(exc).startswith(("Refused", "Needs approval")) else str(exc))
+        return exc.code
+
+
 def cmd_watch(a):
     from . import watch as W
     root, cfg = _root_cfg()
@@ -1375,6 +1397,7 @@ GROUPS = {   # `testbench help --all`: every command, in the groups README's Com
         "share": "publish a run's proof as a page anyone can open and check",
         "badge": "a README badge (SVG) of a plan's latest run",
         "diff": "what changed between two runs",
+        "repro": "run a plan again, or compare runs: is the evidence the same?",
         "history": "a plan's runs over time, with the numbers its checks found",
         "ui": "every run as a page, or a live dashboard (--serve)",
         "export": "a run to MLflow, W&B, csv or jsonl",
@@ -1483,6 +1506,11 @@ diff
   testbench diff                         # the latest run and the one before it
   testbench diff smoke                   # the plan's last two finished runs
   testbench diff last~1 last --json
+repro
+  testbench repro smoke                  # run it twice here, then compare
+  testbench repro train --on local --on docker   # once on each
+  testbench repro --compare last~1 last  # two runs that exist
+  testbench repro --compare ./public/20261101-091600-smoke last
 history
   testbench history smoke
   testbench history smoke -n 5 --json
@@ -1832,6 +1860,35 @@ def build_parser() -> argparse.ArgumentParser:
                                                           "before it")
     _json(p, "the comparison")
     p.set_defaults(fn=cmd_diff)
+    p = sub.add_parser("repro", help="run a plan again, or compare runs: is the evidence the same, and if not, why?",
+                       description="Run PLAN --times N (default 2), each run a normal launch in a fresh copy of the "
+                                   "project, one after another; then compare every evidence file across the runs by "
+                                   "sha256: identical, differs or missing. A file that differs is read to say how (the "
+                                   "first line, JSON keys and numbers by how much, CSV rows and columns, the mean pixel "
+                                   "difference) and why when it can tell: times or durations, absolute paths, ids, "
+                                   "order, encoding, rounding, a random seed not fixed, the platform. The runs' total "
+                                   "worst case is checked once, before anything starts; above ask_above_usd a person "
+                                   "approves the total with --approve. --compare does the comparison for runs that "
+                                   "exist: run ids, run folders, or bundles `testbench share` made (a folder or a URL). "
+                                   "Kept in .testbench/repro/<id>/. Exit 0 the outputs are the same (byte for byte, or "
+                                   "apart from times, paths, ids, order or encoding) and every run passed, 1 they are "
+                                   "not or a run did not pass, 2 refused (nothing ran), 3 a run is still going after "
+                                   "--wait.")
+    p.add_argument("plan", nargs="?", metavar="PLAN", help=PLAN)
+    p.add_argument("--times", type=_count, metavar="N",
+                   help="how many runs (default 2, or one per --on backend); each is priced and counted")
+    p.add_argument("--on", action="append", default=[], metavar="BACKEND",
+                   help="run on this backend instead of the plan's own (repeatable: the runs take turns, e.g. --on "
+                        "local --on docker)")
+    p.add_argument("--approve", action="store_true",
+                   help="a person approved the total of every run (never set this yourself)")
+    p.add_argument("--wait", type=_number, default=540, metavar="SECONDS",
+                   help="follow each run for at most this many seconds (default 540)")
+    p.add_argument("--compare", nargs="+", metavar="RUN",
+                   help="compare runs that exist instead: run ids (prefixes, last, last~N), run folders, or shared "
+                        "bundles (a folder or URL); the first is the one the others are compared with")
+    _json(p, "the comparison")
+    p.set_defaults(fn=cmd_repro)
     p = sub.add_parser("watch", help="run a plan again whenever the project's files change; free plans only, unless a "
                                      "person approves (--approve), and every run is checked against the budget",
                        description="Run PLAN now, then again whenever the project's files change (polled every "

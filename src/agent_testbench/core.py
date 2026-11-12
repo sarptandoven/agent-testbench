@@ -71,6 +71,7 @@ LAYER_MODULES = (
     "agent_testbench.share", "agent_testbench.badge",
     # work built on runs
     "agent_testbench.loop", "agent_testbench.watch", "agent_testbench.diff", "agent_testbench.rescue",
+    "agent_testbench.repro",
     # setting a project up
     "agent_testbench.scaffold", "agent_testbench.recipes", "agent_testbench.lint", "agent_testbench.selftest",
     # the trading pack: standard files, testbench's own metrics, overfitting statistics

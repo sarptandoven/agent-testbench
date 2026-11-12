@@ -1076,6 +1076,12 @@
             }
           }
         },
+        "deterministic": {
+          "description": "Files (paths or globs) that must be byte for byte what the latest passing run of the plan on the same code and data made, e.g. [out/model.json, \"out/*.csv\"]; the first such run passes and is kept as the reference (docs/reproducibility.md)",
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "pattern": "^(?![/\\\\~])(?![A-Za-z]:)(?!(?:.*[/\\\\])?\\.\\.(?:[/\\\\]|$))\\S"}
+        },
         "duration": {
           "description": "How long the step took: {minutes: \"<= 5\"}",
           "type": ["object", "null"],
