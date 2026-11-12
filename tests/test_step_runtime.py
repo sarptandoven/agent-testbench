@@ -1,8 +1,12 @@
 """A proof record names what each step really ran on: the Python its `python` resolved to (the project's own from
 uvx, uv tool or pipx), the kernel's Python for a notebook, node, go or cargo when the command used them - and from
-a tool environment a notebook's kernel runs on the project's virtualenv when that has ipykernel."""
+a tool environment a notebook's kernel runs on the project's virtualenv when that has ipykernel, and the record's
+`environment` (Python, packages) is that Python's, not testbench's own."""
+import hashlib
+import importlib.util
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -12,7 +16,8 @@ from pathlib import Path
 import nbformat
 import pytest
 
-from agent_testbench import config as C, diff as D, executor as E, notebook as NB, report as R
+from agent_testbench import check as CK, config as C, diff as D, executor as E, notebook as NB, provenance as P, \
+    report as R
 from conftest import cli, make_notebook, write_config
 
 REPORT_SCHEMA = json.loads((Path(C.__file__).parent / "schema" / "report-v1.schema.json").read_text())
@@ -97,18 +102,32 @@ def test_ran_on_line_groups_steps_and_reads_old_reports():
                      {"steps": [{"name": "old", "status": "passed", "runtime": one}]})["environment"]["steps"] == []
 
 
+def site_packages(python: Path) -> Path:
+    site = Path(subprocess.run([str(python), "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+                               capture_output=True, text=True, check=True).stdout.strip())
+    site.mkdir(parents=True, exist_ok=True)
+    return site
+
+
 def make_venv(where: Path, ipykernel: bool) -> Path:
     """A virtualenv with no pip (quick, offline); with ipykernel, the one testbench runs with is put on its path."""
     subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(where)], check=True, capture_output=True)
     python = where / BIN / ("python.exe" if os.name == "nt" else "python")
     if ipykernel:                                        # the folders this Python finds ipykernel and its needs in
-        site = subprocess.run([str(python), "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
-                              capture_output=True, text=True, check=True).stdout.strip()
-        Path(site).mkdir(parents=True, exist_ok=True)
         found = [p for p in sys.path if p and Path(p).is_dir() and Path(p).name in ("site-packages", "dist-packages")]
-        (Path(site) / "testbench-test.pth").write_text("\n".join(found) + "\n")
+        (site_packages(python) / "testbench-test.pth").write_text("\n".join(found) + "\n")
         assert subprocess.run([str(python), "-c", "import ipykernel"], capture_output=True).returncode == 0
     return python
+
+
+def install_fake(python: Path, name: str, version: str) -> None:
+    """A package installed for that Python as importlib.metadata sees one (its dist-info folder; nothing to import)."""
+    site = site_packages(python)
+    for old in site.glob(f"{name}-*.dist-info"):
+        shutil.rmtree(old)
+    (site / f"{name}-{version}.dist-info").mkdir()
+    (site / f"{name}-{version}.dist-info" / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n")
 
 
 @pytest.fixture
@@ -194,6 +213,95 @@ def test_which_python_a_notebook_kernel_runs_on(tmp_path, monkeypatch):
     assert E.kernel_python(root, {"VIRTUAL_ENV": str(tool)})[0] == str(python), "testbench's own is not the project's"
     monkeypatch.setattr(E, "_has_ipykernel", lambda python, environ: False)
     assert E.kernel_python(root, {})[0] is None
+
+
+def python_plan(root: Path, run: str = "python -c pass") -> dict:
+    write_config(root, {"project": "p", "plans": {"smoke": {"steps": [{"name": "py", "run": run, "max_minutes": 1}]}}})
+    return C.load(root)["plans"]["smoke"]
+
+
+def execute(root: Path, plan: dict, run_id: str) -> dict:
+    meta = {"schema_version": 1, "run_id": run_id, "plan": "smoke", "backend": "local"}     # as runs.finalize has it
+    return E.execute_plan(plan, project_dir=root, run_dir=root.parent / run_id, meta=meta)
+
+
+def test_from_a_tool_environment_the_record_is_the_steps_python_and_its_packages(tmp_path, from_uv_tool):
+    root = tmp_path / "proj"
+    root.mkdir()
+    python = make_venv(root / ".venv", ipykernel=False)
+    install_fake(python, "Steps-Only", "1.2.3")
+    assert E._norm(E.steps_python(E.step_path(root))) == E._norm(python)     # Windows: which() says python.EXE
+    rep = execute(root, python_plan(root), "a")
+    assert rep["status"] == "passed", rep
+    pytest.importorskip("jsonschema").validate(rep, REPORT_SCHEMA)
+    env = rep["environment"]
+    assert Path(env["executable"]).parent.resolve() == python.parent.resolve(), "the project's venv, not uv's tool"
+    assert E._norm(rep["steps"][0]["runtime"]["python"]["path"]) == E._norm(python), "the Python the step ran on"
+    assert env["python"] == version_of(str(python))
+    assert env["package_versions"] == {"steps-only": "1.2.3"}, "the venv's packages, not testbench's own"
+    assert env["packages"] == 1 and env["packages_sha256"] == hashlib.sha256(b"steps-only==1.2.3").hexdigest()
+    assert env["testbench"] == {"tool": "uv tool", "python": platform.python_version(), "executable": sys.executable}
+    assert "note" not in env
+    described = REPORT_SCHEMA["properties"]["environment"]["properties"]
+    assert set(env) <= set(described) and set(env["testbench"]) <= set(described["testbench"]["properties"])
+
+    install_fake(python, "Steps-Only", "1.3.0")             # the project upgrades it: testbench diff says so
+    d = D.compare(rep, execute(root, python_plan(root), "b"))
+    assert d["environment"]["packages"]["changed"] == {"steps-only": ["1.2.3", "1.3.0"]}
+    assert "steps-only 1.2.3 -> 1.3.0" in D.render(d), D.render(d)
+
+
+def test_installed_like_any_package_the_record_is_testbenchs_own_python_as_before(tmp_path, monkeypatch):
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    root = tmp_path / "proj"
+    root.mkdir()
+    install_fake(make_venv(root / ".venv", ipykernel=False), "steps-only", "1.2.3")
+    assert E.tool_environment() is None, "these tests run from an ordinary install of testbench"
+    assert E.steps_python(E.step_path(root)) is None, "no tool environment: the record stays about testbench's Python"
+    env = execute(root, python_plan(root), "a")["environment"]
+    from importlib.metadata import distributions         # what environment() recorded before it asked other Pythons
+    found = [((d.metadata["Name"] or "").lower(), d.version) for d in distributions() if d.metadata["Name"]]
+    pkgs = sorted({f"{name}=={version}" for name, version in found})
+    assert env == {"python": platform.python_version(), "implementation": platform.python_implementation(),
+                   "platform": platform.platform(), "machine": platform.machine(), "executable": sys.executable,
+                   "packages": len(pkgs), "packages_sha256": hashlib.sha256("\n".join(pkgs).encode()).hexdigest(),
+                   "package_versions": dict(sorted(found))}, "the same fields with the same values as ever"
+    assert P._ask(sys.executable, None) == (env, ""), "asked with PROBE, a Python records what it records in-process"
+
+
+@pytest.mark.posix
+def test_a_steps_python_that_cannot_say_leaves_testbenchs_own_record_and_a_note(tmp_path, from_uv_tool):
+    root = tmp_path / "proj"
+    (root / ".venv" / "bin").mkdir(parents=True)
+    (root / ".venv" / "pyvenv.cfg").write_text("home = /usr\n")
+    broken = root / ".venv" / "bin" / "python"
+    broken.write_text("#!/bin/sh\necho 'this interpreter is broken' >&2\nexit 3\n")
+    broken.chmod(0o755)
+    rep = execute(root, python_plan(root, "echo hi"), "a")
+    pytest.importorskip("jsonschema").validate(rep, REPORT_SCHEMA)
+    env = rep["environment"]
+    assert env["executable"] == sys.executable and "testbench" not in env, "testbench's own record"
+    assert env["note"] == (f"the Python the steps' `python` resolves to ({broken}) could not say what it has installed "
+                           "(it exited with code 3: this interpreter is broken): the Python and packages recorded "
+                           "here are testbench's own (uv tool), not the steps'")
+    assert "note" in REPORT_SCHEMA["properties"]["environment"]["properties"]
+    assert env["note"] in R.render(rep), "report.md says so too"
+
+
+def test_from_a_tool_environment_check_finds_a_notebooks_imports_in_the_projects_venv(tmp_path, from_uv_tool):
+    root = tmp_path / "proj"
+    root.mkdir()
+    python = make_venv(root / ".venv", ipykernel=True)
+    (site_packages(python) / "venv_only_mod.py").write_text("VALUE = 7\n")
+    step = notebook_step(root, ["import venv_only_mod\nprint('VALUE', venv_only_mod.VALUE)"])
+    assert importlib.util.find_spec("venv_only_mod") is None, "testbench's own Python lacks it"
+    assert CK._notebook_needs(root / "nb.ipynb", root) is None, "its kernel runs on the venv, which has it: not skipped"
+    result, log = run_notebook(root, step)
+    assert result["status"] == "passed" and "VALUE 7" in log, log
+    make_notebook(root / "lacks.ipynb", ["import venv_lacks_mod"])
+    what, how = CK._notebook_needs(root / "lacks.ipynb", root)
+    assert f"({python})" in what and how.startswith(f"{python} -m pip install ") and "agent-testbench" not in how, \
+        f"the venv's Python lacks it: installed there, not with uvx --with ({what}: {how})"
 
 
 def test_reading_a_notebook_without_cell_ids_says_nothing(tmp_path):

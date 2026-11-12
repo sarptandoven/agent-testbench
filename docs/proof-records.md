@@ -5,7 +5,8 @@
      of docs/tour.md. -->
 
 Each report names what it proves: the git commit it ran (and a hash of any uncommitted changes), the Python,
-platform and packages where it ran, and the sha256 of every evidence file, in a format published as a
+platform and packages its steps ran on (from `uvx agent-testbench`, the project's own Python, not uvx's), and the
+sha256 of every evidence file, in a format published as a
 [JSON Schema](../src/agent_testbench/schema/report-v1.schema.json). `testbench verify` says whether the evidence
 still matches, and `testbench diff A B` says what changed between two runs - each checked number old -> new and
 whether that is better by its rule, checks that flipped, evidence that changed, the commits, packages that changed

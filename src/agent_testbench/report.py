@@ -236,6 +236,8 @@ def render(report: dict, run_dir: Path | None = None) -> str:
                   + (f"; Python {env['python']} on {env.get('machine', '?')}" if env.get("python") else "")
                   + (f"; evidence sha256 `{r['evidence_sha256'][:16]}` (`testbench verify` checks it)"
                      if r.get("evidence_sha256") else "") + "."]
+    if env.get("note"):                                  # the steps' Python could not be asked: whose record this is
+        lines += [_line(f"Recorded environment: {env['note']}.")]
     if ran_on_line(r):
         lines += [ran_on_line(r, code=True)]
     lines += [""]

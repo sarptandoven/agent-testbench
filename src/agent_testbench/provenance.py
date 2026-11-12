@@ -66,15 +66,77 @@ def source(root: Path) -> dict | None:
             "changes_sha256": h.hexdigest() if dirty else None, "untracked_files": len(untracked)}
 
 
-def environment() -> dict:
-    """Where the plan's code ran: called by the executor on that machine."""
-    from importlib.metadata import distributions
-    found = [((d.metadata["Name"] or "").lower(), d.version) for d in distributions() if d.metadata["Name"]]
+FACTS = ("python", "implementation", "platform", "machine", "executable")
+# what environment() asks another Python for: the facts it records about the Python running it, found the same way.
+# Only the standard library runs (in an empty folder, so no file of the project's is imported); json escapes every
+# non-ASCII character, so the answer reads the same in any locale.
+PROBE = """import importlib.metadata as m, json, platform, sys
+print(json.dumps({"python": platform.python_version(), "implementation": platform.python_implementation(),
+                  "platform": platform.platform(), "machine": platform.machine(), "executable": sys.executable,
+                  "found": [[(d.metadata.get("Name") or "").lower(), d.version] for d in m.distributions()
+                            if d.metadata.get("Name")]}))
+"""
+PROBE_SECONDS = 60
+
+
+def _record(facts: dict, found: list) -> dict:
     pkgs = sorted({f"{name}=={version}" for name, version in found})
-    return {"python": platform.python_version(), "implementation": platform.python_implementation(),
-            "platform": platform.platform(), "machine": platform.machine(), "executable": sys.executable,
+    return {**{k: facts[k] for k in FACTS},
             "packages": len(pkgs), "packages_sha256": hashlib.sha256("\n".join(pkgs).encode()).hexdigest(),
             "package_versions": dict(sorted(found))}         # so `testbench diff` can name the packages that changed
+
+
+def _own() -> dict:
+    from importlib.metadata import distributions
+    found = [((d.metadata.get("Name") or "").lower(), d.version) for d in distributions() if d.metadata.get("Name")]
+    return _record({"python": platform.python_version(), "implementation": platform.python_implementation(),
+                    "platform": platform.platform(), "machine": platform.machine(), "executable": sys.executable},
+                   found)
+
+
+def _ask(python: str, environ: dict | None) -> tuple[dict | None, str]:
+    """environment()'s record of another Python, by running PROBE with it: (the record, '') or (None, why not)."""
+    import tempfile
+    env = dict(os.environ if environ is None else environ)
+    try:
+        with tempfile.TemporaryDirectory(prefix="testbench-probe-") as empty:
+            p = subprocess.run([python, "-c", PROBE], capture_output=True, text=True, errors="replace", env=env,
+                               cwd=empty, timeout=PROBE_SECONDS, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        return None, f"it did not answer within {PROBE_SECONDS} s"
+    except OSError as exc:
+        return None, f"it could not be started ({exc})"
+    if p.returncode != 0:
+        said = (p.stderr.strip() or p.stdout.strip()).splitlines()
+        return None, f"it exited with code {p.returncode}" + (f": {said[-1].strip()[:300]}" if said else "")
+    try:
+        said = json.loads(p.stdout.strip().splitlines()[-1])         # the last line: a sitecustomize may print too
+        found = [(str(name), None if version is None else str(version)) for name, version in said["found"]]
+        facts = {k: str(said[k]) for k in FACTS}
+        facts["executable"] = str(said["executable"] or python)       # sys.executable is '' if it cannot tell
+    except (ValueError, LookupError, TypeError, AttributeError):
+        return None, "what it printed was not the list of its packages"
+    return _record(facts, found), ""
+
+
+def environment(python: str | None = None, environ: dict | None = None) -> dict:
+    """Where the plan's code ran: called by the executor on that machine. It describes the Python the steps' `python`
+    means: the one running testbench (executor.step_path puts its folder first) - or `python`, when testbench runs
+    from a tool environment of its own (uvx, uv tool, pipx) and the steps' `python` is the project's instead
+    (executor.steps_python). That Python is asked by running PROBE with it (environ: the steps' environment), and
+    `testbench` names the Python testbench itself ran on. If it cannot say, the record is testbench's own and
+    `note` says why."""
+    own = _own()
+    if not python:
+        return own
+    from .executor import tool_environment
+    tool = tool_environment()
+    record, problem = _ask(python, environ)
+    if record is None:
+        return {**own, "note": f"the Python the steps' `python` resolves to ({python}) could not say what it has "
+                               f"installed ({problem}): the Python and packages recorded here are testbench's own "
+                               f"({tool or 'its environment'}), not the steps'"}
+    return {**record, "testbench": {"tool": tool, "python": own["python"], "executable": own["executable"]}}
 
 
 def evidence(run_dir: Path) -> tuple[list[dict], str]:
