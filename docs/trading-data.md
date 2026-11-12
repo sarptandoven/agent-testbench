@@ -7,8 +7,9 @@ all of it.
 
 testbench keeps that test honest. testbench.yaml names the data the plans read; the latest rows can be sealed, so
 that every plan but one runs on a copy of the data without them; the plan that opens them is counted every time it
-does; a walk-forward plan replays the strategy window by window with no row from the future; and every run records
-exactly which bytes its steps saw.
+does; a walk-forward plan replays the strategy window by window with no row from the future; a look-ahead plan
+catches a strategy that uses tomorrow's rows today; a model cutoff flags results a language model may already know;
+and every run records exactly which bytes its steps saw.
 
 ```yaml
 data:
@@ -26,6 +27,9 @@ plans:
         expect: {json: {out/metrics.json: {sharpe: ">= 1", trades: ">= 30"}}}
   walk-forward:                # the same steps once per window: 24 months of history, then 6 months of test
     walk_forward: {data: prices, train: 24mo, test: 6mo, step: 6mo}
+    steps: [...]
+  lookahead:                   # the steps again on data cut earlier: a decision that changes used tomorrow's rows
+    lookahead: {data: prices, output: out/signals.csv, cuts: 4}
     steps: [...]
   holdout:                     # opens the sealed rows: counted, and refused after the first opening
     holdout: {max_opens: 1}
@@ -141,6 +145,125 @@ shows `2 step(s) x 7 walk-forward windows, up to 21 min`), `budget.check` prices
 the steps per window, so every backend's hard stop allows for all of them. Fewer than 2 windows, or more than 200, is
 refused at launch with the fix (`testbench plans` says so too), not at load: telling needs the data's time range,
 which loading testbench.yaml does not read.
+
+## Look-ahead
+
+A strategy that uses tomorrow's data today - a signal on the next day's close, an average centred on today, a
+threshold computed over the whole history, a `shift(-1)` - backtests beautifully and trades badly. Its decisions give
+it away: a decision made with only the rows up to its own day does not change when the later rows are cut off.
+
+```yaml
+plans:
+  lookahead:
+    lookahead:
+      data: prices                 # the data: role to cut (default: the only one)
+      output: out/signals.csv      # where the steps write what the strategy decided
+      cuts: 4                      # how many reruns on data cut earlier (default 4, at most 20)
+    steps:
+      - {name: backtest, run: python backtest.py}
+```
+
+testbench runs the steps once on the role's data as the plan sees it (the rows before the seal), keeps `output`, then
+reruns the steps `cuts` more times, each with the data cut at an earlier time, and compares every decision dated
+strictly before each cut with the plan's own run. Any difference fails the plan, with the first one in words:
+
+```
+look-ahead: AAPL at 2024-03-04 was `1` with data up to 2025-06-30 but was `0` with data before 2024-03-05 - the
+strategy used rows after 2024-03-04 to decide it
+```
+
+A row in one run and not the other is a difference too (`... but had no row with data before ...`); with several
+decision columns the finding names the column (`AAPL at 2024-03-04 (weight) was ...`).
+
+**The output.** A UTF-8 CSV file with a header: a time column (the first of `time`, `date`, `timestamp`,
+`datetime`, ISO 8601 as in the data), a `symbol` column when there are several instruments, and one or more decision
+columns - every other column is one (a signal, a target weight, an order size). Rows are matched by time and symbol
+(and order, when a time and symbol repeat). Every run must write it, even with no decision (the header alone).
+Values compare as text, except numbers: two numbers within a relative 1e-9 of each other (or 1e-12 of 0) are the
+same decision, so a last-digit difference from adding up in another order is not look-ahead; `nan` equals `nan`.
+
+**The cuts.** They are times of rows of the role's data, spread evenly over the times past the first 20% of the
+rows, the last of them at the last time (a rerun cut there lacks only the last rows, so a strategy that peeks only
+near the end is caught too); with 4 cuts, near 40%, 60%, 80% and 100% of the rows. No cut ever leaves fewer than 20% of the rows, and the same data always gives the same cuts: nothing
+random. Data with fewer distinct times past the first 20% than `cuts` is refused at launch, with the fix. A strategy
+that peeks a single row ahead shows it only on the last row before a cut; more cuts catch it more surely.
+
+**Each rerun starts afresh.** Before it, the run's copy of the project is put back as it was before the first step,
+`output` is deleted and the role's files are cut, so nothing a run wrote - a cached model, a file of results computed
+on every row - reaches the next. The steps are not told which run they are in. Each run's `output` is kept as
+evidence in `steps/lookahead/` (`full.csv`, `cut-1.csv`, ...), and each step's `data.json` holds its cut.
+
+**What is not look-ahead.** A rerun's steps are checked only for running (their exit code; for a notebook, no cell
+error) and keep no `artifacts:`: the plan's own run is the one graded, and a rerun on less data may well miss a
+number the full run makes. A rerun that crashes, or writes no `output`, stops the plan and is reported as a crash,
+not as look-ahead:
+
+```
+look-ahead not checked: the rerun with data before 2023-03-14 (cut 1/4) crashed - step `backtest (look-ahead cut 1/4)`
+failed: exited 3 (its log: steps/02-backtest-look-ahead-cut-1-4/log.txt). That is a crash, not look-ahead: make the
+steps run on less data (this rerun had 362 rows), then run the plan again
+```
+
+When the plan's own run writes no `output`, no rerun runs: `look-ahead not checked: the plan's own run wrote no
+out/signals.csv, the file lookahead.output names, so there is nothing to compare. ...`
+
+**Cost.** The steps run 1 + `cuts` times: the worst case counts them all (`testbench plans` shows `1 step(s) x 5
+runs (look-ahead: the plan's run and 4 reruns on data cut earlier)`), `budget.check` prices that, and plan.json holds
+a copy of the steps per rerun (`backtest (look-ahead cut 2/4)`), so every backend's hard stop allows for all of them.
+
+**With the seal.** A look-ahead plan runs in a copy of the project (`workdir: inplace` is refused). It does not open
+the holdout - `lookahead:` with `holdout:` is refused at load, as it would open the sealed rows 1 + `cuts` times - and
+it does not walk forward: `lookahead:` with `walk_forward:` is refused too (every window would run 1 + `cuts` times,
+and the strategy's code is the same in every window). Put `lookahead:` on a plan of its own with the same steps.
+
+The report has a Look-ahead section - each rerun's cut, its rows, the rows compared and the differences, and the
+verdict - and report.json a `lookahead` object (`verdict`: `clean`, `look-ahead`, `crashed` or `not checked`; `ok`;
+`finding`; `runs`, each with `before`, `data_rows`, `status`, `rows_compared`, `differences`, `first_difference`).
+
+## Model cutoff
+
+A strategy that asks a language model about the market is graded on history the model may have read about: a model
+trained on news up to October 2024 knows how 2023 ended. Its backtest on 2023 says nothing about its judgement.
+
+```yaml
+plans:
+  backtest:
+    model_cutoff: 2024-10-01       # the training cutoff of the model the strategy asks
+    steps: [...]
+  strict:
+    model_cutoff: {date: 2024-10-01, require_after: true}
+    walk_forward: {data: prices, train: 12mo, test: 3mo}
+    steps: [...]
+```
+
+`model_cutoff` is your statement (or your agent's) of the last day the model may know - testbench cannot know which
+model a step asks or what it was trained on, and it is not set for you when a step lists `mocks:`. A date means that
+whole day; a time, that instant. The plan needs `data:`, whose dates it is compared with.
+
+Every report of the plan compares the cutoff with its test periods: each walk-forward window's test period, the
+sealed rows for the plan that opens the holdout, else every row the steps saw. A period counts as evidence when it
+starts after the cutoff. When one does not, the report has a warning, not a failure:
+
+```
+**Warning**: results on data up to 2024-06-30 may use what the model already knew (model_cutoff 2024-10-01); only
+windows after the cutoff, or a forward paper record, count as evidence.
+```
+
+Data that runs past the cutoff is still mixed (`results on data from 2020-01-01 to 2025-06-30 include days up to
+model_cutoff 2024-10-01, which the model may already know; ...`). Walk-forward windows are marked one by one
+(`after_cutoff` in report.json; the report lists the windows that count):
+
+```
+**Warning**: results on windows 1/7 to 5/7 (test periods from 2022-01-01 to 2024-07-01) may use what the model
+already knew (model_cutoff 2024-03-15); only windows after the cutoff (windows 6/7 to 7/7 here), or a forward paper
+record, count as evidence.
+```
+
+With `require_after: true`, a run with no test period after the cutoff fails (`... - and model_cutoff.require_after is
+true, so with no test period here starting after the cutoff this run fails. ...`). When every test period is after
+it, the report says so: `model cutoff 2024-10-01: the results here are on data from 2025-01-02 on, after it, which
+the model cannot have been trained on`. report.json has a `model_cutoff` object (`date`, `require_after`, `level`:
+`ok`, `warning` or `failed`, `ok`, `finding`, `periods`).
 
 ## Fingerprints
 

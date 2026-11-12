@@ -261,6 +261,8 @@ def cmd_plans(a):
             print(f"{name}: {hw}, {steps}, worst case not known: {exc}")
             continue
         steps += f" x {est['windows']} walk-forward windows" if est.get("windows") else ""
+        steps += f" x {est['runs']} runs (look-ahead: the plan's run and {est['runs'] - 1} reruns on data cut " \
+                 "earlier)" if est.get("runs") else ""
         what = " - opens the holdout" if plan.get("holdout") else ""
         print(f"{name}: {hw}, {steps}, up to {est['max_minutes']:.0f} min, worst case "
               f"${est['worst_case_usd']:.2f}{what}" + (f" - {plan['description']}" if plan.get("description") else ""))

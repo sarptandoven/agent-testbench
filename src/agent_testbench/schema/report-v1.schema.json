@@ -119,7 +119,65 @@
           "train_rows": {"type": "integer"}, "test_rows": {"type": "integer"},
           "status": {"type": "string", "description": "passed when every step of the window passed; skipped when none ran"},
           "steps": {"type": "array", "items": {"type": "string"}},
-          "data": {"type": ["object", "null"], "description": "what the window's data files held, by role"}
+          "data": {"type": ["object", "null"], "description": "what the window's data files held, by role"},
+          "after_cutoff": {"type": "boolean", "description": "with model_cutoff: the window's test period starts after it, so it counts as evidence"}
+        }
+      }
+    },
+    "lookahead": {
+      "type": ["object", "null"],
+      "description": "a plan with lookahead: its steps run again on the data cut earlier, and the decisions dated before each cut compared with the plan's own run",
+      "required": ["verdict", "ok", "finding"],
+      "properties": {
+        "data": {"type": "string", "description": "the data role that was cut"},
+        "output": {"type": "string", "description": "the decisions file the steps write, relative to the project"},
+        "cuts": {"type": "integer", "description": "how many reruns"},
+        "first": {"type": ["string", "null"], "description": "the first time of the data the plan's own run saw"},
+        "last": {"type": ["string", "null"], "description": "the last time of the data the plan's own run saw"},
+        "rows": {"type": ["integer", "null"], "description": "the rows of that data"},
+        "tolerance": {"type": "object", "description": "numbers this close are the same decision: {relative, absolute}"},
+        "full": {"type": "object", "description": "the plan's own run: output (its decisions, kept under steps/lookahead/) and decisions (rows)"},
+        "runs": {
+          "type": "array",
+          "description": "each rerun, earliest cut first",
+          "items": {
+            "type": "object",
+            "required": ["k", "n", "before", "status"],
+            "properties": {
+              "k": {"type": "integer"}, "n": {"type": "integer"},
+              "before": {"type": "string", "description": "the rerun's data held only the rows before this time"},
+              "data_rows": {"type": "integer", "description": "the rows it held"},
+              "status": {"enum": ["same", "different", "crashed", "skipped", "incomplete"], "description": "same: every decision before the cut matched; different: one did not; crashed: a step failed or the output was missing or unreadable"},
+              "rows_compared": {"type": "integer", "description": "decision rows dated before the cut, in either run"},
+              "differences": {"type": "integer", "description": "rows that differ, or are in one run only"},
+              "first_difference": {"type": ["object", "null"], "description": "the earliest: time, symbol, column, the plan's run's value (full) and the rerun's (cut), and which had no row (missing)"},
+              "output": {"type": ["string", "null"], "description": "its decisions, kept under steps/lookahead/"},
+              "detail": {"type": "string", "description": "why it crashed, in words"}
+            }
+          }
+        },
+        "rows_compared": {"type": "integer", "description": "over every rerun"},
+        "verdict": {"enum": ["clean", "look-ahead", "crashed", "not checked"], "description": "clean: no difference; look-ahead: a decision changed with data after it; crashed: a rerun crashed; not checked: nothing to compare"},
+        "ok": {"type": "boolean", "description": "true only when clean; otherwise the plan fails"},
+        "finding": {"type": ["string", "null"], "description": "the verdict in words, with the first difference"}
+      }
+    },
+    "model_cutoff": {
+      "type": ["object", "null"],
+      "description": "a plan with model_cutoff: whether its test periods start after the training cutoff of the model the strategy asks",
+      "required": ["level", "ok", "finding"],
+      "properties": {
+        "date": {"type": "string", "description": "the last day the model may know, as testbench.yaml states it"},
+        "require_after": {"type": "boolean", "description": "a run with no test period after the cutoff fails"},
+        "level": {"enum": ["ok", "warning", "failed"], "description": "ok: every test period is after it; warning: some results may use what the model knew; failed: none is after it and require_after is true"},
+        "ok": {"type": "boolean"},
+        "finding": {"type": "string", "description": "in words"},
+        "periods": {
+          "type": "array",
+          "description": "the test periods: each window's, the holdout's, or the data's",
+          "items": {"type": "object", "properties": {
+            "what": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"},
+            "after_cutoff": {"type": "boolean", "description": "it starts after the cutoff: it counts as evidence"}}}
         }
       }
     },
@@ -133,6 +191,8 @@
           "kind": {"enum": ["notebook", "run", "web"]},
           "status": {"enum": ["passed", "failed", "timeout", "error"]},
           "dir": {"type": "string", "description": "the step's folder, relative to the run folder"},
+          "window": {"type": "integer", "description": "a walk-forward plan: the window this step ran in"},
+          "lookahead": {"type": "integer", "description": "a look-ahead plan: the rerun this step ran in (none for the plan's own run)"},
           "minutes": {"type": "number"},
           "exit_code": {"type": ["integer", "null"]},
           "error": {

@@ -131,6 +131,8 @@ def render(report: dict, run_dir: Path | None = None) -> str:
     lines += [""]
     if holdout_line(r):
         lines += [holdout_line(r), ""]
+    for finding in plan_findings(r):                     # look-ahead, model_cutoff
+        lines += [finding, ""]
     if r.get("launch_error"):
         lines += ["## Could not start", "", r["launch_error"], ""]
     failing = [s for s in r.get("steps", []) if s["status"] != "passed"]
@@ -185,6 +187,8 @@ def render(report: dict, run_dir: Path | None = None) -> str:
                   f"{_cell(w.get('train_rows'))} / {_cell(w.get('test_rows'))} |" for w in windows]
         lines += ["", "The plan passes only when every window does; window k's data holds only the rows before its "
                       "test end.", ""]
+        lines += [counting_line(r), ""] if counting_line(r) else []
+    lines += lookahead_section(r)
     lines += ["## Steps", "", "| | step | minutes | checks | GPU busy |", "|---|---|---|---|---|"]
     for s in r.get("steps", []):
         checks = s.get("expectations") or []
@@ -248,6 +252,63 @@ def holdout_line(r: dict) -> str:
     return _line(f"**Warning**: the holdout ({what}) was opened {counted(n, 'time')} before this run: results on it "
                  f"are no longer untouched (first opened in run `{first.get('run')}`)" + (
                      f"; holdout.max_opens is {h['max_opens']}" if h.get("max_opens") else "") + ".")
+
+
+LOOK_STATUS = {"same": "PASS", "different": "FAIL", "crashed": "CRASHED", "skipped": "SKIPPED",
+               "incomplete": "CANCELLED"}
+LOOK_CLASS = {"same": "passed", "different": "failed", "crashed": "failed"}
+LOOK_TITLE = {"clean": "none found", "look-ahead": "FOUND", "crashed": "not checked, a rerun crashed",
+              "not checked": "not checked"}
+
+
+def plan_findings(r: dict) -> list[str]:
+    """What a plan-level check found, for the top of a report (markdown): a look-ahead the reruns found, or why they
+    could not tell; and how the results stand against the model's training cutoff."""
+    out = []
+    la, mc = r.get("lookahead"), r.get("model_cutoff")
+    if isinstance(la, dict) and la.get("finding") and not la.get("ok"):
+        out.append(_line(f"**FAIL** - {la['finding']}"))
+    if isinstance(mc, dict) and mc.get("finding"):
+        lead = {"failed": "**FAIL** - ", "warning": "**Warning**: "}.get(mc.get("level"), "")
+        out.append(_line(f"{lead}{mc['finding']}."))
+    return out
+
+
+def counting_line(r: dict) -> str:
+    """With model_cutoff, which walk-forward windows test after it: the ones that count as evidence."""
+    windows = [w for w in r.get("windows") or [] if isinstance(w, dict) and "after_cutoff" in w]
+    mc = r.get("model_cutoff") if isinstance(r.get("model_cutoff"), dict) else {}
+    if not windows:
+        return ""
+    after = [str(w.get("window")) for w in windows if w.get("after_cutoff")]
+    return _line(f"Windows that test after model_cutoff {mc.get('date')}, the ones that count as evidence: "
+                 + (", ".join(after) if after else "none") + ".")
+
+
+def lookahead_section(r: dict) -> list[str]:
+    """The Look-ahead section (markdown): each rerun's cut, the rows compared, and the verdict."""
+    la = r.get("lookahead")
+    if not isinstance(la, dict):
+        return []
+    runs = [x for x in la.get("runs") or [] if isinstance(x, dict)] if isinstance(la.get("runs"), list) else []
+    title = LOOK_TITLE.get(la.get("verdict"), str(la.get("verdict")))
+    if la.get("verdict") == "clean":
+        title += f" ({counted(len(runs), 'rerun')}, {la.get('rows_compared')} rows compared)"
+    tol = la.get("tolerance") if isinstance(la.get("tolerance"), dict) else {}
+    rel = tol.get("relative") if isinstance(tol.get("relative"), (int, float)) else 1e-9
+    out = [f"## Look-ahead: {_line(title)}", "",
+           _line(f"`{la.get('output')}` from the plan's own run ({la.get('data')} up to {la.get('last')}) against "
+                 f"{counted(len(runs), 'rerun')} on the data cut earlier, each compared on the rows dated before its "
+                 f"cut; numbers within a relative {rel:g} of each other are the same decision."), ""]
+    if runs:
+        out += ["| | rerun | data before | data rows | rows compared | differences |", "|---|---|---|---|---|---|"]
+        out += [f"| {LOOK_STATUS.get(x.get('status'), _cell(x.get('status')))} | {x.get('k')}/{x.get('n')} | "
+                f"{_cell(x.get('before'))} | {_cell(x.get('data_rows'))} | {_cell(x.get('rows_compared'))} | "
+                f"{_cell(x.get('differences'))} |" for x in runs]
+        out += [""]
+    if la.get("finding"):
+        out += [_line(la["finding"]), ""]
+    return out
 
 
 def write(run_dir: Path, report: dict) -> None:
@@ -336,6 +397,9 @@ def html_body(report: dict, run_dir: Path) -> str:
     if holdout_line(r):
         out.append(f"<p class={'cancelled' if (r.get('holdout') or {}).get('opened_before') else 'muted'}>"
                    f"{e(holdout_line(r).replace('**', ''))}</p>")
+    for finding in plan_findings(r):                     # look-ahead, model_cutoff
+        tone = "failed" if finding.startswith("**FAIL**") else "cancelled" if finding.startswith("**") else "muted"
+        out.append(f"<p class={tone}>{e(finding.replace('**', ''))}</p>")
     if r.get("launch_error"):
         out += ["<h2>Could not start</h2>", f"<pre>{e(r['launch_error'])}</pre>"]
     for s in [s for s in r.get("steps", []) if s["status"] != "passed"]:
@@ -377,6 +441,22 @@ def html_body(report: dict, run_dir: Path) -> str:
                           f"{e(str(w.get('train_end')))}</td><td>{e(str(w.get('test_start')))} to "
                           f"{e(str(w.get('test_end')))}</td><td>{e(str(w.get('train_rows')))} / "
                           f"{e(str(w.get('test_rows')))}</td></tr>" for w in windows) + "</table></div>"]
+        out += [f"<p>{e(counting_line(r))}</p>"] if counting_line(r) else []
+    la = r.get("lookahead") if isinstance(r.get("lookahead"), dict) else None
+    if la:                                                # markdown's section, as a table
+        text = lookahead_section(r)
+        runs = [x for x in la.get("runs") or [] if isinstance(x, dict)] if isinstance(la.get("runs"), list) else []
+        out += [f"<h2>{e(text[0][3:])}</h2>", f"<p>{e(text[2].replace('`', ''))}</p>"]
+        if runs:
+            out += ["<div class=scroll><table><tr><th></th><th>rerun</th><th>data before</th><th>data rows</th>"
+                    "<th>rows compared</th><th>differences</th></tr>"
+                    + "".join(f"<tr><td class='{LOOK_CLASS.get(x.get('status'), 'muted')}'>"
+                              f"{e(LOOK_STATUS.get(x.get('status'), str(x.get('status'))))}</td>"
+                              f"<td>{e(str(x.get('k')))}/{e(str(x.get('n')))}</td><td>{e(str(x.get('before')))}</td>"
+                              f"<td>{e(str(x.get('data_rows')))}</td><td>{e(str(x.get('rows_compared')))}</td>"
+                              f"<td>{e(str(x.get('differences')))}</td></tr>" for x in runs) + "</table></div>"]
+        if la.get("finding"):
+            out.append(f"<p class={'passed' if la.get('ok') else 'failed'}>{e(_line(la['finding']))}</p>")
     rows = []
     for s in r.get("steps", []):
         checks = s.get("expectations") or []
@@ -464,6 +544,18 @@ def render_junit(report: dict) -> str:
     for name in r.get("skipped", []):
         ET.SubElement(ET.SubElement(suite, "testcase", classname=str(r.get("plan")), name=name), "skipped",
                       message="an earlier step did not pass")
+    for key, name in (("lookahead", "look-ahead"), ("model_cutoff", "model cutoff")):    # the plan's own checks
+        found = r.get(key)
+        if isinstance(found, dict) and found.get("finding"):
+            case = ET.SubElement(suite, "testcase", classname=str(r.get("plan")), name=name, time="0")
+            if not found.get("ok", True):
+                ET.SubElement(case, "failure", message=str(found["finding"])[:500],
+                              type="LookAhead" if key == "lookahead" else "ModelCutoff").text = str(found["finding"])
+            else:
+                ET.SubElement(case, "system-out").text = str(found["finding"])
+            for el in (root, suite):
+                el.set("tests", str(int(el.get("tests")) + 1))
+                el.set("failures", str(int(el.get("failures")) + (not found.get("ok", True))))
     for el in root.iter():                     # colored output (ESC) and other control characters are not XML
         el.text = el.text and NOT_XML.sub("", el.text)
         for k, v in el.attrib.items():
