@@ -213,7 +213,7 @@ def _walk(where: str, wf, data: dict) -> dict:
     role = wf.get("data")
     if role is None and len(data) == 1:
         role = next(iter(data))
-    if role not in data:
+    if not isinstance(role, str) or role not in data:      # a list or a mapping is no role either
         raise ConfigError(f"`{at}.data` names the data to cut windows from: one of {', '.join(data)}"
                           + (f"; there is no {role!r}{near(role, data)}" if role is not None else ""))
     out = {"data": role}
@@ -252,7 +252,7 @@ def _lookahead(where: str, la, data: dict) -> dict:
     role = la.get("data")
     if role is None and len(data) == 1:
         role = next(iter(data))
-    if role not in data:
+    if not isinstance(role, str) or role not in data:
         raise ConfigError(f"`{at}.data` names the data to cut: one of {', '.join(data)}"
                           + (f"; there is no {role!r}{near(role, data)}" if role is not None else ""))
     output = la.get("output")

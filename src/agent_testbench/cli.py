@@ -1033,6 +1033,27 @@ The plan fails: that is the point. The report names the failing test and what it
 Ask your agent to fix it: open {target} in Claude Code with the plugin and ask
   "the tests plan fails: find out why, fix the code (not the tests), and prove it with the plan"
 With Docker running, `testbench run sandbox` runs the same suite in a fresh container with no network."""},
+    "trading": {
+        "about": "a trend-following strategy on made-up daily prices whose last quarter is sealed, a look-ahead bug "
+                 "planted in strategy.py, and plans for the ladder: a backtest with costs, look-ahead, walk-forward, "
+                 "the holdout once, and paper on a mock broker. No network, no keys, no cost",
+        "list": "a trading strategy with a planted look-ahead bug, and the ladder from backtest to paper: fix it",
+        "plan": "lookahead", "plan_about": "the backtest, then four reruns on the data cut earlier: does any decision "
+                                           "change when the future is cut away?",
+        "dir": "trading", "exit": 1, "needs": {},
+        "bug": ("strategy.py", "closes[: i + 2]"),     # the planted line, which `next` names by its number
+        "next": """
+The plan fails: that is the point. The backtest looks superb, and the look-ahead check says why: the strategy decides
+with tomorrow's close. Line {line} of strategy.py hands decide() `closes[: i + 2]`, the closes up to tomorrow's; fix it
+to `closes[: i + 1]`, today's, then in {target}:
+  testbench run lookahead       # no decision changes when the future is cut away
+  testbench run backtest        # costs charged, 30+ round trips, better than buy and hold - honestly this time
+  testbench run walk-forward    # every half-year out of sample, window by window
+  testbench run holdout         # the sealed quarter, once: a second opening is refused
+  testbench run paper           # a rehearsal of the paper rung: the decisions as orders on a mock Alpaca account
+README.md there says what each rung proves, and what none of them can.
+Or open it in Claude Code with the plugin and ask: "the lookahead plan fails: find the look-ahead in strategy.py, fix
+it, and take the strategy up the ladder - paper only, never live money"."""},
 }
 
 
@@ -1077,7 +1098,7 @@ def cmd_demo(a):
         return 2
     shutil.copytree(_example(name), target,
                     ignore=shutil.ignore_patterns(".testbench", "outputs", "__pycache__", ".pytest_cache"))
-    (target / ".gitignore").write_text("outputs/\n__pycache__/\n.pytest_cache/\n")
+    (target / ".gitignore").write_text("outputs/\nout/\n__pycache__/\n.pytest_cache/\n")
     if shutil.which("git"):                          # a repository, so `testbench loop` works there too
         for cmd in (["init", "-q"], ["add", "-A"], ["-c", "user.name=testbench demo", "-c", "user.email=demo@localhost",
                                                     "commit", "-qm", f"{name} demo"]):
@@ -1089,8 +1110,13 @@ def cmd_demo(a):
         print(f"Running its free plan, `{demo['plan']}` ({demo['plan_about']}):\n", flush=True)
         code = subprocess.call([sys.executable, "-m", "agent_testbench", "run", demo["plan"], "--wait", "300"],
                                cwd=target)
-        code = 0 if code == demo["exit"] else (code or 1)   # test-suite's plan fails on purpose
-    print(demo["next"].format(target=target))
+        code = 0 if code == demo["exit"] else (code or 1)   # test-suite's and trading's plans fail on purpose
+    line = "?"
+    if demo.get("bug"):                                  # the planted line, by its number in the copy
+        file, text = demo["bug"]
+        lines = (target / file).read_text(encoding="utf-8").splitlines()
+        line = next((n for n, x in enumerate(lines, 1) if text in x), "?")
+    print(demo["next"].format(target=target, line=line))
     return code
 
 
@@ -1246,7 +1272,7 @@ All of them: https://sarptandoven.github.io/agent-testbench/reference/#commands"
 
 EXAMPLES = """
 selftest
-  testbench selftest                     # ten checks in a temporary folder
+  testbench selftest                     # eleven checks in a temporary folder
   testbench selftest --keep              # and keep that folder and its runs
 init
   testbench init                         # a plan for each thing it finds here
@@ -1383,6 +1409,7 @@ note
 demo
   testbench demo                         # tiny-model, into ./testbench-demo
   testbench demo llm-app                 # a bot tested against the mock SDK
+  testbench demo trading                 # a strategy with a look-ahead bug
   testbench demo --list
 connect
   testbench connect --list               # each client, and what is set up

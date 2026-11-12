@@ -454,7 +454,7 @@ with a JSON form (`report`, `diff`, `history`, `estimate`, `exec`, `rescue`, `ch
 | command | what it does | exit codes besides 2 |
 |---|---|---|
 | **start** | | |
-| `demo [NAME] [DIR]`, `demo --list` | copy an example project to a new folder and run its free plan | 0 the plan did what the example expects (the `test-suite` plan fails on purpose), 1 it did not, 3 still running |
+| `demo [NAME] [DIR]`, `demo --list` | copy an example project to a new folder and run its free plan | 0 the plan did what the example expects (the `test-suite` and `trading` plans fail on purpose), 1 it did not, 3 still running |
 | `check [--plan NAME]... [--json]` | run every plan that is free and needs no approval, and list each other plan with its worst case and `testbench run NAME`; with no testbench.yaml, run the plans `init` would write for what it finds, on this machine, keeping what it found in `.testbench/check.json` (so `report`, `runs`, `verify`, `ui` and `diff` work there); a plan whose tool is missing is skipped with the command that installs it | 0 every plan that ran passed, 1 one failed, 2 nothing to check, 3 still running |
 | `doctor` | what this machine can run; each `no` line says what to do | 0, whatever it found |
 | **prove it with a plan** | | |

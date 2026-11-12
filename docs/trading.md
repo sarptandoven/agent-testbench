@@ -31,6 +31,10 @@ python -m agent_testbench.trading.metrics out/equity.csv out/trades.csv --benchm
 The files and the numbers need nothing but the Python standard library: no numpy, no pandas (pandas DataFrames are
 accepted when pandas is there).
 
+New to it? [Trading with agents safely](trading-safely.md) has the ladder a strategy climbs - backtest with costs,
+look-ahead, walk-forward, the holdout once, paper - what each rung proves and what none can, and `testbench demo
+trading` runs it in seconds.
+
 ## Checking a strategy
 
 The backtest step writes the standard files, and its `strategy:` expectation reads them: testbench computes the

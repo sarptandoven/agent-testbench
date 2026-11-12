@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/sarptandoven/agent-testbench/main/src/agent_testbench/schema/testbench.schema.json
+# A trading strategy, up the ladder: a backtest with costs, no look-ahead, every half-year out of sample, the sealed
+# quarter once, then paper. testbench computes every number from the files strategy.py writes; the strategy never
+# grades itself (docs/trading-safely.md). strategy.py has a planted look-ahead bug: `testbench run lookahead` finds it.
+project: trading
+data:
+  prices:
+    path: data/prices.csv            # time,symbol,close - made-up closes, one row per weekday, 2020-01-01 to 2025-09-30
+    holdout_from: 2025-07-01         # sealed: only the holdout plan sees these rows
+
+plans:
+  backtest:
+    description: every row before the seal, graded by testbench - costs, 30+ round trips, beats buy and hold
+    steps:
+      - name: backtest
+        run: python strategy.py
+        max_minutes: 2
+        artifacts: [out/equity.csv, out/trades.csv]     # evidence: the report's Strategy section and the tear sheet
+        expect:
+          strategy:
+            equity: out/equity.csv               # trades.csv is read next to it; its benchmark column is buy and hold
+            sharpe: ">= 1"
+            max_drawdown: ">= -0.25"
+            beats: buy_and_hold
+            min_trades: 30
+            costs: required
+
+  lookahead:
+    description: the backtest, then 4 reruns on data cut earlier - a decision that changes used the future
+    lookahead: {data: prices, output: out/signals.csv, cuts: 4}
+    steps:
+      - name: backtest
+        run: python strategy.py
+        max_minutes: 2
+        artifacts: [out/equity.csv, out/trades.csv]
+        expect:
+          strategy: {sharpe: ">= 1", max_drawdown: ">= -0.25", beats: buy_and_hold, min_trades: 30, costs: required}
+
+  walk-forward:
+    description: window by window - 24 months of history, then the 6 months it trades; every half-year must hold up
+    walk_forward: {data: prices, train: 24mo, test: 6mo}
+    steps:
+      - name: backtest
+        run: python strategy.py
+        max_minutes: 2
+        expect:
+          strategy:
+            total_return: ">= -0.1"              # no half-year loses more than 10%
+            max_drawdown: ">= -0.15"
+            min_trades: 2                        # a half-year holds a few round trips; the whole history needs 30
+            costs: required
+
+  holdout:
+    description: once, on the sealed quarter, by rules set before it opens - a second opening is refused
+    holdout: {max_opens: 1}
+    steps:
+      - name: backtest
+        run: python strategy.py
+        env: {TRADE_FROM: "2025-07-01"}
+        max_minutes: 2
+        artifacts: [out/equity.csv, out/trades.csv]
+        expect:
+          strategy: {total_return: ">= -0.1", max_drawdown: ">= -0.15", min_trades: 2, costs: required}
+
+  paper:
+    description: a rehearsal of the paper rung - the same decisions as orders on a mock Alpaca paper account,
+      day by day through the quarter before the seal; it proves the order code, not an edge
+    steps:
+      - name: paper account
+        run: python paper.py --days 65
+        env: {ALPACA_API_KEY: rehearsal, ALPACA_SECRET_KEY: rehearsal}   # any text: the mock, like the SDK, wants keys
+        mocks:                               # testbench's mock alpaca package: nothing reaches Alpaca
+          alpaca: {prices: data/prices.csv, now: 2025-04-01, advance_every: 8, cash: 10000, fee_usd: 1, slippage_bps: 5}
+        max_minutes: 2
+        artifacts: [out/paper/equity.csv, out/paper/trades.csv]
+        expect:
+          mock_calls:
+            alpaca: {orders: "<= 20", max_order_value: "<= 10000", live: 0}   # and refused: 0, always
+          strategy:
+            equity: out/paper/equity.csv         # the paper record, read like a backtest's files
+            min_trades: 0                        # a quarter of paper trading starts a record; it proves no edge
+            costs: required

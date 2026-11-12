@@ -36,7 +36,7 @@ plans:
     steps: [...]
 ```
 
-[examples/sealed-backtest](../examples/sealed-backtest) is a project set up this way.
+[examples/trading](../examples/trading) is a project set up this way (`testbench demo trading`).
 
 ## data:
 

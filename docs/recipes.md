@@ -74,9 +74,15 @@ Worst cases at the built-in prices (`testbench prices`); start-up minutes are pr
 | [go-test](#go-test) | `go-tests`, `go-sandbox` | local, docker, no network | free |
 | [cargo-test](#cargo-test) | `cargo-tests`, `cargo-sandbox` | local, docker, no network | free |
 | [playwright-ts](#playwright-ts) | `e2e` | local | free |
+| [trading-backtest](#trading-backtest) | `backtest`, `lookahead`, `walk-forward`, `holdout` | local | free |
+| [vectorbt-strategy](#vectorbt-strategy) | `vbt-backtest`, `vbt-lookahead`, `vbt-walk-forward`, `vbt-holdout` | local | free |
+| [freqtrade-strategy](#freqtrade-strategy) | `ft-backtest`, `ft-lookahead`, `ft-walk-forward`, `ft-holdout` | local | free |
+| [alpaca-paper](#alpaca-paper) | `paper-rehearsal`, `paper` | local (the mock broker), local (Alpaca's paper API) | free |
 
 The plan names differ between recipes, so any of them combine, except that pytorch-train and ssh-gpu-box are the
-same ladder on different machines. A testbench.yaml has one `docker:` section: combine docker-sandbox or two of the
+same ladder on different machines, and trading-backtest, vectorbt-strategy and freqtrade-strategy the same ladder for
+different frameworks: each has a plan that opens the holdout, and one plan per project may, so `init --add` refuses
+a second one. A testbench.yaml has one `docker:` section: combine docker-sandbox or two of the
 language recipes and the first one's image is kept (init prints the other's), so the second's sandbox plan needs
 an image with both.
 
@@ -280,14 +286,73 @@ should fail. It has no docker plan: the browsers need Playwright's own image (`m
 the header says what to add to it. For a page with no Playwright tests of its own, use [web-app](#web-app).
 **Costs** nothing.
 
+### Trading strategies
+
+testbench is not a broker, a signal service or investment advice, and it never picks a strategy: these recipes check
+the claims a backtest makes, rung by rung, from files the backtest writes, and 0.3 stops at paper trading ([Trading
+with agents safely](trading-safely.md)). Each strategy recipe brings a `data:` section that names the prices and seals
+their latest rows, and four plans:
+
+- the **backtest**, on every row before the seal, graded by `strategy:` - testbench's own numbers from the standard
+  files ([Trading](trading.md#the-files)), with fees or slippage charged, 30+ round trips and `beats: buy_and_hold`;
+- **look-ahead**: the backtest again on the data cut earlier, 4 times; a decision in `out/signals.csv` that changes
+  when the rows after it are cut away fails the plan;
+- **walk-forward**: the steps once per window (24 months of history, 6 to trade), each with only the rows before its
+  end, and every window must hold up;
+- the **holdout**: once, on the sealed rows no other plan saw, by rules written before it opens; a second opening is
+  refused ([Sealed data](trading-data.md)).
+
+`testbench recipes` gives a walk-forward plan's time per window: its windows come from the data, which a recipe does
+not ship (`testbench plans` counts them once it is there).
+
+#### trading-backtest
+
+**Proves** the ladder above for any backtest that writes the standard files: plain pandas, backtrader, LEAN,
+NautilusTrader ([Writing the files from a framework](trading.md#writing-the-files-from-a-framework) has a snippet for
+each). [examples/trading](../examples/trading) is a project made to it (`testbench demo trading`). **Adapt it**: the
+prices file and `holdout_from`, the backtest command, the bar (`sharpe`, `max_drawdown`), the windows, and what a
+window and the holdout must at least do. The backtest reads `TESTBENCH_DATA_PRICES`, trades from
+`TESTBENCH_TEST_START` or `TRADE_FROM` when set, and writes `out/signals.csv` with the signal's number, not only
+the position it gives: a number changes on every peek ahead, a 0 or 1 only when it flips. **Costs** nothing.
+
+#### vectorbt-strategy
+
+**Proves** the same ladder for a `vbt.Portfolio`, with testbench's numbers in place of `pf.stats()`. The header shows
+the lines that write the files from `pf.orders` and `pf.value()`, and the signals from the indicator, the entries and
+the exits. **Adapt it**: as trading-backtest, and install vectorbt where the step's `python` is. **Costs** nothing.
+
+#### freqtrade-strategy
+
+**Proves** the same ladder for a freqtrade `IStrategy`. freqtrade reads its own data folder, which the seal does not
+cut, so the step's script first writes the cut candles there from `TESTBENCH_DATA_PRICES` (keep your candles in
+`data/candles.csv`), runs `freqtrade backtesting` with `--timerange` from `TESTBENCH_TEST_START` or `TRADE_FROM`, and
+writes the standard files from its results; the signals leave out exits forced at the end of the data, which a cut
+run forces where the full run did not. The freqtrade snippet was not run against freqtrade: check its files with
+`testbench numbers trading` first. **Costs** nothing.
+
+#### alpaca-paper
+
+**Proves**, in `paper-rehearsal`, that a bot on alpaca-py reads the bars, decides and places its orders day by day on
+testbench's mock Alpaca paper account (`mocks: alpaca`, its clock walking through a prices file): no more orders and
+none larger than you allow, nothing refused, no live account, and its record graded like a backtest - free, offline,
+seconds, and proof of the order code, not of an edge. `paper` runs the same bot once a day against Alpaca's paper
+API, with the keys by name (`secrets: [ALPACA_API_KEY, ALPACA_SECRET_KEY]`), and checks that the account it reached
+is a paper one (Alpaca numbers them PA...). Live trading is not part of 0.3: no recipe, plan or mock sends a live
+order, and the mock refuses `paper=False`. [examples/trading/paper.py](../examples/trading/paper.py) is a bot made to
+it. **Adapt it**: the bot's command, the rehearsal's prices, first day and length, the order bounds, the key names.
+`init` refuses it until the rehearsal's prices file is in the project. **Costs** nothing; `paper` needs the network
+to reach Alpaca and a paper account.
+
 ## How the recipes are tested
 
 `tests/test_recipes.py` loads every recipe as a config under init's header and checks that the costs its header
-states are its worst cases; combines all of them in one file; adds them to existing files without changing a line;
-and runs every plan that runs on this machine - `tests`, `notebook-smoke`, `smoke`, `box-smoke`, `finetune-smoke`,
-`eval-quick`, `eval-full`, `pipeline-sample`, `ui`, and the docker sandbox's two plans - on a tiny project made to
-each recipe's contract, plus an improvement loop on `eval-quick`'s score. The Modal, Colab and ssh plans are checked
-as configuration only.
+states are its worst cases; combines them in one file (one strategy recipe of the three); adds them to existing files
+without changing a line; and runs every plan that runs on this machine - `tests`, `notebook-smoke`, `smoke`,
+`box-smoke`, `finetune-smoke`, `eval-quick`, `eval-full`, `pipeline-sample`, `ui`, the docker sandbox's two plans,
+trading-backtest's four and alpaca-paper's `paper-rehearsal` - on a tiny project made to each recipe's contract (for
+the trading ones, examples/trading's prices and strategy), plus an improvement loop on `eval-quick`'s score. The
+Modal, Colab and ssh plans, the vectorbt and freqtrade ladders and the `paper` plan against Alpaca are checked as
+configuration only.
 
 `tests/test_recipes_languages.py` checks that each language recipe's Dockerfile starts from pinned official images
 and installs what testbench needs in a container, and that init's plan for each language runs its runner the way

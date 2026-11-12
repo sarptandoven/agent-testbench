@@ -645,9 +645,9 @@ The same as a built-in one, and the same rules hold for it, checked in code when
 
 - **A header comment.** Its first line is `# Recipe NAME: what it is for` (the line `testbench recipes` shows), then
   `Proves:` (what passing shows), `FILL IN:` (what only the person knows) and `Costs:` (what it can cost).
-- **Sections, then plans.** Any of `sessions:`, `modal:`, `colab:`, `docker:`, `ssh:` (each once), then `plans:`
-  with at least one plan; each top-level key unquoted at the start of its line and everything under it indented, so
-  the recipe can be added to a testbench.yaml as text, comments and all.
+- **Sections, then plans.** Any of `sessions:`, `modal:`, `colab:`, `docker:`, `ssh:`, `data:` (each once), then
+  `plans:` with at least one plan; each top-level key unquoted at the start of its line and everything under it
+  indented, so the recipe can be added to a testbench.yaml as text, comments and all.
 - **Never `budget:`, `pricing:` or `guard:`.** They stay the person's. A recipe that sets one does not load:
   `testbench recipes` lists it under "Installed but not loaded" with the reason, and nothing from it is ever written.
 - **`# FILL IN` on each value only the person knows**: a command's arguments, a path, the number that means
@@ -664,11 +664,11 @@ refused with what to do; a built-in recipe's name cannot be taken by a plug-in (
 1. It reads by the rules above (`recipes.parse`).
 2. Its header has the first line, `Proves:`, `FILL IN:` and `Costs:`, and its lines to fill in are marked.
 3. Its plans load through config under the header `testbench init` writes, as `init --recipe` checks them (the
-   notebooks it names stand in for the project's own).
+   notebooks it names, and the files its mocks read, stand in for the project's own).
 4. Every plan's worst case is a number of dollars within the default `budget.max_run_usd` ($2.00), so nothing in it
-   is refused as it ships.
+   is refused as it ships (a walk-forward plan, whose windows its data decides, at the most windows a launch allows).
 
-The 14 built-in recipes keep it (tests/test_recipes_plugins.py checks each).
+The 18 built-in recipes keep it (tests/test_recipes_plugins.py checks each).
 
 ### A recipe made in Python
 

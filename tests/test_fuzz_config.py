@@ -84,8 +84,9 @@ def test_a_real_config_with_values_changed_loads_or_says_which_field(machine_lim
         if not [p for p in paths(raw) if p]:
             break
         where = data.draw(st.sampled_from([p for p in paths(raw) if p]))
-        try:
-            put(raw, where, data.draw(values), data.draw(st.sampled_from(["set", "set", "delete", "rename"])))
+        try:                                              # a copy: ODD's lists and dicts are shared between draws, and
+            put(raw, where, copy.deepcopy(data.draw(values)),     # a later change inside one would make a cycle
+                data.draw(st.sampled_from(["set", "set", "delete", "rename"])))
         except (KeyError, IndexError, TypeError):
             pass                                          # an earlier change took the parent away
     try:

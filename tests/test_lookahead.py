@@ -327,6 +327,10 @@ def test_too_little_data_for_the_cuts_is_refused_at_launch(tmp_path):
     ({"p": {**LOOK, "lookahead": {"output": "s.csv", "cut": 3}}}, True, "has no 'cut' (did you mean cuts?)"),
     ({"p": {**LOOK, "lookahead": {"output": "s.csv", "data": "price"}}}, True,
      "names the data to cut: one of prices; there is no 'price' (did you mean prices?)"),
+    ({"p": {**LOOK, "lookahead": {"output": "s.csv", "data": []}}}, True,      # not a name, and not a crash
+     "`plans.p.lookahead.data` names the data to cut: one of prices; there is no []"),
+    ({"p": {**LOOK, "lookahead": None, "walk_forward": {"data": {}, "train": "6mo", "test": "3mo"}}}, True,
+     "`plans.p.walk_forward.data` names the data to cut windows from: one of prices; there is no {}"),
     ({"p": {**LOOK, "lookahead": "out/s.csv"}}, True, "is {data, output, cuts}"),
     ({"p": LOOK}, False, "cuts a data file by its time column; name the data first"),
     ({"p": {**LOOK, "workdir": "inplace"}}, True, "this plan's steps see the data of each look-ahead rerun cut"),

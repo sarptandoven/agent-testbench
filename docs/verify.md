@@ -18,7 +18,7 @@ testbench --version                             # agent-testbench 0.2.0
 testbench selftest
 ```
 
-It builds a small project in a temporary folder and checks ten things, one line each. Your `~/.testbench` is not
+It builds a small project in a temporary folder and checks eleven things, one line each. Your `~/.testbench` is not
 touched: it uses empty limits and an empty ledger of its own. What you should see:
 
 ```
@@ -29,12 +29,16 @@ touched: it uses empty limits and an empty ledger of its own. What you should se
   ok       a budget that is not a number (NaN) is refused
   ok       a live kernel keeps running and answers
   ok       an LLM app runs against the mock SDK, with no key and no network
+  ok       a strategy that decides with tomorrow's data is caught
   ok       a loop keeps a better try and reverts a worse one
   ok       an HTML report is written
   ok       the MCP server answers
 
-10 checks: 10 ok, 0 failed, 0 skipped, in 21 s.
+11 checks: 11 ok, 0 failed, 0 skipped, in 27 s.
 ```
+
+The strategy check runs a ten-line strategy that reads tomorrow's close by an off-by-one slice through a
+[look-ahead plan](trading-data.md#look-ahead) - the plan must fail - then the fixed one, which must pass.
 
 A failed line prints what went wrong and keeps the folder (`testbench selftest --keep` keeps it anyway).
 

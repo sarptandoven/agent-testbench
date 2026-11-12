@@ -485,7 +485,9 @@ def tune_with_a_loop(plan: Plan, metric: Metric) -> str:
 
 def check_a_strategy(plan: Plan = "") -> str:
     plan = _plan_arg(plan)
-    which = f"Start from plan `{plan}`." if plan else "testbench://plans lists the plans; start from the backtest."
+    which = f"Start from plan `{plan}`." if plan else (
+        "testbench://plans lists the plans; start from the backtest. With no such plans yet, the `recipes` tool has "
+        "the ladder: trading-backtest (or vectorbt-strategy, freqtrade-strategy), then alpaca-paper.")
     return f"""Check whether this trading strategy holds up, rung by rung, with agent-testbench. {which}
 Paper and simulation only: never trade live money and never point the code at a live account.
 

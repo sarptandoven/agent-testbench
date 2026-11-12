@@ -107,6 +107,10 @@ What it does not prove, and how it compares with CI, papermill or calling Modal 
 
 --8<-- "README.md#loops"
 
+## For traders
+
+--8<-- "README.md#for-traders"
+
 ## Guardrails
 
 --8<-- "README.md#guardrails"

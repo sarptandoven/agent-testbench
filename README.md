@@ -48,15 +48,16 @@ pip install "agent-testbench[all]"         # or: uv tool install "agent-testbenc
 testbench init                             # keeps those plans in testbench.yaml, with a budget and AGENTS.md
 testbench run <plan>                       # the report: what passed, what failed and why, what it cost
 testbench demo                             # or first an example project, run for free (testbench demo --list)
-testbench selftest                         # ten checks of the main promises on this machine, in under a minute
+testbench selftest                         # eleven checks of the main promises on this machine, in under a minute
 ```
 
 `testbench init` finds notebooks, a pytest suite, training scripts and web apps, and writes a plan for each -
 lint, run, the files they write, every test passing, a page with no console errors - with a `FILL IN` line for
 the number only you know ("accuracy >= 0.9"). Starting from a goal instead? `testbench recipes` lists ready
 ladders of plans - pytest, a Colab notebook, PyTorch training, a LoRA fine-tune, a web app, an LLM eval, a Docker
-sandbox, your own GPU box, a data pipeline - with each plan's worst case; `testbench init --recipe pytorch-train`
-writes one, and `--add` adds one to the testbench.yaml you have ([docs/recipes.md](docs/recipes.md)). Not only
+sandbox, your own GPU box, a data pipeline, a trading strategy from backtest to paper - with each plan's worst
+case; `testbench init --recipe pytorch-train` writes one, and `--add` adds one to the testbench.yaml you have
+([docs/recipes.md](docs/recipes.md)). Not only
 Python: `init` turns `npm test` (jest, vitest, mocha, node --test, Playwright), a Go module or a Rust crate into a
 plan judged by the runner's own JUnit report, and the jest, vitest, go-test and cargo-test recipes also run the
 suite in a Docker container with no network.
@@ -241,6 +242,16 @@ A loop over a trading strategy also says whether its best try is better than luc
 `--min-deflated-sharpe 0.95` makes `--target` count only once the best try clears it
 ([docs/loops.md](docs/loops.md#is-the-best-try-luck)).
 
+## For traders
+
+A strategy never grades itself: the backtest writes its trades and equity, testbench computes the numbers, and the
+strategy climbs a ladder - a backtest with costs, a look-ahead check, walk-forward windows, a sealed holdout opened
+once, then paper trading on a mock broker and on Alpaca's paper API - with the deflated Sharpe ratio over every try a
+loop made. `testbench demo trading` shows it in seconds: a backtest that looks superb, a planted look-ahead caught,
+the one-line fix, every rung passed. `testbench recipes` has the ladder for pandas, vectorbt and freqtrade, and
+alpaca-paper. testbench is not investment advice, and 0.3 does backtests and paper trading only:
+[Trading with agents safely](docs/trading-safely.md).
+
 ## Guardrails
 
 - **Money**: worst case = hardware price x time limit (+ start-up), checked before every run, session and loop.
@@ -316,7 +327,9 @@ refusal (exit 2) says what was refused, why, and the command or the testbench.ya
   and LLM tool definitions
 - [docs/tour.md](docs/tour.md) - a five-minute tour with real screenshots, from install to a proved fix
 - [docs/examples.md](docs/examples.md) - the examples: an LLM app on a mock SDK, a web form in headless Chromium, a
-  failing test suite for your agent to fix, a Colab-style notebook
+  failing test suite for your agent to fix, a Colab-style notebook, a strategy with a planted look-ahead bug
+- [docs/trading-safely.md](docs/trading-safely.md), [docs/trading.md](docs/trading.md) - trading with agents safely,
+  the trading pack: a strategy's numbers, sealed data, look-ahead, overfitting statistics, mock brokers
 - [docs/why.md](docs/why.md), [docs/use-cases.md](docs/use-cases.md), [docs/faq.md](docs/faq.md),
   [docs/troubleshooting.md](docs/troubleshooting.md)
 - [docs/github-action.md](docs/github-action.md) - the GitHub Action: inputs, outputs, what reviewers see
