@@ -214,8 +214,9 @@ def subjects(plans: dict) -> set[tuple[str, str]]:
     """What plans exercise - each notebook and Python script, a pytest suite or another test runner's suite, a web
     page - so init can leave out a plan it detected when a recipe's plans already cover the same thing."""
     out = set()
-    for plan in plans.values():
-        for step in (plan or {}).get("steps") or []:
+    for name, plan in plans.items():
+        plan = C.long_form(name, plan)                   # `tests: "pytest -q"` is a plan too
+        for step in (plan.get("steps") if isinstance(plan, dict) else None) or []:
             if not isinstance(step, dict):
                 continue
             if step.get("notebook"):
@@ -236,8 +237,10 @@ def check(text: str, root: Path) -> dict:
         raw = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
         raise RecipeError(f"the combined {C.CONFIG_NAME} would not be valid YAML ({exc}); nothing was written") from None
-    for name, plan in (raw.get("plans") or {}).items():
-        for step in (plan or {}).get("steps") or []:
+    plans = raw.get("plans") if isinstance(raw, dict) else None
+    for name, plan in (plans if isinstance(plans, dict) else {}).items():
+        plan = C.long_form(name, plan)                   # a short form has no notebook, but its steps may be mappings
+        for step in (plan.get("steps") if isinstance(plan, dict) else None) or []:
             nb = step.get("notebook") if isinstance(step, dict) else None
             if isinstance(nb, str) and not (Path(root) / nb).is_file():
                 raise RecipeError(f"plan {name} runs the notebook {nb}, which is not in this project, and there is no "

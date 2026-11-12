@@ -3,11 +3,38 @@
 Paths are relative to the folder holding `testbench.yaml`. Every validation error names the field and says what
 to write instead.
 
+The smallest testbench.yaml is a plan with one command; everything else has a default:
+
+```yaml
+plans:
+  tests: "pytest -q"
+```
+
+## Autocomplete in your editor
+
+testbench.yaml has a JSON Schema ([`src/agent_testbench/schema/testbench.schema.json`](../src/agent_testbench/schema/testbench.schema.json);
+`testbench schema` prints it). With it, an editor completes keys, shows what each one does on hover, and flags a
+misspelt key or a wrong value as you type. `testbench init` writes this first line, which the YAML language server
+(VS Code's YAML extension, and editors built on it) reads:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/sarptandoven/agent-testbench/main/src/agent_testbench/schema/testbench.schema.json
+```
+
+Or, for every testbench.yaml, in VS Code's settings.json (`testbench schema > testbench.schema.json` saves a copy
+that works offline; put its path in place of the URL):
+
+```json
+"yaml.schemas": {
+  "https://raw.githubusercontent.com/sarptandoven/agent-testbench/main/src/agent_testbench/schema/testbench.schema.json": "testbench.yaml"
+}
+```
+
 ## Top level
 
 | field | default | |
 |---|---|---|
-| `project` | required | letters, digits, `-`, `_`; names the Modal app and volume (`testbench-<project>`) |
+| `project` | the folder's name | letters, digits, `-`, `_`; names the Modal app and volume (`testbench-<project>`). Left out, it is the folder's name with every other character written as `-`, as `testbench init` writes it |
 | `budget.max_run_usd` | `2.0` | refuse a run whose worst case is higher |
 | `budget.ask_above_usd` | `0.5` | above this, `testbench run` needs `--approve` (a person's yes) |
 | `budget.max_day_usd` | `10.0` | refuse a run that would take today's committed total over this |
@@ -181,14 +208,41 @@ plans:
 A plan runs its steps in order and stops at the first one that does not pass, unless that step has
 `continue_on_failure: true`.
 
+Short forms, for plans that run on this machine (`backend: local`) with the default `max_minutes`. Each is read
+as the long form it stands for, so runs, estimates, reports and plan.json are the same as if it were written out:
+
+```yaml
+plans:
+  tests: "pytest -q"                          # one command: one step, named after the plan (tests)
+  checks: ["ruff check .", "pytest -q"]       # commands in order: steps named ruff, then pytest
+```
+
+In any plan, a step may be a plain command; it is a `run:` step named after its program (`pytest` for
+`pytest -q`, `python -m pytest` or `uv run pytest`; `train` for `python train.py`), with `-2`, `-3` added when
+a name is taken:
+
+```yaml
+plans:
+  gpu-check:
+    backend: modal
+    gpu: T4
+    steps:
+      - pytest -q                                          # a step named pytest
+      - {name: train, run: python train.py, max_minutes: 30}
+```
+
+A plan or step written in a shape testbench does not take gets an error naming the field and showing each of
+these forms on its own line.
+
 ## Steps
 
-Exactly one of `notebook:`, `run:` or `web:`. `params`, `cells`, `uploads` and `colab_shim` are for notebook
-steps; on another step they are refused, not ignored.
+Exactly one of `notebook:`, `run:` or `web:` - or a plain command, which is a `run:` step named after its
+program (see [Plans](#plans)). `params`, `cells`, `uploads` and `colab_shim` are for notebook steps; on another
+step they are refused, not ignored.
 
 | field | default | |
 |---|---|---|
-| `name` | required | unique within the plan |
+| `name` | required (a plain command is named for you) | unique within the plan |
 | `notebook` | | an `.ipynb` or a percent-format `.py`; runs cell by cell in its kernel ([notebooks.md](notebooks.md)) |
 | `run` | | a shell command (bash) |
 | `web` | | see below |

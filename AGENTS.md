@@ -37,6 +37,10 @@
   skip unless mlflow / wandb are installed (in a separate venv: `docs/export.md`).
 - Setup: `recipes/` (the YAML ladders `testbench recipes` and `init --recipe` use; recipes never set budget:,
   pricing: or guard:), `connect.py` (`testbench connect`: other clients' MCP configs, merged as text).
+- testbench.yaml: `config.py` reads it; its short forms (`tests: "pytest -q"`, a list of commands, a step written as
+  a command) become the long form there (`config.long_form`), so nothing downstream sees them.
+  `schema/testbench.schema.json` is its JSON Schema for editors (`testbench schema`): a new key needs an entry
+  there too (tests/test_schema.py fails otherwise).
 - Plans for LLM apps: `mocks.py` and `mock_clients/` (the mock `openai` / `anthropic` packages a step's `mocks:` puts
   first on PYTHONPATH; they never touch the network). Notebooks: `notebook.py` (forms, papermill parameters,
   percent-format .py, kernels).

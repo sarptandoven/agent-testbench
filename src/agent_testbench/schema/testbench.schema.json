@@ -1,0 +1,1063 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/sarptandoven/agent-testbench/main/src/agent_testbench/schema/testbench.schema.json",
+  "title": "agent-testbench testbench.yaml",
+  "description": "What the agent may run, where, and for how much (docs/reference.md). `testbench schema` prints this file.",
+  "type": ["object", "null"],
+  "additionalProperties": true,
+  "properties": {
+    "project": {
+      "description": "A short name of letters, digits, - or _ (it names the Modal app and volume); default: the folder's name",
+      "type": ["string", "integer", "null"],
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,40}$"
+    },
+    "budget": {
+      "description": "What runs may cost; this machine's ~/.testbench/limits.yaml can only lower it",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "max_run_usd": {
+          "description": "Refuse any run whose worst case costs more than this many US dollars",
+          "type": "number",
+          "minimum": 0,
+          "default": 2.0
+        },
+        "ask_above_usd": {
+          "description": "Above this, a person must approve the run (testbench run --approve)",
+          "type": "number",
+          "minimum": 0,
+          "default": 0.5
+        },
+        "max_day_usd": {
+          "description": "Refuse a run that would take today's committed total over this",
+          "type": "number",
+          "minimum": 0,
+          "default": 10.0
+        }
+      }
+    },
+    "sessions": {
+      "description": "Where `testbench session start` puts its kernel by default, and for how long",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "description": "local, docker, ssh, kubernetes, modal, colab, or an installed plugin's backend (default local)",
+          "type": "string",
+          "anyOf": [
+            {"enum": ["local", "docker", "ssh", "kubernetes", "modal", "colab"]},
+            {"type": "string", "minLength": 1}
+          ],
+          "default": "local"
+        },
+        "gpu": {
+          "description": "The sessions' GPU, or NAME:COUNT for several",
+          "type": ["string", "integer", "null"],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.!+-]*(:[1-9][0-9]{0,2})?$"
+        },
+        "idle_minutes": {
+          "description": "A session stops itself after this long unused (default 10)",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 10
+        },
+        "max_minutes": {
+          "description": "And after this long in any case; it bounds the session's cost (default 60)",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 60
+        },
+        "secrets": {
+          "$ref": "#/$defs/names",
+          "description": "Secret NAMES passed into every session, never values",
+          "type": ["array", "null"]
+        },
+        "cpu": {
+          "description": "CPU cores for sessions (modal, kubernetes)",
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        },
+        "memory_gb": {
+          "description": "GB of memory for sessions (modal, kubernetes)",
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "pricing": {
+      "description": "Your own prices, used instead of the built-in ones (each number 0 or more)",
+      "type": ["object", "null"],
+      "additionalProperties": {
+        "description": "A price, or a table of prices by name",
+        "anyOf": [
+          {"type": "number", "minimum": 0},
+          {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}}
+        ]
+      },
+      "properties": {
+        "modal_gpu_per_s": {
+          "description": "US dollars per second for each Modal GPU, e.g. {H100: 0.001097}",
+          "type": "object",
+          "additionalProperties": {"type": "number", "minimum": 0}
+        },
+        "modal_cpu_core_per_s": {
+          "description": "US dollars per second for a Modal CPU core",
+          "type": "number",
+          "minimum": 0
+        },
+        "modal_mem_gib_per_s": {
+          "description": "US dollars per second for a GiB of Modal memory",
+          "type": "number",
+          "minimum": 0
+        },
+        "colab_units_per_hour": {
+          "description": "Colab compute units per hour by GPU, e.g. {CPU: 0.1, T4: 1.8}",
+          "type": "object",
+          "additionalProperties": {"type": "number", "minimum": 0}
+        },
+        "colab_usd_per_unit": {
+          "description": "US dollars per Colab compute unit (default 0.10)",
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "guard": {
+      "description": "The Claude Code hook's settings",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "ask": {
+          "description": "Commands the hook asks a person about first, e.g. [git push, gh pr merge]",
+          "type": "array",
+          "items": {"type": "string"},
+          "default": ["git push", "gh repo create", "gh pr merge", "gh release create"]
+        }
+      }
+    },
+    "notify": {
+      "description": "A JSON POST when a run or loop ends or a launch needs approval (docs/notify.md)",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "if": {"type": "object"},
+      "then": {"oneOf": [{"required": ["webhook"]}, {"required": ["webhook_env"]}]},
+      "properties": {
+        "webhook": {
+          "description": "The URL to POST to, starting with https:// (or use webhook_env to keep it out of the file)",
+          "type": "string",
+          "pattern": "^\\s*https?://[^/\\s]+"
+        },
+        "webhook_env": {
+          "description": "The NAME of an environment variable that holds the URL, e.g. TESTBENCH_WEBHOOK",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "on": {
+          "description": "The events to send (default run_end, loop_rule, loop_end, approval_needed)",
+          "anyOf": [
+            {"enum": ["run_end", "loop_rule", "loop_end", "approval_needed", "watch_run", "loop_try"]},
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {"enum": ["run_end", "loop_rule", "loop_end", "approval_needed", "watch_run", "loop_try"]}
+            }
+          ]
+        }
+      }
+    },
+    "export": {
+      "description": "Where every finished run goes too: MLflow, W&B, csv, jsonl (docs/export.md)",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "mlflow": {
+          "description": "An MLflow tracking server: {tracking_uri: http://127.0.0.1:5000, experiment: my-project}; false leaves it out",
+          "anyOf": [
+            {"type": ["boolean", "null"]},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "tracking_uri": {
+                  "description": "The tracking URI, without credentials (set MLFLOW_TRACKING_TOKEN in the environment)",
+                  "type": "string",
+                  "pattern": "\\S",
+                  "not": {"pattern": "^\\w[\\w+.-]*://[^/@\\s]+@"}
+                },
+                "experiment": {"description": "The experiment's name", "type": "string", "pattern": "\\S"},
+                "artifacts": {
+                  "description": "Upload the report and the evidence files (default true)",
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        },
+        "wandb": {
+          "description": "Weights & Biases: {project: my-project, mode: offline}; WANDB_API_KEY stays in the environment; false leaves it out",
+          "anyOf": [
+            {"type": ["boolean", "null"]},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "project": {
+                  "description": "The W&B project, without / \\ # ? % or :",
+                  "type": "string",
+                  "pattern": "^[^/\\\\#?%:]*\\S[^/\\\\#?%:]*$"
+                },
+                "entity": {"description": "The W&B team or user", "type": "string", "pattern": "\\S"},
+                "mode": {
+                  "description": "online (to the W&B server), offline (kept here for wandb sync) or disabled",
+                  "enum": ["online", "offline", "disabled"]
+                },
+                "dir": {
+                  "description": "Where W&B keeps its files, e.g. .testbench",
+                  "type": "string",
+                  "pattern": "\\S"
+                },
+                "tags": {
+                  "description": "Tags for every run, e.g. [baseline, nightly]",
+                  "type": "array",
+                  "items": {"type": "string"}
+                },
+                "artifacts": {
+                  "description": "Upload the report and the evidence files (default true)",
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        },
+        "csv": {
+          "description": "A csv file every run adds a line to: its path, e.g. .testbench/runs.csv; false leaves it out",
+          "anyOf": [
+            {"type": ["boolean", "null"]},
+            {"type": "string", "pattern": "\\S"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"path": {"description": "The file's path", "type": "string", "pattern": "\\S"}}
+            }
+          ]
+        },
+        "jsonl": {
+          "description": "A jsonl file every run adds a line to: its path, e.g. .testbench/runs.jsonl; false leaves it out",
+          "anyOf": [
+            {"type": ["boolean", "null"]},
+            {"type": "string", "pattern": "\\S"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"path": {"description": "The file's path", "type": "string", "pattern": "\\S"}}
+            }
+          ]
+        }
+      }
+    },
+    "exclude": {
+      "description": "Files left out of every copy of the project (remote backends, workdir: copy); setting it replaces the default list, and .testbench and .env files are always left out",
+      "type": "array",
+      "items": {"type": "string"},
+      "examples": [[".git", "data/*.bin"]]
+    },
+    "modal": {
+      "description": "The Modal image and machine for Modal plans and sessions",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "python": {
+          "description": "The image's Python version, in quotes, e.g. \"3.11\" (3.10 unquoted would be read as 3.1)",
+          "type": "string",
+          "default": "3.11"
+        },
+        "pip": {
+          "description": "Packages for the image (pin them), e.g. [numpy==2.2.6]",
+          "type": ["array", "null"],
+          "items": {"type": "string"},
+          "default": []
+        },
+        "requirements": {"description": "A requirements file for the image", "type": ["string", "null"]},
+        "apt": {
+          "description": "Debian packages for the image, e.g. [ffmpeg]",
+          "type": ["array", "null"],
+          "items": {"type": "string"},
+          "default": []
+        },
+        "run_commands": {
+          "description": "Extra image build commands",
+          "type": ["array", "null"],
+          "items": {"type": "string"},
+          "default": []
+        },
+        "cpu": {
+          "description": "CPU cores for every Modal plan and session (a plan can override)",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 2.0
+        },
+        "memory_gb": {
+          "description": "GB of memory for every Modal plan and session (a plan can override)",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 8
+        }
+      }
+    },
+    "colab": {
+      "description": "Colab plans and sessions (Google's Colab CLI)",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "pip": {
+          "description": "Packages installed on the VM with colab install",
+          "type": ["array", "null"],
+          "items": {"type": "string"},
+          "default": []
+        },
+        "requirements": {"description": "A requirements file installed on the VM", "type": ["string", "null"]},
+        "cli": {"description": "The Colab CLI executable (default colab)", "type": "string"},
+        "auth": {
+          "description": "How the Colab CLI signs in, passed to it as --auth: adc or oauth2",
+          "type": "string",
+          "examples": ["adc", "oauth2"]
+        }
+      }
+    },
+    "ssh": {
+      "description": "A machine of yours reached over ssh",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "description": "Needed for the ssh backend: a Host from ~/.ssh/config, or user@host, that `ssh HOST true` reaches with keys",
+          "type": ["string", "null"]
+        },
+        "usd_per_hour": {
+          "description": "What the machine costs you per hour while it works (0 for your own)",
+          "type": "number",
+          "minimum": 0,
+          "default": 0.0
+        },
+        "python": {
+          "description": "The machine's Python command (default python3)",
+          "type": "string",
+          "pattern": "\\S",
+          "default": "python3"
+        },
+        "workdir": {
+          "description": "Where testbench works on the machine (default ~/.testbench-remote)",
+          "type": "string",
+          "default": "~/.testbench-remote"
+        },
+        "setup": {
+          "description": "venv (a virtualenv per project on the machine) or none (use ssh.python as it is)",
+          "enum": ["venv", "none"],
+          "default": "venv"
+        },
+        "pip": {
+          "description": "Packages for the machine's virtualenv (pin them)",
+          "type": ["array", "null"],
+          "items": {"type": "string"},
+          "default": []
+        },
+        "command": {
+          "description": "How to reach the machine, as a list, e.g. [ssh, -p, \"2222\"] (default [ssh])",
+          "anyOf": [
+            {"type": "string", "pattern": "\\S"},
+            {"type": "array", "minItems": 1, "items": {"type": "string"}}
+          ],
+          "examples": [["ssh"]]
+        }
+      }
+    },
+    "docker": {
+      "description": "Containers on this machine (Docker or Podman): docs/docker.md",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "description": "The image containers start from (Python 3.10 or newer)",
+          "type": "string",
+          "pattern": "\\S",
+          "default": "python:3.11-slim"
+        },
+        "setup": {
+          "description": "build (testbench builds an image from docker.image with its basics and docker.pip, once) or none (the image already has them)",
+          "enum": ["build", "none"],
+          "default": "build"
+        },
+        "pip": {
+          "description": "Packages for the container image (pin them); needs setup: build",
+          "type": ["array", "null"],
+          "items": {"type": "string"},
+          "default": []
+        },
+        "network": {
+          "description": "bridge (Docker's default), none (no network at all: a sandbox), host, or a network's name",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+          "default": "bridge",
+          "examples": ["bridge", "none", "host"]
+        },
+        "gpus": {
+          "description": "What docker run --gpus takes: all, a count, or \"device=0,1\"; leave it out for no GPU",
+          "anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}, {"type": "string", "pattern": "\\S"}]
+        },
+        "cpu": {
+          "description": "CPUs a container may use (docker's --cpus); leave it out for no limit",
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        },
+        "memory_gb": {
+          "description": "GB of memory a container may use (docker's --memory); leave it out for no limit",
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        },
+        "usd_per_hour": {
+          "description": "What the machine costs you per hour while it works (0 for your own)",
+          "type": "number",
+          "minimum": 0,
+          "default": 0.0
+        },
+        "python": {
+          "description": "The image's Python command (default python3)",
+          "type": "string",
+          "pattern": "\\S",
+          "default": "python3"
+        },
+        "run_args": {
+          "description": "Extra arguments for docker run, e.g. [-v, /data:/data:ro]",
+          "anyOf": [{"type": "null"}, {"type": "string"}, {"type": "array", "items": {"type": ["string", "number"]}}],
+          "examples": [["-v", "/data:/data:ro"]]
+        },
+        "build_args": {
+          "description": "Extra arguments for docker build, e.g. [--network, host]",
+          "anyOf": [{"type": "null"}, {"type": "string"}, {"type": "array", "items": {"type": ["string", "number"]}}],
+          "examples": [["--network", "host"]]
+        },
+        "ca_bundle": {
+          "description": "A CA bundle (PEM) pip needs behind a TLS-intercepting proxy",
+          "type": ["string", "null"]
+        },
+        "command": {
+          "description": "The container CLI, as a list: [docker] or [podman]",
+          "anyOf": [
+            {"type": "string", "pattern": "\\S"},
+            {"type": "array", "minItems": 1, "items": {"type": ["string", "number"]}}
+          ],
+          "examples": [["docker"], ["podman"]]
+        }
+      }
+    },
+    "kubernetes": {
+      "description": "A Kubernetes cluster: each run a Job, each session a pod (docs/kubernetes.md)",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "description": "A context from your kubeconfig; leave it out for the current one",
+          "type": ["string", "null"],
+          "pattern": "\\S"
+        },
+        "namespace": {
+          "description": "The namespace (lowercase letters, digits and -); leave it out for the context's",
+          "type": ["string", "null"],
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "image": {
+          "description": "The image the pod runs (Python 3.10 or newer)",
+          "type": "string",
+          "pattern": "\\S",
+          "default": "python:3.11-slim"
+        },
+        "setup": {
+          "description": "pip (the pod installs testbench's basics and kubernetes.pip when it starts) or none (the image already has them)",
+          "enum": ["pip", "none"],
+          "default": "pip"
+        },
+        "pip": {
+          "description": "Packages the pod installs (pin them); needs setup: pip",
+          "type": ["array", "null"],
+          "items": {"type": "string"},
+          "default": []
+        },
+        "python": {
+          "description": "The image's Python command (default python3)",
+          "type": "string",
+          "pattern": "\\S",
+          "default": "python3"
+        },
+        "image_pull_policy": {
+          "description": "When the node pulls the image",
+          "enum": ["IfNotPresent", "Always", "Never"],
+          "default": "IfNotPresent"
+        },
+        "usd_per_hour": {
+          "description": "What a pod costs per hour, by GPU and cpu for a pod without one, e.g. {cpu: 0.0, A100: 2.5} (a number: the pod without a GPU)",
+          "anyOf": [
+            {"type": "number", "minimum": 0},
+            {"type": "object", "minProperties": 1, "additionalProperties": {"type": "number", "minimum": 0}}
+          ],
+          "default": {"cpu": 0.0}
+        },
+        "gpu_resource": {
+          "description": "The resource a GPU is requested as, e.g. nvidia.com/gpu or amd.com/gpu",
+          "type": "string",
+          "pattern": "\\S",
+          "default": "nvidia.com/gpu"
+        },
+        "gpu_node_selector": {
+          "description": "Node labels that find each GPU, e.g. {A100: {nvidia.com/gpu.product: NVIDIA-A100}}",
+          "type": ["object", "null"],
+          "additionalProperties": {"type": "object"}
+        },
+        "node_selector": {
+          "description": "Node labels every pod needs, e.g. {pool: gpu}",
+          "type": ["object", "null"],
+          "additionalProperties": {"type": ["string", "number"]}
+        },
+        "tolerations": {
+          "description": "Kubernetes tolerations, e.g. [{key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}]",
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": {"enum": ["key", "operator", "value", "effect", "tolerationSeconds"]}
+          }
+        },
+        "service_account": {
+          "description": "A service account in the namespace; leave it out for the default",
+          "type": ["string", "null"],
+          "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+        },
+        "cpu": {
+          "description": "CPUs per pod (its request and limit); a plan can override",
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        },
+        "memory_gb": {
+          "description": "GB of memory per pod (its request and limit); a plan can override",
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        },
+        "env": {
+          "description": "Environment variables in every pod, e.g. {HF_HOME: /work/cache/hf}",
+          "type": ["object", "null"],
+          "additionalProperties": {"type": ["string", "number"]}
+        },
+        "env_secrets": {
+          "description": "Environment variables from Kubernetes Secrets, as SECRET/KEY, e.g. {HF_TOKEN: hf-token/token}",
+          "type": ["object", "null"],
+          "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+          "additionalProperties": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?/[-._A-Za-z0-9]+$"}
+        },
+        "volumes": {
+          "description": "Kubernetes volumes for the pod, each with a name (not work) and a source",
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "minProperties": 2,
+            "properties": {
+              "name": {
+                "description": "The volume's name (work is testbench's own)",
+                "type": "string",
+                "not": {"const": "work"}
+              }
+            }
+          }
+        },
+        "volume_mounts": {
+          "description": "Mounts of those volumes, outside /work, e.g. [{name: data, mountPath: /data, readOnly: true}]",
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "required": ["name", "mountPath"],
+            "properties": {
+              "mountPath": {
+                "description": "Where in the pod, outside /work",
+                "type": "string",
+                "pattern": "^/",
+                "not": {"pattern": "^/work(/|$)"}
+              }
+            }
+          }
+        },
+        "command": {
+          "description": "How to run kubectl, as a list, e.g. [kubectl, --kubeconfig, /path/to/config]",
+          "anyOf": [
+            {"type": "string", "pattern": "\\S"},
+            {"type": "array", "minItems": 1, "items": {"type": "string"}}
+          ],
+          "examples": [["kubectl"]]
+        }
+      }
+    },
+    "plans": {
+      "description": "Plans by name: a command, a list of commands, or the long form with backend, gpu and steps",
+      "type": ["object", "null"],
+      "propertyNames": {"pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,40}$"},
+      "additionalProperties": {"$ref": "#/$defs/plan"}
+    }
+  },
+  "$defs": {
+    "rule": {
+      "description": "A check on one value: \">= 0.9\", \"~= 0.93 +- 0.01\", \"between 0.8 and 0.95\", or a bare value meaning equality",
+      "type": ["string", "number", "boolean", "null"],
+      "not": {"type": "string", "pattern": "^\\s*(=>|=<|===|=(?!=)|≥|≤|≠)"}
+    },
+    "names": {
+      "description": "Secret NAMES (never values), e.g. [HF_TOKEN]",
+      "type": "array",
+      "items": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"}
+    },
+    "plan": {
+      "description": "A plan: one command, a list of commands, or the long form with backend, gpu and steps",
+      "oneOf": [
+        {
+          "description": "One command, run on this machine as one step named after the plan, e.g. \"pytest -q\"",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        {
+          "description": "Commands (or steps) run in order on this machine, e.g. [\"ruff check .\", \"pytest -q\"]",
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/step"}
+        },
+        {"$ref": "#/$defs/plan_full"}
+      ]
+    },
+    "plan_full": {
+      "description": "A plan in full: where it runs (backend, gpu) and its steps",
+      "type": "object",
+      "required": ["steps"],
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "description": "Where it runs: local, docker, ssh, kubernetes, modal, colab, or an installed plugin's backend (default local)",
+          "type": "string",
+          "anyOf": [
+            {"enum": ["local", "docker", "ssh", "kubernetes", "modal", "colab"]},
+            {"type": "string", "minLength": 1}
+          ],
+          "default": "local"
+        },
+        "gpu": {
+          "description": "The GPU, or NAME:COUNT for several (modal: T4 L4 A10 L40S A100-40GB A100-80GB H100 H200 B200 B300 RTX-PRO-6000; colab: T4 L4 G4 A100 H100)",
+          "type": ["string", "integer", "null"],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.!+-]*(:[1-9][0-9]{0,2})?$",
+          "examples": ["T4", "H100:2"]
+        },
+        "cpu": {
+          "description": "CPU cores for this plan (modal, kubernetes); overrides the backend section's cpu",
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        },
+        "memory_gb": {
+          "description": "GB of memory for this plan (modal, kubernetes); overrides the backend section's",
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        },
+        "workdir": {
+          "description": "inplace runs in the project folder, copy in a scratch copy (default: inplace on local, copy on remote backends)",
+          "enum": ["inplace", "copy", null]
+        },
+        "description": {"description": "What this plan proves, in a line", "type": ["string", "null"]},
+        "steps": {
+          "description": "The steps, run in order; a plan stops at the first that fails unless it has continue_on_failure",
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/step"}
+        }
+      }
+    },
+    "step": {
+      "description": "A step: a command (named after its program), or a mapping with name and one of run, notebook or web",
+      "oneOf": [
+        {
+          "description": "A command, run as a run: step named after its program (pytest, pytest-2, ...)",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        {"$ref": "#/$defs/step_full"}
+      ]
+    },
+    "step_full": {
+      "description": "A step in full: a name and exactly one of run, notebook or web",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "oneOf": [{"required": ["run"]}, {"required": ["notebook"]}, {"required": ["web"]}],
+      "allOf": [
+        {
+          "if": {"not": {"required": ["notebook"]}},
+          "then": {
+            "properties": {
+              "params": {"maxProperties": 0},
+              "cells": {"type": "null"},
+              "uploads": {"maxItems": 0},
+              "colab_shim": {"const": true}
+            }
+          }
+        }
+      ],
+      "properties": {
+        "name": {
+          "description": "The step's name, unique within its plan",
+          "type": ["string", "integer"],
+          "minLength": 1
+        },
+        "run": {"description": "A shell command (bash), run in the project folder or its copy", "type": "string"},
+        "notebook": {
+          "description": "A notebook to run cell by cell: an .ipynb, or a .py with # %% cells",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "web": {
+          "$ref": "#/$defs/web",
+          "description": "Start an app, open a page in a browser, act on it and record what it shows"
+        },
+        "max_minutes": {
+          "description": "The step is stopped when it runs out; it also bounds the cost estimate",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 10
+        },
+        "params": {
+          "description": "Notebook steps: values for its form fields (#@param) or papermill parameters, e.g. {EPOCHS: 2}",
+          "type": "object"
+        },
+        "env": {
+          "description": "Extra environment variables, e.g. {SEED: \"1\"}",
+          "type": "object",
+          "additionalProperties": {"type": ["string", "number", "boolean", "null"]}
+        },
+        "secrets": {
+          "$ref": "#/$defs/names",
+          "description": "Secret NAMES passed in (local: must be exported; modal: Modal secrets of these names), never values"
+        },
+        "pythonpath": {
+          "description": "Folders put first on PYTHONPATH, e.g. [mocks]",
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "artifacts": {
+          "description": "Files (globs) copied into the run folder as evidence, e.g. [\"outputs/*.png\"]",
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "expect": {
+          "$ref": "#/$defs/expect",
+          "description": "What must hold for the step to pass (docs/expectations.md)"
+        },
+        "uploads": {
+          "description": "Notebook steps: the files each files.upload() call gets, e.g. [[data.csv], [a.mp4, b.mp4]]",
+          "type": "array",
+          "items": {"type": "array", "items": {"type": "string"}}
+        },
+        "cells": {
+          "description": "Notebook steps: the code cells to run, counted from 1, e.g. \"1-3,5\" or [1, 2]",
+          "type": ["string", "integer", "array", "null"],
+          "minimum": 1,
+          "pattern": "^(?=.*[0-9])\\s*([0-9]+(-[0-9]+)?)?\\s*(,\\s*([0-9]+(-[0-9]+)?)?\\s*)*$",
+          "minItems": 1,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "colab_shim": {
+          "description": "Notebook steps: put the headless google.colab stand-in in the kernel (default true)",
+          "type": "boolean",
+          "default": true
+        },
+        "continue_on_failure": {
+          "description": "Go on to the next step even if this one fails (default false)",
+          "type": "boolean",
+          "default": false
+        },
+        "mocks": {
+          "$ref": "#/$defs/mocks",
+          "description": "Strict mock LLM clients for the step, which never touch the network: [openai, anthropic], or with options (docs/mocks.md)"
+        }
+      }
+    },
+    "web": {
+      "description": "A web step: an app, a page, actions on it",
+      "type": "object",
+      "required": ["url"],
+      "additionalProperties": false,
+      "properties": {
+        "url": {"description": "The page to open, e.g. http://127.0.0.1:8000/", "type": "string", "pattern": "\\S"},
+        "serve": {
+          "description": "The command that starts the app (stopped afterwards); leave it out for a page that is already up",
+          "type": ["string", "array", "null"],
+          "items": {"type": "string"}
+        },
+        "ready_timeout": {
+          "description": "Seconds to wait for the url to answer (default 30)",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 30
+        },
+        "actions": {
+          "description": "What to do on the page, in order: click, fill, press, wait_for, wait_ms, goto, screenshot",
+          "type": ["array", "null"],
+          "items": {"$ref": "#/$defs/web_action"}
+        },
+        "screenshot": {
+          "description": "Take a full-page screenshot at the end (default true)",
+          "type": "boolean",
+          "default": true
+        },
+        "viewport": {
+          "description": "The browser's width and height in pixels (default [1280, 800])",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"type": "number", "exclusiveMinimum": 0},
+          "default": [1280, 800]
+        }
+      }
+    },
+    "web_action": {
+      "description": "One action, e.g. {click: \"#increment\"} or {fill: {selector: \"#name\", text: Ada}}",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "click": {"description": "Click the element this selector finds", "type": "string"},
+        "fill": {
+          "description": "Type text into a field: {selector: \"#name\", text: Ada}",
+          "type": "object",
+          "required": ["selector", "text"],
+          "additionalProperties": false,
+          "properties": {
+            "selector": {"description": "The field's selector", "type": "string"},
+            "text": {"description": "The text to type", "type": ["string", "number"]}
+          }
+        },
+        "press": {"description": "Press a key, e.g. Enter", "type": "string"},
+        "wait_for": {
+          "description": "Wait until this selector finds something, e.g. \"text=Saved\"",
+          "type": "string"
+        },
+        "wait_ms": {"description": "Wait this many milliseconds", "type": "integer", "minimum": 0},
+        "goto": {"description": "Open another url", "type": "string"},
+        "screenshot": {"description": "Take a screenshot named this (NAME.png)", "type": "string"}
+      }
+    },
+    "expect": {
+      "description": "What must hold for the step to pass; every kind is in docs/expectations.md",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exit_code": {"description": "The code the command must exit with (run steps: default 0)", "type": "integer"},
+        "no_errors": {
+          "description": "Every cell runs without an error (notebook steps: default true)",
+          "type": "boolean"
+        },
+        "files": {
+          "description": "Files (paths or globs) that must exist after the step, e.g. [outputs/model.pt, \"plots/*.png\"]",
+          "type": "array",
+          "items": {"type": "string", "pattern": "\\S"}
+        },
+        "json": {
+          "description": "Values in JSON files: {metrics.json: {accuracy: \">= 0.9\", \"losses.-1\": \"< 0.5\"}}",
+          "type": ["object", "null"],
+          "additionalProperties": {
+            "description": "Dotted paths in this file (-1 is a list's last item), each with a rule",
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {"$ref": "#/$defs/rule"}
+          }
+        },
+        "text": {
+          "description": "Texts that must appear in stdout or a file: {stdout: [\"epoch 10\"]}",
+          "type": ["object", "null"],
+          "additionalProperties": {
+            "description": "A text, or a list of texts, to find",
+            "anyOf": [
+              {"type": "string", "minLength": 1},
+              {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+            ]
+          }
+        },
+        "media": {
+          "description": "Video, audio and image properties (needs ffprobe): {out/video.mp4: {frames: \">= 120\"}}",
+          "type": ["object", "null"],
+          "additionalProperties": {
+            "description": "Rules on this file: frames, width, height, fps, seconds, audio",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "frames": {"description": "frames: a rule, e.g. \">= 120\"", "$ref": "#/$defs/rule"},
+              "width": {"description": "width: a rule, e.g. \">= 120\"", "$ref": "#/$defs/rule"},
+              "height": {"description": "height: a rule, e.g. \">= 120\"", "$ref": "#/$defs/rule"},
+              "fps": {"description": "fps: a rule, e.g. \">= 120\"", "$ref": "#/$defs/rule"},
+              "seconds": {"description": "seconds: a rule, e.g. \">= 120\"", "$ref": "#/$defs/rule"},
+              "audio": {"description": "audio: a rule, e.g. \">= 120\"", "$ref": "#/$defs/rule"}
+            },
+            "minProperties": 1
+          }
+        },
+        "web": {
+          "description": "What a web step's page must show: {status: 200, text: [\"Count: 2\"]}",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "status": {"$ref": "#/$defs/rule", "description": "The HTTP status, e.g. 200 or \"between 200 and 299\""},
+            "title": {"description": "Text the page's title contains", "type": "string", "minLength": 1},
+            "text": {
+              "description": "Texts the page must show",
+              "type": "array",
+              "items": {"type": "string", "minLength": 1}
+            },
+            "no_console_errors": {"description": "No console or page errors (default true)", "type": "boolean"}
+          }
+        },
+        "junit": {
+          "description": "The test suite's own JUnit XML report: its path, or {path: report.xml, failures: 0, tests: \">= 10\"}, or a list of those",
+          "anyOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/junit"},
+            {"type": "array", "items": {"$ref": "#/$defs/junit"}}
+          ]
+        },
+        "metrics": {
+          "description": "Numbers in stdout or a file, found by a regular expression whose first group is the number: {stdout: {\"val_loss=([0-9.eE+-]+)\": \"< 0.3\"}}",
+          "type": ["object", "null"],
+          "additionalProperties": {
+            "description": "Regular expressions, each with a rule on the last number it finds",
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {"$ref": "#/$defs/rule"}
+          }
+        },
+        "gpu": {
+          "description": "GPU use while the step ran: {busy_pct: \">= 50\", max_mem_mib: \"<= 15000\"}",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "busy_pct": {"description": "busy_pct: a rule, e.g. \">= 50\"", "$ref": "#/$defs/rule"},
+            "mean_util_pct": {"description": "mean_util_pct: a rule, e.g. \">= 50\"", "$ref": "#/$defs/rule"},
+            "max_mem_mib": {"description": "max_mem_mib: a rule, e.g. \">= 50\"", "$ref": "#/$defs/rule"}
+          }
+        },
+        "image": {
+          "description": "Images compared with a known-good one: {outputs/plot.png: {like: golden/plot.png, max_diff: 0.02}}",
+          "type": ["object", "null"],
+          "additionalProperties": {
+            "description": "The known-good image and the largest mean pixel difference",
+            "type": "object",
+            "required": ["like"],
+            "additionalProperties": false,
+            "properties": {
+              "like": {"description": "The known-good image", "type": "string"},
+              "max_diff": {
+                "description": "The largest mean pixel difference, 0 (identical) to 1 (default 0.02)",
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.02
+              }
+            }
+          }
+        },
+        "duration": {
+          "description": "How long the step took: {minutes: \"<= 5\"}",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "minutes": {"description": "minutes: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+            "seconds": {"description": "seconds: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"}
+          }
+        },
+        "mock_calls": {
+          "description": "What the mock clients saw: {anthropic: {calls: \"<= 5\", output_tokens: \"<= 2000\"}}",
+          "type": ["object", "null"],
+          "propertyNames": {"enum": ["anthropic", "openai"]},
+          "additionalProperties": {
+            "description": "Rules on this mock client's calls",
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "calls": {"description": "calls: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+              "refused": {"description": "refused: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+              "injected": {"description": "injected: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+              "input_tokens": {"description": "input_tokens: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+              "output_tokens": {"description": "output_tokens: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"},
+              "tool_calls": {"description": "tool_calls: a rule, e.g. \"<= 5\"", "$ref": "#/$defs/rule"}
+            }
+          }
+        }
+      }
+    },
+    "junit": {
+      "description": "A JUnit XML report: its path, or {path: report.xml, failures: 0, tests: \">= 10\"}",
+      "anyOf": [
+        {"type": "string", "pattern": "\\S"},
+        {
+          "type": "object",
+          "required": ["path"],
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "description": "The JUnit XML file the test command writes (pytest: --junitxml=report.xml)",
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "tests": {"$ref": "#/$defs/rule", "description": "A rule on the number of tests"},
+            "passed": {"$ref": "#/$defs/rule", "description": "A rule on the number of passed tests"},
+            "failures": {"$ref": "#/$defs/rule", "description": "A rule on the number of failures tests"},
+            "errors": {"$ref": "#/$defs/rule", "description": "A rule on the number of errors tests"},
+            "skipped": {"$ref": "#/$defs/rule", "description": "A rule on the number of skipped tests"}
+          }
+        }
+      ]
+    },
+    "mocks": {
+      "description": "Mock clients by name, or with options: [openai, anthropic] or {anthropic: {replies: tests/replies.yaml, fail_on_call: 3}}",
+      "anyOf": [
+        {"type": "null"},
+        {"enum": ["anthropic", "openai"]},
+        {"type": "array", "items": {"enum": ["anthropic", "openai"]}},
+        {
+          "type": "object",
+          "propertyNames": {"enum": ["anthropic", "openai"]},
+          "additionalProperties": {"$ref": "#/$defs/mock_options"}
+        }
+      ]
+    },
+    "mock_options": {
+      "description": "Options for a mock client",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "dependentRequired": {"fail_with": ["fail_on_call"]},
+      "properties": {
+        "replies": {"description": "A replies file (YAML or JSON): what the mock answers to what", "type": "string"},
+        "fail_on_call": {
+          "description": "The call (counted from 1), or calls, that fail",
+          "anyOf": [
+            {"type": "integer", "minimum": 1},
+            {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}}
+          ]
+        },
+        "fail_with": {
+          "description": "How those calls fail (needs fail_on_call)",
+          "enum": [
+            "rate_limit",
+            "overloaded",
+            "server",
+            "timeout",
+            "connection",
+            "auth",
+            "permission",
+            "not_found",
+            "bad_request"
+          ]
+        }
+      }
+    }
+  }
+}
