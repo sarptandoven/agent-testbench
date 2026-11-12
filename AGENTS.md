@@ -79,7 +79,7 @@
   asked and again as it resolves. Reading the loop never judges a try (`loop.judge` may revert code).
 - Rescue: `rescue.py` (`testbench rescue`: reads a notebook, runs it through `executor.run_step`, diagnoses the first
   failing cell; the import-to-pip-name table is there).
-- Data seal: `dataseal.py` (testbench.yaml `data:`, a plan's `holdout:` and `walk_forward:`; checked at load without
+- Data seal: `dataseal.py` (testbench.yaml `data:`, a plan's `holdout:`, `walk_forward:`, `lookahead:` and `model_cutoff:`; checked at load without
   reading the data, read at launch by `runs.launch` and `budget.worst_case` (windows multiply the worst case), cut
   where the plan runs by the executor's `Seal`, and by docker on this machine before the copy; docs/trading-data.md).
 - Sessions: `kernelkit/` (the launcher and client that run on the session's machine), `session_backends.py`
