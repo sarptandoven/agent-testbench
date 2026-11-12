@@ -205,6 +205,7 @@ The server's tools, resources and prompts, and which guardrails hold in which cl
 - **ssh**: `ssh HOST true` must work with keys; `ssh: {host: HOST, usd_per_hour: 0}` in testbench.yaml.
 - **Docker**: a running Docker (or podman); `docker: {network: none}` for no network.
 - **Kubernetes**: kubectl with a context for your cluster; `kubernetes: {usd_per_hour: {cpu: 0, A100: 2.5}}`.
+- **RunPod**: an API key from runpod.io exported as `RUNPOD_API_KEY`; `gpu: H100-SXM` on a `backend: runpod` plan.
 - **Trackers**: `pip install "agent-testbench[mlflow]"` or `[wandb]` for exports.
 - **Web steps**: `playwright install chromium`.
 
@@ -277,8 +278,8 @@ The same pages, with search: <https://sarptandoven.github.io/agent-testbench/>.
 
 `python -m pytest` runs everything that needs no account - notebooks in real kernels, expectations, budgets and
 limits, the guard hook, the MCP server over stdio and HTTP, loops on real git repositories, the ssh backend through
-a stand-in for ssh, Docker in real containers, web steps in Chromium - on Linux and macOS with Python 3.10 and
-3.12, and on Windows. `tests/test_live.py` runs the same things on Modal, Colab or a real ssh host and is opt-in.
+a stand-in for ssh, the runpod backend against a fake RunPod API, Docker in real containers, web steps in Chromium -
+on Linux and macOS with Python 3.10 and 3.12, and on Windows. `tests/test_live.py` runs the same things on Modal, Colab or a real ssh host and is opt-in.
 The demos in `docs/` are real agent runs.
 
 ## Limits

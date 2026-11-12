@@ -2010,7 +2010,7 @@ def build_parser() -> argparse.ArgumentParser:
                                     "--idle-minutes unused and after --max-minutes in any case.")
     q.add_argument("name", nargs="?", default="main", metavar="NAME", help="its name (default main)")
     q.add_argument("-s", "--session", metavar="NAME", help="the same as NAME, as exec and files spell it")
-    q.add_argument("--backend", help="local, docker, ssh, kubernetes, modal, colab, or an installed backend "
+    q.add_argument("--backend", help="local, docker, ssh, kubernetes, runpod, modal, colab, or an installed backend "
                                      "(`testbench doctor` lists them; default: sessions.backend)")
     q.add_argument("--gpu", help="e.g. T4, or H100:2 on modal (`testbench prices` lists each backend's)")
     q.add_argument("--idle-minutes", type=_positive, metavar="MINUTES",

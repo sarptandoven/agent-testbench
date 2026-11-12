@@ -58,6 +58,7 @@ nav:                                  # a few sections a newcomer can scan; ever
       - Docker: docker.md
       - ssh: ssh.md
       - Kubernetes: kubernetes.md
+      - RunPod: runpod.md
   - Trading:
       - Trading with agents safely: trading-safely.md
       - Files and metrics: trading.md

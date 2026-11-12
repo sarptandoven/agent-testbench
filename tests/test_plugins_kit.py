@@ -280,7 +280,7 @@ def test_plugins_lists_every_kind_with_its_builtins_installed_and_broken(tmp_pat
     lines = r.stdout.splitlines()
     for kind in P.KINDS:
         assert any(line.startswith(f"{kind:<10} ") for line in lines), f"{kind} is not listed:\n{r.stdout}"
-    assert "backends   where plans and sessions run\n  built in   local, modal, colab, ssh, docker, kubernetes\n" \
+    assert "backends   where plans and sessions run\n  built in   local, modal, colab, ssh, docker, kubernetes, runpod\n" \
            "  installed  fake (fakebench:backend, fakebench 0.1)\n  broken     broken: fakebench:no_such_thing did " \
            "not load: AttributeError" in r.stdout, r.stdout
     assert "testbench plugin test PACKAGE" in r.stdout

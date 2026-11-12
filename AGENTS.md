@@ -33,7 +33,8 @@
   import inside the command): `testbench --version` and `--help` load no PyYAML, notebook machinery or core module.
 - Backends: `backends/__init__.py` (the `Backend` interface and registry, plugins by entry point); each backend
   module (`backends/local.py`, `modal_backend.py`, `colab_backend.py`, `ssh_backend.py`, `docker_backend.py`,
-  `kubernetes_backend.py`) owns its GPUs, prices and plan runner.
+  `kubernetes_backend.py`, `runpod_backend.py`) owns its GPUs, prices and plan runner. RunPod's tests run against a
+  fake RunPod on 127.0.0.1 (`tests/test_runpod.py`); nothing in the suite reaches RunPod or needs a key.
 - Proof: `provenance.py` (source, environment, evidence hashes; `schema/report-v1.schema.json`), `report.py`
   (md, html, junit, history), `ui.py` (static pages), `dashboard.py` (`testbench ui --serve`: live and read-only on
   127.0.0.1, Host header checked, serves only reports and step evidence from .testbench - never state.json or

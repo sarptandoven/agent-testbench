@@ -68,11 +68,12 @@ SAFE = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
 
 # Run in the container with its Python (standard library only): a tar.gz on stdout with the run folder - only the
 # files that show progress, or all of it - and `done` once the work has ended. Light files are read whole first,
-# so a file rewritten while it is read never breaks the archive.
+# so a file rewritten while it is read never breaks the archive. The work folder is /work, or the second argument
+# (a RunPod pod's).
 PROBE = r'''
 import glob, io, os, sys, tarfile
 full = sys.argv[1] == "full"
-os.chdir("/work")
+os.chdir(sys.argv[2] if len(sys.argv) > 2 else "/work")
 if full:
     names = [os.path.join(d, f) for d, _, fs in os.walk("run") for f in fs]
 else:

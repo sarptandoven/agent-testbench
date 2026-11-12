@@ -68,7 +68,7 @@ interface, so a plug-in can do anything a built-in does; `testbench plugin test`
 testbench's skills and hook.)
 
 The built-in machines other than this one are layers that plug in the same way: `backends/modal_backend`,
-`colab_backend`, `ssh_backend`, `docker_backend` and `kubernetes_backend`, with live sessions in `sessions`,
+`colab_backend`, `ssh_backend`, `docker_backend`, `kubernetes_backend` and `runpod_backend`, with live sessions in `sessions`,
 `session_backends` and `kernelkit/` (the launcher and watchdog that run on the session's machine).
 
 ## Layers

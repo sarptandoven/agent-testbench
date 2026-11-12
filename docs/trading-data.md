@@ -308,7 +308,7 @@ find the sealed rows elsewhere depends on where it runs.
 |---|---|
 | `docker` | cut on this machine before the project is copied in: they never enter the container (nothing of this machine is mounted). A [live session](reference.md#live-sessions) on docker gets the same cut copy. With `docker.network: none` the step cannot fetch them from anywhere else either. This is the backend that enforces the seal - unless `docker.run_args` mounts a folder that holds them |
 | `local` | the run's copy (`.testbench/runs/<id>/work`) is cut, but the step runs as you on this machine: it can still open the project's own file by its absolute path (`TESTBENCH_PROJECT_DIR` names the folder). The seal stops accidents - a script that loads `data/prices.csv`, a notebook that reads everything - and the fingerprint records what the step was given, not what else it opened. A live local session sees the project as it is |
-| `ssh`, `kubernetes`, `colab` | the whole project is copied there, and the executor cuts the file in the run's copy before the first step |
+| `ssh`, `kubernetes`, `runpod`, `colab` | the whole project is copied there, and the executor cuts the file in the run's copy before the first step |
 | `modal` | the project is part of the container image (at `/project`, whole); the run's copy at `/work/project` is cut before the first step, but `/project` still holds every row: like local, a guard against accidents |
 
 For a claim to hold against an agent set on getting around it, run the plans it tunes on docker with

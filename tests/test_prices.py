@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from agent_testbench import budget, config as C
-from agent_testbench.backends import colab_backend, modal_backend
+from agent_testbench.backends import colab_backend, modal_backend, runpod_backend
 from conftest import REPO, cli, write_config
 
 
@@ -15,6 +15,10 @@ def test_the_repository_catalog_matches_the_built_in_tables():
     assert cat["modal"]["mem_gib_per_s"] == modal_backend.MEM_GIB_PER_S
     assert cat["colab"]["units_per_hour"] == colab_backend.UNITS_PER_HOUR
     assert cat["colab"]["usd_per_unit"] == colab_backend.USD_PER_UNIT
+    assert cat["runpod"]["usd_per_hour"] == runpod_backend.USD_PER_HOUR
+    assert cat["runpod"]["cpu_usd_per_vcpu_hour"] == runpod_backend.CPU_USD_PER_VCPU_HOUR
+    assert cat["runpod"]["taken"] in runpod_backend.PRICES_TAKEN, "the date the built-in prices were taken"
+    assert set(runpod_backend.USD_PER_HOUR) == set(runpod_backend.GPU_IDS), "every GPU it offers has a price"
 
 
 def _catalog(tmp_path: Path, **modal) -> str:
