@@ -18,7 +18,8 @@ plug-ins    machines (Modal, Colab, ssh, Docker, Kubernetes, and backends from o
 **The core** is these modules of `src/agent_testbench/`: `config` (testbench.yaml), `budget` and `prices` (worst
 cases, limits, ledgers), `backends/__init__` (the `Backend` interface and registry) and `backends/local` (this
 machine), `runs` and `driver` (launching, following and closing out a run), `executor` (a plan's steps and their
-evidence), `expect` (the checks), `provenance` and `report` (the proof record), `procs` (background processes and
+evidence), `expect` (the checks), `metrics` (evidence files read as named numbers, [metric readers](plugins.md#metrics)),
+`provenance` and `report` (the proof record), `procs` (background processes and
 lock files on every system), and `core` itself. `agent_testbench.core` is its public face: thin functions to load a
 project, list and estimate plans, launch a run, wait for it, read its report and verify its evidence - the same code
 the CLI runs, so the same budget checks and the same records.

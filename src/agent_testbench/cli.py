@@ -151,8 +151,9 @@ def cmd_init(a):
 def _print_recipe_plans(cfg: dict, chosen: list[dict]) -> None:
     from . import recipes as RC
     for r in chosen:
+        package = "" if r.get("origin") in (RC.ORIGIN, "", None) else f", from {r['origin']}"
         for plan in r["plans"]:
-            print(f"  plan {plan}: {RC.describe(cfg, plan)} (recipe {r['name']})")
+            print(f"  plan {plan}: {RC.describe(cfg, plan)} (recipe {r['name']}{package})")
         for stand_in, own in r["swapped"].items():
             print(f"    runs {own}, found here, where the recipe says {stand_in}")
 
@@ -424,6 +425,33 @@ def cmd_export(a):
     if not dirs:
         print("No finished runs to export yet.")
     return worst
+
+
+def cmd_numbers(a):
+    import yaml
+    from . import metrics as M
+    if not a.reader:
+        print(M.listing())
+        return 0
+    opts = {}
+    for item in a.opt:
+        key, eq, value = item.partition("=")
+        if not eq or not key.strip():
+            print(f"testbench: --opt is KEY=VALUE, e.g. --opt risk_free=0.04 or --opt columns=[loss,acc]; got {item!r}")
+            return 2
+        try:
+            opts[key.strip()] = yaml.safe_load(value)       # 0.04 a number, [loss, acc] a list, stocks a word
+        except yaml.YAMLError:
+            opts[key.strip()] = value
+    if a.paths:
+        opts["files"] = a.paths
+    try:
+        got = M.read(a.reader, Path.cwd(), opts)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"testbench: {exc}")
+        return 2
+    print(json.dumps(got, indent=2, allow_nan=False) if a.json or a.format == "json" else M.render(got))
+    return 0
 
 
 def cmd_prices(a):
@@ -1123,7 +1151,8 @@ GROUPS = {   # `testbench help --all`: every command, in the groups README's Com
         "diff": "what changed between two runs",
         "history": "a plan's runs over time, with the numbers its checks found",
         "ui": "every run as a page, or a live dashboard (--serve)",
-        "export": "a run to MLflow, W&B, csv or jsonl"},
+        "export": "a run to MLflow, W&B, csv or jsonl",
+        "numbers": "the named numbers a reader finds in evidence files"},
     "live sessions": {
         "session": "a live kernel: start, list, stop, sync, install, shell",
         "exec": "run code or notebook cells in a session, see what came back",
@@ -1226,6 +1255,11 @@ ui
 export
   testbench export --to csv              # the latest run, to a csv file
   testbench export all --to mlflow --tracking-uri http://127.0.0.1:5000
+numbers
+  testbench numbers                      # the readers, and the files each reads
+  testbench numbers trading out/equity.csv out/trades.csv
+  testbench numbers json outputs/metrics.json --json
+  testbench numbers csv log.csv --opt columns=[loss,accuracy]
 session
   testbench session start                # a kernel on this machine
   testbench session start gpu --backend modal --gpu T4 --max-minutes 30
@@ -1550,6 +1584,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--path", help="with --to csv or jsonl: the file (default: .testbench/runs.csv or .jsonl)")
     p.add_argument("--no-artifacts", action="store_true", help="trackers: leave out the report and evidence files")
     p.set_defaults(fn=cmd_export)
+    p = sub.add_parser("numbers", help="the named numbers a reader finds in evidence files",
+                       description="Print what a metric reader finds in evidence files: each number by the name a "
+                                   "check's rule will use (sharpe, loss.last, failures), and notes on what it could "
+                                   "not work out. Readers: json, csv, junit, trading and those installed packages add "
+                                   "(none named: list them). With no PATH a reader looks in this folder and one folder "
+                                   "down. It needs no testbench.yaml. Exit 0 read, 2 a file is missing or refused.")
+    p.add_argument("reader", nargs="?", metavar="READER", help="json, csv, junit, trading or an installed reader")
+    p.add_argument("paths", nargs="*", metavar="PATH",
+                   help="the files to read, in the reader's order (trading: equity.csv [trades.csv [prices.csv]])")
+    p.add_argument("--opt", action="append", default=[], metavar="KEY=VALUE",
+                   help="a reader option, e.g. keys=[accuracy] or risk_free=0.04 (repeatable; `testbench numbers` "
+                        "lists each reader's)")
+    _json(p, "the numbers")
+    p.set_defaults(fn=cmd_numbers)
     p = sub.add_parser("runs", help="recent runs, one line each")
     p.add_argument("-n", type=_count, default=10, help="the latest N runs (default 10)")
     p.set_defaults(fn=cmd_runs)

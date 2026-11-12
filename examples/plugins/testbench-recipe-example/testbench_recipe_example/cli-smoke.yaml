@@ -1,0 +1,27 @@
+# Recipe cli-smoke: a command-line tool starts, and turns a small sample input into the output it should.
+#
+# Proves: the tool installs and starts (--help exits 0 and prints its usage), and a run on a sample input you keep in
+#   the project writes its output file in this run and prints the line that says it finished - so a broken install,
+#   a crash at start-up or a run that silently writes nothing fails, not only a wrong answer.
+# FILL IN: the tool's command, the sample input, the output file it writes and the line it prints when it is done.
+# Costs: nothing; it runs on this machine.
+
+plans:
+  cli-smoke:
+    backend: local
+    description: the tool starts, and turns the sample input into its output file
+    steps:
+      - name: help
+        run: python -m mytool --help                                 # FILL IN: your tool's command
+        max_minutes: 2
+        expect:
+          exit_code: 0
+          text: {stdout: ["usage:"]}
+      - name: sample run
+        run: python -m mytool samples/input.csv --out outputs/result.csv     # FILL IN: a small input you keep here
+        max_minutes: 5
+        artifacts: [outputs/result.csv]
+        expect:
+          exit_code: 0
+          files: [outputs/result.csv]                                # FILL IN: the file it writes
+          text: {stdout: ["done"]}                                   # FILL IN: the line it prints when it is done
