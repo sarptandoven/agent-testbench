@@ -83,6 +83,16 @@ or the day's limits, because no approval raises those. So keep the client's own 
 `session_start` and `loop_start` (for Gemini CLI, never set `trust: true` on the server), and review changes to
 `testbench.yaml` like any other diff. connect prints all of this each time it runs.
 
+## Tools
+
+`testbench mcp` serves the commands as tools: `session_start`, `session_exec`, `session_files`, `session_sync`,
+`session_install`, `session_shell`, `session_list`, `session_stop`, `check_project`, `plans`, `run_plan`,
+`wait_run`, `get_report`, `list_runs`, `cancel_run`, `spend`, `lint_notebook`, `rescue_notebook`, `recipes`,
+`export_run`, `diff_runs`, `add_note`, `loop_start`, `loop_try`, `loop_status` and `loop_stop`. They run side by
+side (stop a session while a long cell runs), return plots and screenshots as images, and pass on progress.
+`testbench mcp --http` serves streamable HTTP on 127.0.0.1 instead of stdio. Your own agent gets the same tools
+from Python ([Python API and tools](python-api.md)).
+
 ## Resources and prompts
 
 Besides its tools, the server has resources, which an agent reads without running a command, and prompts: the

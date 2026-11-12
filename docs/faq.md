@@ -153,7 +153,7 @@ Yes: Linux, macOS and Windows, Python 3.10 or newer. The test suite runs on Linu
   `claude plugin install agent-testbench@agent-testbench`). Or only the MCP server:
   `claude mcp add agent-testbench -- testbench mcp`.
 - **Cursor, Codex, Claude Desktop or any MCP client**: `testbench mcp` serves the commands as tools over stdio (or
-  `--http`). The config is in the [quick start](../README.md#quick-start).
+  `--http`). The config is in [connect your agent](../README.md#connect-your-agent).
 - **Any other agent that can run commands**: the CLI, and the working rules `testbench init` writes into
   `AGENTS.md` (with `CLAUDE.md` pointing to it).
 

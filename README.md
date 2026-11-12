@@ -4,31 +4,11 @@
 [![PyPI](https://img.shields.io/pypi/v/agent-testbench.svg)](https://pypi.org/project/agent-testbench/)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sarptandoven/agent-testbench/blob/main/LICENSE)
 
-**A test bench your coding agent operates.** Claude Code, Codex, Cursor or any agent gets a live kernel on real
-hardware - your machine, a Docker sandbox, any box you reach with ssh, a Modal GPU or a Colab VM - to run code
-and notebook cells, look at the values and plots, fix and rerun. Then it proves the result with a clean, checked
-run whose report names the code it ran and fingerprints its evidence. Every run is priced before it starts and
-stopped on the machine itself at its limit, inside a budget the agent cannot raise.
-
-```
-$ testbench loop start smoke --metric outputs/metrics.json:accuracy --budget-usd 0
-BASELINE: accuracy 0.86, run 20261031-054550-smoke passed.
-
-$ testbench loop try "hidden units 8 -> 64"        # the agent edited the code; testbench commits, runs, judges
-KEPT try 2: accuracy 0.9689 (best was 0.8689, +0.1). Run 20261031-054609-smoke passed. Best is now 509b79c25.
-
-$ testbench loop try "learning rate 0.05 -> 0.1"
-REVERTED try 3: accuracy 0.9689 is not better than the best 0.9689. The branch is back at 509b79c25.
-```
-
-That is a real run: Claude Code, given only this plugin, took a model from 0.86 to 0.9756 accuracy in six tries,
-four kept and two reverted by testbench, in 78 seconds - [docs/demo-loop.md](docs/demo-loop.md).
-
-<img src="https://raw.githubusercontent.com/sarptandoven/agent-testbench/main/docs/assets/report-pass.png" width="640"
-alt="The HTML report of a fixed run: PASS, accuracy 0.1711 to 0.9756 since the failing run before it, every check that
-was made, the code and Python it ran, the evidence hash, and the confusion matrix plot inline">
-
-*`testbench report --format html` for the demo's fixed run - a real report, unedited ([the tour](docs/tour.md)).*
+**A test bench your coding agent operates.** testbench runs your code - tests, notebooks, training scripts, web
+apps - on real machines: this one, a Docker sandbox, any box you reach with ssh, a Kubernetes cluster, a Modal GPU
+or a Colab VM. It proves what the code did with **plans** (steps, checks and evidence), each priced before it
+starts and stopped at its limit inside a budget the agent cannot raise, and every run leaves a **proof record**
+anyone can check.
 
 ## Quick start
 
@@ -36,127 +16,26 @@ was made, the code and Python it ran, the evidence hash, and the confusion matri
 cd your-project && uvx agent-testbench check   # its tests, notebooks or app, run and proved here: no setup, free
 ```
 
-Or `pip install agent-testbench`, then `testbench check`. With no testbench.yaml, `check` runs on this machine the
-plans `testbench init` would write for what it finds - a pytest suite, `npm test`, `go test`, cargo tests,
-notebooks, a web app - and prints PASS or FAIL for each, the report of each failure (the failing test, cell or
-line), the run ids (`testbench verify RUN` checks a run's evidence) and the one next step. It writes nothing but
-`.testbench/`, and a plan whose tool is missing here is skipped with the command that installs it. In a project
-with a testbench.yaml it runs every free plan and only lists the ones that cost money. Then:
+With no testbench.yaml, `check` runs on this machine the plans `testbench init` would write for what it finds - a
+pytest suite, `npm test`, `go test`, cargo tests, notebooks, a web app - and prints PASS or FAIL for each, the
+report of each failure (the failing test, cell or line) and the one next step. It writes nothing but `.testbench/`.
+Then:
 
 ```bash
-pip install "agent-testbench[all]"         # or: uv tool install "agent-testbench[all]"
-testbench init                             # keeps those plans in testbench.yaml, with a budget and AGENTS.md
-testbench run <plan>                       # the report: what passed, what failed and why, what it cost
-testbench demo                             # or first an example project, run for free (testbench demo --list)
-testbench selftest                         # eleven checks of the main promises on this machine, in under a minute
+pip install "agent-testbench[all]"   # or: uv tool install "agent-testbench[all]"
+testbench demo                       # a small example project, run here for free (testbench demo --list)
+testbench init                       # keep the plans in testbench.yaml, with a budget and AGENTS.md
+testbench run <plan>                 # the report: what passed, what failed and why, what it cost
 ```
 
-`testbench init` finds notebooks, a pytest suite, training scripts and web apps, and writes a plan for each -
-lint, run, the files they write, every test passing, a page with no console errors - with a `FILL IN` line for
-the number only you know ("accuracy >= 0.9"). Starting from a goal instead? `testbench recipes` lists ready
-ladders of plans - pytest, a Colab notebook, PyTorch training, a LoRA fine-tune, a web app, an LLM eval, a Docker
-sandbox, your own GPU box, a data pipeline, a trading strategy from backtest to paper - with each plan's worst
-case; `testbench init --recipe pytorch-train` writes one, and `--add` adds one to the testbench.yaml you have
-([docs/recipes.md](docs/recipes.md)). Not only
-Python: `init` turns `npm test` (jest, vitest, mocha, node --test, Playwright), a Go module or a Rust crate into a
-plan judged by the runner's own JUnit report, and the jest, vitest, go-test and cargo-test recipes also run the
-suite in a Docker container with no network.
+[Getting started](docs/getting-started.md) goes through a first project step by step, and
+[the five-minute tour](docs/tour.md) shows it with screenshots.
 
-**Claude Code** - the plugin adds the skills and a guard hook for spending and secrets:
+## What you can do
 
-```bash
-claude plugin marketplace add sarptandoven/agent-testbench
-claude plugin install agent-testbench@agent-testbench
-```
+### Prove a change
 
-Then ask in plain words: *"get training working and prove it with the smoke plan"*, or *"use testbench loop to
-raise accuracy, budget $2"*.
-
-**Cursor, VS Code, Codex, Gemini CLI**: `testbench connect cursor` (or `vscode`, `codex`, `gemini`, `claude`;
-`--user` for every project, `--list` to see what is set up) registers the MCP server in the client's own config
-and writes the working rules into AGENTS.md; [docs/clients.md](docs/clients.md) says which guardrails hold
-outside Claude Code.
-
-**Any other MCP client** (nothing to install with [uv](https://docs.astral.sh/uv/)):
-
-```json
-{ "mcpServers": { "agent-testbench": { "command": "uvx", "args": ["--from", "agent-testbench[all]", "testbench", "mcp"] } } }
-```
-
-**In CI**: `uses: sarptandoven/agent-testbench@v1` with `plan: smoke`; `comment: true` puts the verdict and the
-numbers' change since the base branch on the pull request, and `attest: true` signs the report so
-`testbench verify --attestation` shows which workflow and commit made it ([docs/github-action.md](docs/github-action.md)).
-GitLab, Azure Pipelines, CircleCI or any shell: `testbench ci --for gitlab -o .gitlab-ci.yml` writes a job that runs
-`testbench check` and shows each step as a test ([docs/ci.md](docs/ci.md)).
-
-**Your own agent or a notebook**: `from agent_testbench import Testbench` runs plans and live sessions from Python,
-and `agent_testbench.tools` gives the same tools to the Anthropic or OpenAI API (`tools.anthropic_tools()`,
-`tools.call(name, input)`), inside the same budget, approvals and machine limits
-([docs/python-api.md](docs/python-api.md), [examples/agent-loop](examples/agent-loop)). The OpenAI Agents SDK,
-LangChain / LangGraph and the Claude Agent SDK get them as their own tools: `tools.for_openai_agents()`,
-`tools.for_langchain()`, `tools.for_claude_agent_sdk()`, where only a person approves a cost.
-
-**Any other agent** reads the working rules `testbench init` writes into `AGENTS.md`.
-
-## What your agent can do with it
-
-- **Work live** in a kernel that stays up: run code, `.py` files or a notebook's cells (Colab form fields set), get
-  back what it printed, the last value, plots as images, and errors with the line that raised them. Install
-  packages, run shell commands, move files, push local edits without losing variables.
-- **Prove it** with a plan: notebooks, scripts or web UIs run end to end, checked against expectations - metric
-  thresholds and tolerances, the project's own test suite, numbers in the log, files, video frames, a page's text,
-  GPU use, a plot that should look like a known-good one. The report leads with what failed and says what changed
-  since the last run.
-- **Rescue a notebook** that no longer runs: `testbench rescue nb.ipynb` reads it and runs it top to bottom, then
-  says which cell fails and why - a missing package and its pip name, cells that only worked in another order, a
-  Colab-only path, a file downloaded by hand, a GPU this machine lacks - with a plan that proves it once fixed.
-- **Test LLM apps for free**: `mocks: [openai, anthropic]` on a step swaps in strict mock SDKs - no key, no network,
-  the same answer every time, and the SDK's own `BadRequestError` for a request the real API would refuse.
-- **Improve it** with a loop: each idea is committed, proved by a run, and kept only if the number got better.
-- **Stay inside a budget**: worst case priced before every launch, approvals above a threshold, machine-wide limits
-  a project cannot raise, and a hard stop on the machine doing the work.
-- **Show it**: reports as HTML pages with the evidence inline, JUnit for CI, history and trend lines, and proof
-  records anyone can check with `testbench verify`.
-
-## Where it runs
-
-| backend | the machine | hard stop | |
-|---|---|---|---|
-| `local` | this one, in the project folder | this machine's supervisor | free |
-| `docker` | a fresh container here; `network: none` for a sandbox, `gpus: all` for NVIDIA GPUs | a watchdog inside the container | [docs/docker.md](docs/docker.md) |
-| `ssh` | any machine `ssh` reaches: a GPU box, a university server, a rented instance | a watchdog on that machine | [reference](docs/reference.md#the-ssh-backend) |
-| `kubernetes` | a Job on your cluster's GPU or CPU nodes, through kubectl | the Job's `activeDeadlineSeconds`, and a watchdog in the pod | [docs/kubernetes.md](docs/kubernetes.md) |
-| `modal` | a [Modal](https://modal.com) Sandbox or function with any GPU (T4 ... B200) | Modal's own timeouts | your Modal account |
-| `colab` | a [Colab](https://colab.research.google.com) VM through Google's Colab CLI | a watchdog on the VM, which releases it | your compute units |
-| plugins | anything a package registers (`agent_testbench.backends` entry point) | the backend's own (`testbench plugin test` checks it has one) | [docs/plugins.md](docs/plugins.md) |
-
-Each is set per plan (`backend:`) or per session (`--backend`), so the same notebook can be proved for free
-locally, then on the target GPU for a few cents. Linux, macOS and Windows (Colab's CLI has no Windows build).
-
-## Live sessions
-
-```
-$ testbench session start gpu --backend modal --gpu T4 --idle-minutes 3 --max-minutes 8
-gpu  ready on modal T4  up 0.0 min, idle 0.0 min (stops after 3 idle / 8 total)  ~$0.000 so far
-Within budget: up to $0.16 (today so far $0.01 of $2.00).
-
-$ testbench exec -f check_gpu.py
-[check_gpu.py | ok | 3.3 s]
-20 matmuls of 4096x4096 on Tesla T4: 0.67 s
-=> torch.Size([4096, 4096])
-
-$ testbench exec "float(b.mean()), torch.cuda.max_memory_allocated() // 2**20"      # variables persist
-[code | ok | 0.2 s]
-=> (1023.1211547851562, 200)
-
-$ testbench session stop
-gpu stopped after 1.4 min, about $0.017
-```
-
-Also: `exec --cells nb.ipynb:1-4 --params '{"EPOCHS": 1}'`, `files ls|get|put`, `session sync|install|shell|list`.
-A call past `--timeout` is interrupted and the kernel keeps its variables; a session stops itself when idle.
-
-## Plans and expectations
+A plan says what "working" means, and `testbench run` checks it end to end in a fresh process:
 
 ```yaml
 plans:
@@ -172,181 +51,154 @@ plans:
         params: {EPOCHS: 1}                                           # Colab form fields
         expect:
           json: {outputs/metrics.json: {accuracy: "~= 0.93 +- 0.02"}}
-          metrics: {stdout: {"val_loss=([0-9.]+)": "< 0.3"}}          # a number printed to the log
           image: {outputs/confusion.png: {like: golden/confusion.png, max_diff: 0.05}}
-  gpu-check:                           # a few minutes on the target GPU before a long run
-    backend: modal
-    gpu: A10
-    steps:
-      - name: train short
-        notebook: train.ipynb
-        max_minutes: 10                # also the hard stop, and what the worst case is priced on
-        expect:
-          gpu: {busy_pct: ">= 50"}     # an idle GPU fails the step
 ```
-
-Steps are `notebook:` (an `.ipynb` or a percent-format `.py`; `params:` sets Colab form fields and papermill
-parameters - [docs/notebooks.md](docs/notebooks.md)), `run:` (a shell command) or `web:` (a page driven in headless
-Chromium: click, fill, wait, screenshot). `mocks: [openai, anthropic]` gives a step mock LLM SDKs, and
-`mock_calls: {anthropic: {calls: "<= 5"}}` bounds what the code asked for ([docs/mocks.md](docs/mocks.md)). Every expectation and what its failure looks like: [docs/expectations.md](docs/expectations.md). Every
-field of testbench.yaml: [docs/reference.md](docs/reference.md).
 
 ```
 $ testbench run smoke                  # after a bad edit to the data cell (abridged)
 # FAIL - plan `smoke` on local
-
-Run `20261031-064120-smoke`, started 2026-10-31 06:41, 0.05 min, about $0.000. Stopped because step 2 (train quick) failed.
-
 ## FAIL: train quick
-
 - **cell 2**: `AxisError`: axis 2 is out of bounds for array of dimension 2
 - raised at cell line 10: X_train_mean = X.mean(axis=2) (raised in _methods.py:83, _count_reduce_items)
-
 ## Compared with the previous run `20261031-064113-smoke` (passed)
-
 - Broke: train quick
 ```
 
-## Proof records
+Its report is a proof record: the commit it ran, where it ran, and the sha256 of every evidence file.
+`testbench verify` checks the evidence later, `testbench diff` says what changed between two runs, and
+`testbench share` publishes a run as a page anyone can check. Steps run notebooks, shell commands or web pages in
+headless Chromium; `mocks: [openai, anthropic]` tests an LLM app against strict mock SDKs (no key, no network), and
+`testbench rescue nb.ipynb` says why a notebook no longer runs. Read on: [expectations](docs/expectations.md),
+[proof records](docs/proof-records.md), [notebooks](docs/notebooks.md), [mock clients](docs/mocks.md).
 
-Each report names what it proves: the git commit it ran (and a hash of any uncommitted changes), the Python,
-platform and packages where it ran, and the sha256 of every evidence file, in a format published as a
-[JSON Schema](src/agent_testbench/schema/report-v1.schema.json). `testbench verify` says whether the evidence still
-matches, and `testbench diff A B` says what changed between two runs - each checked number old -> new and whether
-that is better by its rule, checks that flipped, evidence that changed, the commits, packages that changed version.
-`testbench watch smoke` reruns a free plan whenever you save, one run at a time. `report --format html` writes one page with the plots inline, `--format junit` feeds CI test reports,
-`testbench history <plan>` shows how the checked numbers moved, and `testbench ui` writes static pages for every
-run with a trend line per number; `testbench ui --serve` shows them live at http://127.0.0.1:8770/ - what is
-running, its log as it grows, sessions, the loop, and today's spend against your limits - read-only and for this
-machine only ([docs/dashboard.md](docs/dashboard.md)). `testbench export --to mlflow|wandb|csv|jsonl` (or `export:` in testbench.yaml,
-after every run) puts runs where you already track experiments, with the evidence attached
-([docs/export.md](docs/export.md)).
-`testbench share --to git:gh-pages/runs` publishes a run as a page anyone can open, with a README badge, and
-`testbench verify --from URL` checks it there - no project needed ([docs/share.md](docs/share.md)).
+<img src="https://raw.githubusercontent.com/sarptandoven/agent-testbench/main/docs/assets/report-pass.png" width="640"
+alt="The HTML report of a fixed run: PASS, accuracy 0.1711 to 0.9756 since the failing run before it, every check that
+was made, the code and Python it ran, the evidence hash, and the confusion matrix plot inline">
 
-## Loops
+*`testbench report --format html` for the demo's fixed run - a real report, unedited ([the tour](docs/tour.md)).*
 
-```bash
-testbench loop start smoke --metric outputs/metrics.json:accuracy --budget-usd 5 --max-hours 8
-testbench loop try "lower the learning rate to 3e-4"     # commit, run, keep or revert
-testbench loop status | stop
+### Work live
+
+```
+$ testbench session start gpu --backend modal --gpu T4 --idle-minutes 3 --max-minutes 8
+gpu  ready on modal T4  up 0.0 min, idle 0.0 min (stops after 3 idle / 8 total)  ~$0.000 so far
+Within budget: up to $0.16 (today so far $0.01 of $2.00).
+
+$ testbench exec "float(b.mean()), torch.cuda.max_memory_allocated() // 2**20"      # variables persist
+[code | ok | 0.2 s]
+=> (1023.1211547851562, 200)
+
+$ testbench session stop
+gpu stopped after 1.4 min, about $0.017
 ```
 
-The loop works on a branch of its own. A try is kept only when its run passes and the metric beats the best so
-far; otherwise the branch goes back to the best commit, keeping edits made meanwhile. `--metric` is a number a json
-check reads (`FILE:KEY`) or any check's number (`check:val_loss`). One budget covers every run of the loop, approved
-once; each run is still checked against the per-run and daily limits. The report lists each kept change, what it
-moved and the run that proves it; merging is yours to decide.
+A kernel that stays up on any machine runs code, `.py` files or a notebook's cells (`exec --cells nb.ipynb:1-4`)
+and gives back what they printed, the last value, plots as images and errors with their line. `files`,
+`session install`, `shell` and `sync` move files, add packages and push your edits without losing variables. A
+call past `--timeout` is interrupted and the kernel keeps its variables; a session stops itself when idle
+([live sessions](docs/reference.md#live-sessions)).
 
-Left to run, a loop stops itself: `--target 0.95` (done), `--patience 4` (four tries in a row not kept) or
-`--max-tries 20` refuse the next try and say what to do instead. With `notify: {webhook_env: TESTBENCH_WEBHOOK}`
-in testbench.yaml you hear when runs and loops end, or when a launch waits for your yes - a Slack webhook or any
-JSON POST ([docs/loops.md](docs/loops.md), [docs/notify.md](docs/notify.md)).
+### Improve it in a loop
 
-A loop over a trading strategy also says whether its best try is better than luck: from every try's returns (the
-`equity.csv` it keeps), reverted tries included, each report gives the best try's deflated Sharpe ratio, and
-`--min-deflated-sharpe 0.95` makes `--target` count only once the best try clears it
-([docs/loops.md](docs/loops.md#is-the-best-try-luck)).
+```
+$ testbench loop start smoke --metric outputs/metrics.json:accuracy --budget-usd 0
+BASELINE: accuracy 0.86, run 20261031-054550-smoke passed.
 
-## For traders
+$ testbench loop try "hidden units 8 -> 64"        # the agent edited the code; testbench commits, runs, judges
+KEPT try 2: accuracy 0.9689 (best was 0.8689, +0.1). Run 20261031-054609-smoke passed. Best is now 509b79c25.
+
+$ testbench loop try "learning rate 0.05 -> 0.1"
+REVERTED try 3: accuracy 0.9689 is not better than the best 0.9689. The branch is back at 509b79c25.
+```
+
+Each idea is committed, proved by a run, and kept only if the number got better; one budget covers the whole loop,
+and stopping rules (`--target`, `--patience`, `--max-tries`) end it. That is a real run: Claude Code, given only
+the Claude Code plugin, took a model from 0.86 to 0.9756 accuracy in six tries, four kept and two reverted by
+testbench, in 78 seconds ([the demo](docs/demo-loop.md), [loops](docs/loops.md)).
+
+### Trade safely
 
 A strategy never grades itself: the backtest writes its trades and equity, testbench computes the numbers, and the
 strategy climbs a ladder - a backtest with costs, a look-ahead check, walk-forward windows, a sealed holdout opened
-once, then paper trading on a mock broker and on Alpaca's paper API - with the deflated Sharpe ratio over every try a
-loop made. `testbench demo trading` shows it in seconds: a backtest that looks superb, a planted look-ahead caught,
-the one-line fix, every rung passed. `testbench recipes` has the ladder for pandas, vectorbt and freqtrade, and
-alpaca-paper. testbench is not investment advice, and 0.3 does backtests and paper trading only:
-[Trading with agents safely](docs/trading-safely.md).
+once, then paper trading on a mock broker and on Alpaca's paper API - with the deflated Sharpe ratio over every
+try a loop made. `testbench demo trading` shows it in seconds: a backtest that looks superb, a planted look-ahead
+caught, the one-line fix, every rung passed. testbench is not investment advice, and 0.3 does backtests and paper
+trading only: [Trading with agents safely](docs/trading-safely.md).
+
+### Add plug-ins
+
+```toml
+[project.entry-points."agent_testbench.backends"]     # in a package's pyproject.toml
+rack = "testbench_rack:backend"                       # now `backend: rack` in testbench.yaml
+```
+
+A package can add a machine to run on, a check, a mock SDK, a place to export runs or send notifications, a
+recipe or a metric reader. `testbench plugins` lists what is installed, and `testbench plugin test` checks that a
+plug-in keeps its kind's contract - a backend, for one, must stop itself on the remote side
+([plug-ins](docs/plugins.md)).
+
+### From your editor, CI and code
+
+```yaml
+- uses: sarptandoven/agent-testbench@v1   # in a GitHub workflow: the report as the job summary, a pass or fail
+  with:
+    plan: smoke
+    comment: true                         # the verdict and how the numbers moved, on the pull request
+```
+
+[The GitHub Action](docs/github-action.md) can also sign the report (`attest: true`); `testbench ci --for gitlab`
+writes a job for GitLab, Azure Pipelines, CircleCI or any shell ([CI](docs/ci.md)).
+[The VS Code extension](docs/vscode.md) shows plans, runs, the loop and today's spend, and runs a costly plan only
+after you click Approve. From Python, `from agent_testbench import Testbench` runs plans and sessions, and
+`agent_testbench.tools` gives the same tools to the Anthropic and OpenAI APIs, the OpenAI Agents SDK, LangChain and
+the Claude Agent SDK ([Python API](docs/python-api.md)).
 
 ## Guardrails
 
-- **Money**: worst case = hardware price x time limit (+ start-up), checked before every run, session and loop.
-  Over `max_run_usd` or a day's limit: refused. Over `ask_above_usd`: a person approves - in Claude Code the hook
-  asks you, in MCP clients the server asks you directly (elicitation). `~/.testbench/limits.yaml` caps every project
-  on the machine; a project can lower those limits, never raise them, and they hold whatever was approved. Prices
-  come from a built-in table that a fetched catalog can raise, never lower (`testbench prices`). Anything that is
-  not a real number - a NaN budget, an infinite price, a broken ledger line - refuses the launch.
-- **Hard stops** on the machine doing the work: Modal's timeouts, or kernelkit's watchdog on Colab VMs, ssh machines
-  and in containers - so the bound holds with your laptop asleep. Ssh and docker runs are also stopped from this
-  machine shortly after their limit, in case the work there stopped its watchdog.
-- **Secrets** by name only, never on a command line, and a value the code prints is blanked out of everything a
-  run keeps (report, evidence, notifications, exports); strict mocks stand in for paid APIs in tests.
-- **The guard hook** (Claude Code) refuses raw cloud launches and commands that would print secrets, asks before
-  an edit raises a budget, lowers a price or loosens a docker sandbox, turns every `--approve` into a question to
-  you (in quotes, a variable, xargs or `bash -c` too), and refuses edits to the ledgers. It is a safety net, not a
-  sandbox (a script the agent writes can still pass `--approve`; the machine's limits still hold) - for running code
-  nobody reviewed, use `backend: docker` with `network: none`. [The threat model](docs/threat-model.md) says who can
-  do what, and names the test behind each guarantee.
+- **Money**: a run's worst case - the hardware's price times its time limit - is checked before every run, session
+  and loop. Above `max_run_usd` or a day's limit it is refused; above `ask_above_usd` a person approves.
+  `~/.testbench/limits.yaml` caps every project on the machine, and a project can lower those limits, never raise
+  them.
+- **Hard stops** on the machine doing the work - Modal's timeouts, or a watchdog on Colab VMs, ssh machines,
+  containers and pods - so the bound holds with your laptop asleep.
+- **Secrets** go by name only, and a value the code prints is blanked out of everything a run keeps.
+- **The guard hook** (Claude Code) asks you before every `--approve` and every edit that raises a budget. It is a
+  safety net, not a sandbox: for code nobody reviewed, use `backend: docker` with `network: none`.
 
-## MCP and agents
+[The threat model](docs/threat-model.md) says who can do what, and names the test behind each guarantee.
 
-Tools: `session_start`, `session_exec`, `session_files`, `session_sync`, `session_install`, `session_shell`,
-`session_list`, `session_stop`, `check_project`, `plans`, `run_plan`, `wait_run`, `get_report`, `list_runs`, `cancel_run`, `spend`,
-`lint_notebook`, `rescue_notebook`, `recipes`, `export_run`, `diff_runs`, `add_note`, `loop_start`, `loop_try`, `loop_status`,
-`loop_stop`. They run side by side (stop a
-session while a long cell runs), return plots and screenshots as images, and pass on progress. `testbench mcp --http`
-serves streamable HTTP on 127.0.0.1. In Claude Code: `claude mcp add agent-testbench -- testbench mcp`, or the
-plugin, which adds the `iterate` and `setup` skills.
+## Install
 
-Resources, read without running anything: `testbench://plans`, `testbench://runs`, `testbench://runs/{run_id}/report`
-(and `report.json`, `evidence/{path}`), `testbench://loops/current`, `testbench://notes`, `testbench://config/schema`.
-They serve only reports and step evidence, as the dashboard does. Prompts: `prove-this-change`, `find-why-this-fails`,
-`tune-with-a-loop` and `check-a-strategy` ([docs/clients.md](docs/clients.md#resources-and-prompts)).
+```bash
+pip install "agent-testbench[all]"           # or: uv tool install "agent-testbench[all]"
+```
 
-## Commands
+### Connect your agent
 
-`testbench --help` shows the core, a dozen commands:
+- **Claude Code**: the plugin adds the `iterate` and `setup` skills and the guard hook for spending and secrets
+  (only the MCP server: `claude mcp add agent-testbench -- testbench mcp`). Then ask in plain words: *"get
+  training working and prove it with the smoke plan"*, or *"use testbench loop to raise accuracy, budget $2"*.
 
-| | |
-|---|---|
-| `testbench demo` / `check` / `doctor` | start: an example project, a first run of yours, what this machine can run |
-| `testbench plans` / `estimate` / `run` / `report [--format html\|junit]` / `verify [--attestation]` / `ui [--serve]` | prove it with a plan: its worst case, the run, its report and evidence, every run as a page |
-| `testbench session start/list/stop/...` / `exec` / `loop start/try/status/stop` | work live in a kernel, improve in a loop |
+  ```bash
+  claude plugin marketplace add sarptandoven/agent-testbench
+  claude plugin install agent-testbench@agent-testbench
+  ```
 
-The rest, for setup, money, notebooks and more (`testbench help --all` lists every command in groups):
+- **Cursor, VS Code, Codex, Gemini CLI**: `testbench connect cursor` (or `vscode`, `codex`, `gemini`, `claude`;
+  `--user` for every project, `--list` to see what is set up) registers the MCP server in the client's own config
+  and writes the working rules into AGENTS.md.
+- **Any other MCP client** (nothing to install with [uv](https://docs.astral.sh/uv/)):
 
-| | |
-|---|---|
-| `testbench init [--recipe]` / `recipes` / `schema` / `connect` / `ci` / `selftest` / `mcp [--http]` / `plugins` / `plugin test` | set up a project, your agents and CI (GitLab, Azure, CircleCI, a shell script), editor autocomplete for testbench.yaml, check the promises hold here, serve MCP, list plug-ins and check one keeps its contract |
-| `testbench wait` / `status` / `runs` / `cancel` / `watch` | follow, list and stop runs; run a free plan again on every change |
-| `testbench diff` / `history` / `export` / `share` / `badge` | what changed between runs, the checked numbers over time, MLflow / W&B / csv / jsonl, a run as a page others can check, a README badge |
-| `testbench files` / `notify test` | files on a session's machine; a test message to the `notify:` webhook |
-| `testbench spend [--modal]` / `prices [--update]` | money |
-| `testbench lint` / `rescue` / `nb split/build/fields` / `note` | notebooks and the lab notebook |
+  ```json
+  { "mcpServers": { "agent-testbench": { "command": "uvx", "args": ["--from", "agent-testbench[all]", "testbench", "mcp"] } } }
+  ```
 
-`testbench help COMMAND` shows a command's options and examples; exit codes are in
-[docs/reference.md](docs/reference.md#exit-codes) (0 passed, 1 failed, 2 refused or bad input, 3 still running). A
-refusal (exit 2) says what was refused, why, and the command or the testbench.yaml field that fixes it.
+- **Any other agent** reads the working rules `testbench init` writes into `AGENTS.md`.
 
-## Documentation
+The server's tools, resources and prompts, and which guardrails hold in which client:
+[other coding agents](docs/clients.md).
 
-- [docs/reference.md](docs/reference.md) - every field of testbench.yaml, sessions, plans, steps, loops, proof
-  records, prices, the ssh backend, machine limits, writing a backend plugin
-- [docs/plugins.md](docs/plugins.md) - plug-ins of every kind: how a package adds one, and the kit that checks it
-- [docs/expectations.md](docs/expectations.md) - every expectation, with what its failure looks like
-- [docs/recipes.md](docs/recipes.md), [docs/notebooks.md](docs/notebooks.md), [docs/rescue.md](docs/rescue.md),
-  [docs/mocks.md](docs/mocks.md) - starting points, what notebook steps accept, rescuing notebooks, mock LLM SDKs
-- [docs/docker.md](docs/docker.md), [docs/kubernetes.md](docs/kubernetes.md) - the docker and kubernetes backends
-- [docs/loops.md](docs/loops.md), [docs/notify.md](docs/notify.md), [docs/export.md](docs/export.md) - loops,
-  notifications, exports to MLflow and W&B
-- [docs/clients.md](docs/clients.md), [docs/python-api.md](docs/python-api.md) - other coding agents, the Python API
-  and LLM tool definitions
-- [docs/vscode.md](docs/vscode.md) - the VS Code extension: plans, runs, the loop and today's spend in the editor; a
-  cost that needs approval runs only after you click Approve and run
-- [docs/tour.md](docs/tour.md) - a five-minute tour with real screenshots, from install to a proved fix
-- [docs/examples.md](docs/examples.md) - the examples: an LLM app on a mock SDK, a web form in headless Chromium, a
-  failing test suite for your agent to fix, a Colab-style notebook, a strategy with a planted look-ahead bug
-- [docs/trading-safely.md](docs/trading-safely.md), [docs/trading.md](docs/trading.md) - trading with agents safely,
-  the trading pack: a strategy's numbers, sealed data, look-ahead, overfitting statistics, mock brokers
-- [docs/why.md](docs/why.md), [docs/use-cases.md](docs/use-cases.md), [docs/faq.md](docs/faq.md),
-  [docs/troubleshooting.md](docs/troubleshooting.md)
-- [docs/github-action.md](docs/github-action.md) - the GitHub Action: inputs, outputs, what reviewers see
-- [docs/ci.md](docs/ci.md) - CI jobs for GitLab, Azure Pipelines, CircleCI and any shell (`testbench ci`)
-- [docs/demo-loop.md](docs/demo-loop.md), [docs/demo-sandbox.md](docs/demo-sandbox.md) and
-  [docs/demo.md](docs/demo.md) - real agent runs, with what they did
-- [examples/](examples) - a Colab-style notebook with plans for every backend, and a web UI check
-
-## Install notes
+### What each machine needs
 
 - **Modal**: `modal setup` once (your account; [pricing](https://modal.com/pricing)).
 - **Colab**: `uv tool install google-colab-cli`, then log in once (`colab new`). Uses your compute units.
@@ -356,7 +208,70 @@ refusal (exit 2) says what was refused, why, and the command or the testbench.ya
 - **Trackers**: `pip install "agent-testbench[mlflow]"` or `[wandb]` for exports.
 - **Web steps**: `playwright install chromium`.
 
-`testbench doctor` shows what this machine can run.
+`testbench doctor` shows what this machine can run. Each plan picks its machine (`backend:`), and so does each
+session (`--backend`), so the same notebook can be proved for free here, then on the target GPU for a few cents
+([backends](docs/backends.md)). Linux, macOS and Windows (Colab's CLI has no Windows build).
+
+## Commands
+
+`testbench --help` shows the core:
+
+| | |
+|---|---|
+| **start** | |
+| `testbench demo` | copy an example project, run its free plan, show what is next |
+| `testbench check` | run every free plan here, even with no testbench.yaml |
+| `testbench doctor` | check what this machine can run, and what to fix |
+| **prove it with a plan** | |
+| `testbench plans` | list the plans, their hardware and worst-case cost |
+| `testbench estimate` | price a plan's worst case; say whether it may launch now |
+| `testbench run` | run a plan and print its report |
+| `testbench report` | print a run's report: markdown, json, html or junit |
+| `testbench verify` | check a run's evidence against its recorded hashes |
+| `testbench ui` | show every run as a page, or a live dashboard (--serve) |
+| **work live, improve in a loop** | |
+| `testbench session` | manage a live kernel: start, list, stop, sync, install, shell |
+| `testbench exec` | run code or notebook cells in a session, see what came back |
+| `testbench loop` | try changes one at a time; keep what a plan run shows is better |
+
+`testbench help --all` adds the rest, in these groups:
+
+| | |
+|---|---|
+| set up | `init`, `recipes`, `schema`, `connect`, `ci`, `selftest`, `mcp`, `plugins`, `plugin test` |
+| runs | `wait`, `status`, `runs`, `cancel`, `watch` |
+| proof | `diff`, `history`, `share`, `badge`, `export`, `numbers` |
+| sessions and notifications | `files`, `notify test` |
+| money | `spend`, `prices` |
+| notebooks and the lab notebook | `lint`, `rescue`, `nb`, `note` |
+
+`testbench help COMMAND` shows a command's options and examples, and [the reference](docs/reference.md#commands)
+lists every command with its exit codes: 0 passed, 1 failed, 2 refused or bad input, 3 still running. A refusal
+says what was refused, why, and the command or the testbench.yaml field that fixes it.
+
+## Documentation
+
+- **Start**: [getting started](docs/getting-started.md), [the tour](docs/tour.md), [why](docs/why.md),
+  [use cases](docs/use-cases.md), [examples](docs/examples.md), [recipes](docs/recipes.md), real agent runs
+  ([a loop improves a model](docs/demo-loop.md), [a suite fixed in a sandbox](docs/demo-sandbox.md),
+  [a planted bug found](docs/demo.md))
+- **Prove things**: [expectations](docs/expectations.md), [notebooks](docs/notebooks.md),
+  [mock clients](docs/mocks.md), [rescue a notebook](docs/rescue.md), [proof records](docs/proof-records.md),
+  [share a run](docs/share.md), [watch](docs/watch.md), [the dashboard](docs/dashboard.md),
+  [exports](docs/export.md)
+- **Work with agents**: [other coding agents](docs/clients.md), [VS Code](docs/vscode.md), [loops](docs/loops.md),
+  [notifications](docs/notify.md), [the GitHub Action](docs/github-action.md), [other CIs](docs/ci.md),
+  [Python API](docs/python-api.md)
+- **Machines**: [backends](docs/backends.md), [Docker](docs/docker.md), [ssh](docs/ssh.md),
+  [Kubernetes](docs/kubernetes.md)
+- **Trading**: [trading with agents safely](docs/trading-safely.md), [files and metrics](docs/trading.md),
+  [sealed data](docs/trading-data.md), [overfitting statistics](docs/trading-stats.md)
+- **Plug-ins**: [plug-ins](docs/plugins.md), [how it fits together](docs/architecture.md)
+- **Trust**: [threat model](docs/threat-model.md), [check it yourself](docs/verify.md), [FAQ](docs/faq.md)
+- **Reference**: [testbench.yaml and every command](docs/reference.md), [troubleshooting](docs/troubleshooting.md)
+- **Project**: [changelog](CHANGELOG.md), [contributing](CONTRIBUTING.md), [publishing](docs/publishing.md)
+
+The same pages, with search: <https://sarptandoven.github.io/agent-testbench/>.
 
 ## How it is tested
 

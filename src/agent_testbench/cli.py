@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import functools
+import importlib
 import json
 import math
 import os
@@ -18,10 +19,45 @@ import sys
 import textwrap
 from pathlib import Path
 
-from . import __version__, budget, config as C, lint as L, notebook as NB, report as R, runs
+from . import __version__
 
-INIT_TEMPLATE = """\
-# yaml-language-server: $schema=""" + C.SCHEMA_URL + """
+
+class _Later:
+    """A module of the package, imported when a command first uses something of it: `testbench --version` and
+    `--help` load neither PyYAML nor the notebook machinery, and each command loads only what it uses (the others
+    import theirs inside the command). tests/test_cli_ux.py keeps start-up small."""
+
+    def __init__(self, name: str):
+        self._name = f"{__package__}.{name}"
+
+    def __getattr__(self, attr):
+        return getattr(importlib.import_module(self._name), attr)
+
+
+budget, C, L, NB, R, runs = map(_Later, ("budget", "config", "lint", "notebook", "report", "runs"))
+
+
+def _refusals() -> tuple:
+    """The errors a command reports in one line and exit 2: testbench.yaml's, and a notebook that cannot be read.
+    Only those of modules already loaded, since a module that was never loaded raised nothing (and an `except`
+    clause would otherwise load testbench.yaml's and the notebook machinery on every exit)."""
+    found = ((f"{__package__}.config", "ConfigError"), (f"{__package__}.notebook", "NotebookError"))
+    return tuple(getattr(sys.modules[m], name) for m, name in found if m in sys.modules)
+
+
+def init_template() -> str:
+    """What `testbench init` writes, with {project} and {plans} to fill in; the first line points editors at the
+    schema. Put together on first use, so that importing cli does not load testbench.yaml's machinery."""
+    return "# yaml-language-server: $schema=" + C.SCHEMA_URL + _INIT_BODY
+
+
+def __getattr__(name):                     # `from agent_testbench.cli import INIT_TEMPLATE`, as recipes and tests do
+    if name == "INIT_TEMPLATE":
+        return init_template()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+_INIT_BODY = """
 # agent-testbench: what the agent may run, where, and for how much. Reference: https://github.com/sarptandoven/agent-testbench
 project: {project}
 
@@ -127,7 +163,7 @@ def cmd_init(a):
     if a.recipe:
         return _init_from_recipes(root, target, project, found, a.recipe)
     plans = "".join(text for _, text, _ in found) or EMPTY_PLAN
-    target.write_text(INIT_TEMPLATE.format(project=project, plans=plans))
+    target.write_text(init_template().format(project=project, plans=plans))
     _write_agent_rules(root)
     first = next(iter(C.load(root)["plans"]))
     machine = budget.write_limits_if_missing()
@@ -170,8 +206,8 @@ def _init_from_recipes(root: Path, target: Path, project: str, found: list, want
         for name, text, what in found:
             plan = yaml.safe_load("plans:\n" + text)["plans"]
             (left if name in theirs or RC.subjects(plan) & covered else kept).append((name, text, what))
-        text, notes = RC.compose(INIT_TEMPLATE.format(project=project, plans="".join(t for _, t, _ in kept)), chosen,
-                                 fresh=True)
+        text, notes = RC.compose(init_template().format(project=project, plans="".join(t for _, t, _ in kept)),
+                                 chosen, fresh=True)
         cfg = RC.check(text, root)
     except RC.RecipeError as exc:
         print(f"testbench: {exc}")
@@ -902,7 +938,7 @@ def _session_cmd(fn):
         from .session_backends import SessionError
         try:
             return fn(a)
-        except (SessionError, C.ConfigError, NB.NotebookError) as exc:
+        except (SessionError, *_refusals()) as exc:
             print(f"testbench: {exc}")
             return 2
     return wrapped
@@ -1338,6 +1374,14 @@ class _Parser(argparse.ArgumentParser):
         return f"For example: `{hit}`. " if hit else ""
 
 
+class _Kinds:
+    """The kinds of plug-in, read when `plugin test --help` shows them rather than whenever the parser is made."""
+
+    def __str__(self):
+        from .plugins import KINDS
+        return ", ".join(KINDS)
+
+
 def _number(text: str) -> float:
     """A real number on the command line; nan and inf would compare false with every limit."""
     try:
@@ -1373,61 +1417,62 @@ def _count(text: str) -> int:
     return v
 
 
-GROUPS = {   # `testbench help --all`: every command, in the groups README's Commands table uses, one short line each
-    "try it and set up": {
+# Every command, in a group, with one line that says what it does: `testbench help --all` lists them all, and
+# `testbench --help` the groups in CORE. README.md's Commands table and docs/reference.md#commands use the same groups,
+# in this order, with the same lines (tests/test_cli_ux.py checks that they agree).
+GROUPS = {
+    "start": {
         "demo": "copy an example project, run its free plan, show what is next",
-        "init": "write testbench.yaml and AGENTS.md for this project",
-        "recipes": "ready plans for a goal, each with its worst-case cost",
-        "schema": "testbench.yaml's JSON Schema, for editors to autocomplete it",
-        "connect": "set up Cursor, VS Code, Codex, Gemini or Claude Code to use it",
-        "ci": "a CI job for GitLab, Azure, CircleCI or a shell script",
-        "doctor": "check what this machine can run, and what to fix",
-        "plugins": "the kinds of plug-in: built in, installed, broken and why",
-        "plugin": "plugin test: check a plug-in keeps its kind's contract",
-        "selftest": "a minute or so: check the main promises hold on this machine",
-        "mcp": "serve these commands as MCP tools"},
-    "plans": {
         "check": "run every free plan here, even with no testbench.yaml",
-        "plans": "the plans, their hardware and worst-case cost",
+        "doctor": "check what this machine can run, and what to fix"},
+    "prove it with a plan": {
+        "plans": "list the plans, their hardware and worst-case cost",
+        "estimate": "price a plan's worst case; say whether it may launch now",
         "run": "run a plan and print its report",
+        "report": "print a run's report: markdown, json, html or junit",
+        "verify": "check a run's evidence against its recorded hashes",
+        "ui": "show every run as a page, or a live dashboard (--serve)"},
+    "work live, improve in a loop": {
+        "session": "manage a live kernel: start, list, stop, sync, install, shell",
+        "exec": "run code or notebook cells in a session, see what came back",
+        "loop": "try changes one at a time; keep what a plan run shows is better"},
+    "set up": {
+        "init": "write testbench.yaml and AGENTS.md for this project",
+        "recipes": "list ready plans for a goal, each with its worst-case cost",
+        "schema": "print testbench.yaml's JSON Schema, for editor autocomplete",
+        "connect": "set up Claude Code, Cursor, VS Code, Codex or Gemini to use it",
+        "ci": "write a CI job for GitLab, Azure, CircleCI or a shell script",
+        "selftest": "check the main promises hold on this machine, in a minute",
+        "mcp": "serve these commands as MCP tools",
+        "plugins": "list the kinds of plug-in: built in, installed, broken and why",
+        "plugin": "plugin test: check a plug-in keeps its kind's contract"},
+    "runs": {
         "wait": "follow a run until it ends",
-        "status": "one line about a run",
-        "runs": "recent runs",
+        "status": "print one line about a run",
+        "runs": "list recent runs",
         "cancel": "stop a run, here and on its remote machine",
         "watch": "run a free plan again whenever the files change"},
     "proof": {
-        "report": "a run's report: markdown, json, html or junit",
-        "verify": "check a run's evidence against its recorded hashes",
+        "diff": "show what changed between two runs",
+        "history": "show a plan's runs over time, with the numbers its checks found",
         "share": "publish a run's proof as a page anyone can open and check",
-        "badge": "a README badge (SVG) of a plan's latest run",
-        "diff": "what changed between two runs",
-        "history": "a plan's runs over time, with the numbers its checks found",
-        "ui": "every run as a page, or a live dashboard (--serve)",
-        "export": "a run to MLflow, W&B, csv or jsonl",
-        "numbers": "the named numbers a reader finds in evidence files"},
-    "live sessions": {
-        "session": "a live kernel: start, list, stop, sync, install, shell",
-        "exec": "run code or notebook cells in a session, see what came back",
-        "files": "list, get and put files on a session's machine"},
-    "loops and notifications": {
-        "loop": "try changes one at a time; keep what a plan run shows is better",
-        "notify": "send a test message to testbench.yaml's notify: webhook"},
+        "badge": "draw a README badge (SVG) of a plan's latest run",
+        "export": "send a run to MLflow, W&B, csv or jsonl",
+        "numbers": "list the named numbers a reader finds in evidence files"},
+    "sessions and notifications": {
+        "files": "list, get and put files on a session's machine",
+        "notify": "notify test: send a test message to the notify: webhook"},
     "money": {
-        "estimate": "a plan's worst case, and whether it may launch now",
-        "spend": "what runs and sessions have cost",
-        "prices": "the prices behind every estimate"},
+        "spend": "show what runs and sessions have cost",
+        "prices": "list the prices behind every estimate"},
     "notebooks and the lab notebook": {
         "lint": "check notebooks for Colab and headless pitfalls",
-        "rescue": "why a notebook does not run, and what to do",
-        "nb": "a notebook as plain cell files: split, build, fields",
+        "rescue": "find why a notebook does not run, and what to do",
+        "nb": "split a notebook into cell files, build it back, list its fields",
         "note": "add a line to the lab notebook (.testbench/NOTES.md)"},
 }
 
-CORE = {   # `testbench --help`: the commands a newcomer needs, each with its line from GROUPS; `help --all`: every one
-    "start": ("demo", "check", "doctor"),
-    "prove it with a plan": ("plans", "estimate", "run", "report", "verify", "ui"),
-    "work live, improve in a loop": ("session", "exec", "loop"),
-}
+CORE = ("start", "prove it with a plan", "work live, improve in a loop")   # the groups `testbench --help` shows
 
 ABOUT = ("testbench runs your code on real machines - this one, a container, an ssh box, a Modal GPU, a Colab VM - "
          "and proves what it did with plans: steps, checks and evidence, inside a budget. Coding agents operate it "
@@ -1670,7 +1715,7 @@ def commands(ap) -> dict:
 
 def _listing(groups: dict, top: dict) -> list[str]:
     """Each group's title and its commands, one line each. A name the parser lacks is left out, and so is a group
-    left with none: CORE may name a command another branch adds."""
+    left with none."""
     lines = []
     for title, names in groups.items():
         shown = [textwrap.fill(f"{n:<9} {summary}", _width(), initial_indent="    ", subsequent_indent=" " * 14)
@@ -1681,7 +1726,7 @@ def _listing(groups: dict, top: dict) -> list[str]:
 
 def _finish(ap) -> None:
     """Every command's --help gets a description and ends with its examples. `testbench --help` lists the core
-    commands (CORE) and how many more there are; `testbench help --all` lists every one in the groups README uses."""
+    groups (CORE) and how many more commands there are; `testbench help --all` lists every group (GROUPS)."""
     found = commands(ap)
     for path, p in found.items():
         sub = _subcommands(ap if " " not in path else found[path.rsplit(" ", 1)[0]])
@@ -1690,9 +1735,8 @@ def _finish(ap) -> None:
         if path in examples():
             p.epilog = "examples:\n" + examples()[path]
     top = _subcommands(ap).choices
-    line = {n: summary for names in GROUPS.values() for n, summary in names.items()}
-    other = {n: p.summary for n, p in top.items() if n not in line}
-    core = {title: {n: line.get(n) or top[n].summary for n in names if n in top} for title, names in CORE.items()}
+    other = {n: p.summary for n, p in top.items() if all(n not in names for names in GROUPS.values())}
+    core = {title: GROUPS[title] for title in CORE if title in GROUPS}
     more = len(set(top) - {n for names in core.values() for n in names})
     ap.description = "\n".join([_wrap(ABOUT), "", "commands:", *_listing(core, top)] + [
         "", f"{more} more, for setup, money, notebooks and the rest: testbench help --all"] * bool(more))
@@ -2058,7 +2102,6 @@ def build_parser() -> argparse.ArgumentParser:
                    help="test: send one test message and say whether it was accepted")
     p.set_defaults(fn=cmd_notify)
     sub.add_parser("doctor", help="check what this machine can run; each `no` line says what to do").set_defaults(fn=cmd_doctor)
-    from .plugins import KINDS
     p = sub.add_parser("plugins", help="each kind of plug-in: its built-ins, what is installed (and from which "
                                        "package), what is broken and why")
     _json(p, "every kind and its plug-ins")
@@ -2076,8 +2119,8 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("target", nargs="?", metavar="TARGET",
                    help="module:attr, or an installed package's name (e.g. testbench-backend-example)")
     q.add_argument("--installed", action="store_true", help="every installed plug-in, of every kind")
-    q.add_argument("--kind", metavar="KIND", help=f"test it as this kind: {', '.join(KINDS)} (default: the kind its "
-                                                  "entry point declares, or the only one that takes it)")
+    q.add_argument("--kind", metavar="KIND", help="test it as this kind: %(kinds)s (default: the kind its entry point "
+                                                  "declares, or the only one that takes it)").kinds = _Kinds()
     _json(q, "the results")
     p.set_defaults(fn=cmd_plugin)
     p = sub.add_parser("selftest", help="a minute or so, local and free: check that the main promises hold on this "
@@ -2231,6 +2274,9 @@ def _utf8_on_windows(argv) -> None:
 def main(argv=None):
     _utf8_on_windows(argv)
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv == ["--version"]:                        # what argparse would print, before the parser is even made
+        print(f"agent-testbench {__version__}")
+        sys.exit(0)
     if argv[:1] == ["help"]:                         # `testbench help run` is `testbench run --help`
         argv = [*argv[1:], "--help"]
     ap = build_parser()
@@ -2251,7 +2297,7 @@ def main(argv=None):
         a.json = True                                # --format json and --json are the same everywhere
     try:
         sys.exit(a.fn(a))
-    except (C.ConfigError, NB.NotebookError) as exc:
+    except _refusals() as exc:
         print(f"testbench: {exc}", file=sys.stderr)
         sys.exit(2)
     except (FileNotFoundError, IsADirectoryError, NotADirectoryError, PermissionError) as exc:

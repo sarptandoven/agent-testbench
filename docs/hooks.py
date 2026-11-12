@@ -11,8 +11,8 @@ Three things, all at build time; no file in the repository is changed:
   On the site, a link to a file that is a page of the site goes to that page; a link to any other file or
   folder of the repository goes to it on GitHub; web links are kept. So README.md's `docs/docker.md` becomes
   `docker.md`, and `src/agent_testbench/schema/report-v1.schema.json` a link to that file on GitHub. A file
-  included whole is that page; so is a file named in HOME (README.md is the home page, `../README.md#loops`
-  goes to `index.md#loops`, so the home page keeps README.md's headings).
+  included whole is that page; so is a file named in HOME (README.md is the home page, `../README.md#guardrails`
+  goes to `index.md#guardrails`, so the home page keeps README.md's headings).
 - In a table, GitHub needs `\|` for a pipe inside code (`html\|junit`); Python-Markdown shows the backslash, so it
   is dropped there (Python-Markdown already keeps a pipe inside code from splitting the cell).
 

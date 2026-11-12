@@ -1,13 +1,15 @@
 """The core of agent-testbench: what it takes to prove a plan on this machine, and nothing more.
 
-    ways in    the CLI, the MCP server, the Python API and its tool definitions, editors (connect), the dashboard,
-       |       the GitHub Action
+    ways in    the CLI, the MCP server, the Python API and its tool definitions, editors (connect, the VS Code
+       |       extension), the dashboard, the GitHub Action and `testbench ci` jobs
        v
     core       load testbench.yaml, price a plan and check the budget, launch a run and drive it here, check its
        |       expectations, write and verify its proof record
        v
-    plug-ins   machines (Modal, Colab, ssh, Docker, Kubernetes, entry-point backends), kinds of step (notebooks, web
-               pages), mocks, export sinks, notifiers, recipes
+    plug-ins   seven kinds: backends (Modal, Colab, ssh, Docker, Kubernetes, entry-point backends), checks, mocks,
+               export sinks, notifiers, recipes, metric readers; the trading pack is plug-ins of these kinds
+
+docs/architecture.md is this picture in words.
 
 The rule: a core module never imports a layer, or a package other than the standard library and PyYAML, at module
 level. A layer may import the core; the core reaches a layer only inside the function that needs it (a notebook step

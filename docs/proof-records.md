@@ -1,9 +1,29 @@
 # Proof records
 
-<!-- From README.md, "Proof records", and docs/reference.md, "Proof records" and "Run folder". Edit them there.
-     "Checking a run away from its project" and "Comparing two runs" are this page's own. The screenshots are made
-     by docs/assets/make_screenshots.py from the runs of docs/tour.md. -->
---8<-- "README.md#proof-records"
+<!-- "What a record holds" and "The run folder" are docs/reference.md's "Proof records" and "Run folder": edit them
+     there. The rest is this page's own. The screenshots are made by docs/assets/make_screenshots.py from the runs
+     of docs/tour.md. -->
+
+Each report names what it proves: the git commit it ran (and a hash of any uncommitted changes), the Python,
+platform and packages where it ran, and the sha256 of every evidence file, in a format published as a
+[JSON Schema](../src/agent_testbench/schema/report-v1.schema.json). `testbench verify` says whether the evidence
+still matches, and `testbench diff A B` says what changed between two runs - each checked number old -> new and
+whether that is better by its rule, checks that flipped, evidence that changed, the commits, packages that changed
+version.
+
+The same record, in the forms people read:
+
+- `testbench report --format html` writes one page with the plots inline, and `--format junit` feeds CI test
+  reports.
+- `testbench history <plan>` shows how the checked numbers moved, and `testbench ui` writes static pages for every
+  run with a trend line per number; `testbench ui --serve` shows them live at http://127.0.0.1:8770/ - what is
+  running, its log as it grows, sessions, the loop, and today's spend against your limits - read-only and for this
+  machine only ([live dashboard](dashboard.md)).
+- `testbench watch smoke` reruns a free plan whenever you save, one run at a time ([watch](watch.md)).
+- `testbench export --to mlflow|wandb|csv|jsonl` (or `export:` in testbench.yaml, after every run) puts runs where
+  you already track experiments, with the evidence attached ([exports](export.md)).
+- `testbench share --to git:gh-pages/runs` publishes a run as a page anyone can open, with a README badge, and
+  `testbench verify --from URL` checks it there - no project needed ([share a run](share.md)).
 
 `testbench ui` for the demo project after the runs of [the tour](tour.md) (a screenshot):
 

@@ -76,7 +76,7 @@ no   testbench.yaml: No testbench.yaml here or in any parent of <folder>. Run `t
 - `` no   Modal login: run `modal setup` `` - once, in your terminal (an agent should never handle the token). In CI,
   `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` in the environment count.
 - `no   docker daemon: <reason> - start Docker` - the CLI is there but no daemon answers `docker info`.
-- `no   backend <name>: <why>` - a backend plugin is installed but did not load (or took a built-in's name); only
+- `no   backend <name>: <why>` - a backend plug-in is installed but did not load (or took a built-in's name); only
   projects that use it break. The same for the other kinds (`no   check <name>: <why>`, ...). `testbench plugin
   test PACKAGE` says what is wrong with it; `testbench plugins` lists every kind and what is installed.
 - `no   testbench.yaml: <message>` - the file does not load; the message is one of those below.
@@ -298,7 +298,7 @@ A run that started writes a report; the failure is in it, first. `testbench repo
   code)*. Colab's CLI has no Windows build.
 - Modal: `testbench doctor` says `` Modal login: run `modal setup` `` until there is a `~/.modal.toml` or a
   `MODAL_TOKEN_ID` in the environment.
-- Plugins: `` backend '<name>' is installed but did not load (<why>); `testbench doctor` shows it - reinstall or fix
+- Plug-ins: `` backend '<name>' is installed but did not load (<why>); `testbench doctor` shows it - reinstall or fix
   that package `` *(from the code)*.
 
 ## The Claude Code guard hook

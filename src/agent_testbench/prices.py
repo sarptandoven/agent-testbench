@@ -15,7 +15,6 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
-import urllib.request
 from pathlib import Path
 
 URL = "https://raw.githubusercontent.com/sarptandoven/agent-testbench/main/pricing/catalog.json"
@@ -107,6 +106,7 @@ def source(name: str, built_in: dict, fetched, overrides: dict | None) -> str:
 
 def update(url: str = URL) -> list[str]:
     """Fetch the catalog and keep it; returns what it raises or adds compared with the built-in tables."""
+    import urllib.request                         # here: every estimate reads prices, only this fetches them
     try:
         with urllib.request.urlopen(url, timeout=30) as r:
             data = json.loads(r.read().decode())

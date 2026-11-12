@@ -83,41 +83,17 @@ What it does not prove, and how it compares with CI, papermill or calling Modal 
 
 --8<-- "README.md#quick-start"
 
-## What your agent can do with it
+## What you can do
 
---8<-- "README.md#what-your-agent-can-do-with-it"
-
-## Where it runs
-
---8<-- "README.md#where-it-runs"
-
-## Live sessions
-
---8<-- "README.md#live-sessions"
-
-## Plans and expectations
-
---8<-- "README.md#plans-and-expectations"
-
-## Proof records
-
---8<-- "README.md#proof-records"
-
-## Loops
-
---8<-- "README.md#loops"
-
-## For traders
-
---8<-- "README.md#for-traders"
+--8<-- "README.md#what-you-can-do"
 
 ## Guardrails
 
 --8<-- "README.md#guardrails"
 
-## MCP and agents
+## Install
 
---8<-- "README.md#mcp-and-agents"
+--8<-- "README.md#install"
 
 ## Commands
 
@@ -126,10 +102,6 @@ What it does not prove, and how it compares with CI, papermill or calling Modal 
 ## Documentation
 
 --8<-- "README.md#documentation"
-
-## Install notes
-
---8<-- "README.md#install-notes"
 
 ## How it is tested
 
