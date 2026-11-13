@@ -204,7 +204,8 @@ def test_a_notebook_whose_packages_are_missing_is_skipped_with_the_command_that_
     assert r.returncode == 2, r.stdout + r.stderr       # nothing could run
     line = next(ln for ln in r.stdout.splitlines() if ln.startswith("explore-local:"))
     assert "skipped: explore.ipynb imports surely_not_installed_pkg_7f3, which the Python its kernel runs" in line
-    assert "is a guess" in line and "pip install surely-not-installed-pkg-7f3`" in line, line
+    assert "is a guess" in line and re.search(r"pip install (--python \S+ )?surely-not-installed-pkg-7f3`", line), \
+        line                                              # pip, or uv pip when this Python's venv was made by uv
     assert "Next: install what explore-local needs:" in r.stdout
     assert not (root / ".testbench").exists(), "nothing ran, so nothing is written"
 

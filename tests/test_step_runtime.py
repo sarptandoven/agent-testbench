@@ -300,7 +300,7 @@ def test_from_a_tool_environment_check_finds_a_notebooks_imports_in_the_projects
     assert result["status"] == "passed" and "VALUE 7" in log, log
     make_notebook(root / "lacks.ipynb", ["import venv_lacks_mod"])
     what, how = CK._notebook_needs(root / "lacks.ipynb", root)
-    assert f"({python})" in what and how.startswith(f"{python} -m pip install ") and "agent-testbench" not in how, \
+    assert f"({python})" in what and how == CK._pip(str(python), ["venv-lacks-mod"]) and "--with" not in how, \
         f"the venv's Python lacks it: installed there, not with uvx --with ({what}: {how})"
 
 
