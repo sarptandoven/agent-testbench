@@ -281,7 +281,7 @@ def kernel_python(project: Path, environ: dict | None = None) -> tuple[str | Non
     if not _has_ipykernel(str(python), environ):
         from .check import _pip
         return None, (f"the kernel runs on {own}: the project's virtualenv ({venv}) has no ipykernel. "
-                      f"`{_pip(str(python), ['ipykernel'])}` puts it there, and notebooks then run on the project's "
+                      f"`{_pip(str(python), ['ipykernel'])}` puts it there, and the kernel then runs on the project's "
                       "Python")
     return str(python), ""
 

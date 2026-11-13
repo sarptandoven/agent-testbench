@@ -104,7 +104,10 @@ a strategy good until it survives costs, look-ahead, an untouched holdout and th
   a notebook's kernel, node, go or cargo); `testbench diff` names a step whose interpreter changed. From uvx, uv
   tool or pipx a notebook's kernel runs on the project's virtualenv when it has ipykernel, and the report's
   `environment` (Python, executable, packages - what `testbench diff` and `repro` compare) is the steps' Python, asked
-  by running it, not uvx's own; `environment.testbench` names the Python testbench ran on.
+  by running it, not uvx's own; `environment.testbench` names the Python testbench ran on. A local live session
+  started from there runs its kernel on the project's virtualenv by the same rule (`session start` says which),
+  `session install` installs for the kernel's Python (never into uvx's own: refused, with the fix) and
+  `session shell`'s `python` is the project's.
 - A Docker plan or session whose daemon is not running is refused at once (exit 2, how to start it) before any
   run, session or ledger line is written (`Backend.preflight`).
 - `init --recipe trading-backtest` writes a starter `backtest.py` (fees, no look-ahead, the standard files) when

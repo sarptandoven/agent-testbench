@@ -31,6 +31,8 @@ def started(plain):
 
 def test_state_persists_like_notebook_cells(started):
     root = started
+    handles = state(root)["handles"]
+    assert "tool" not in handles and "kernel_note" not in handles, "installed like any package: its own python3 kernel"
     assert cli(root, "exec", "total = 40").returncode == 0
     r = cli(root, "exec", "total += 2\nprint('total is', total)\ntotal * 10")
     assert r.returncode == 0 and "total is 42" in r.stdout and "=> 420" in r.stdout

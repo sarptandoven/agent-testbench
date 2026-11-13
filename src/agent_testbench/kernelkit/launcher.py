@@ -1,11 +1,12 @@
 """Start one IPython kernel and keep it until told to stop.
 
-    python -m agent_testbench.kernelkit.launcher --workdir DIR --state-dir DIR [--shim]
+    python -m agent_testbench.kernelkit.launcher --workdir DIR --state-dir DIR [--shim] [--python PYTHON]
 
 Writes STATE_DIR/kernel.json (the connection file), kernel.pid and ready. Exits when the kernel dies or on
 SIGTERM (on Windows also a console break), shutting the kernel down. A file STATE_DIR/interrupt asks it to
 interrupt the kernel - the way that works on every system, Windows included. With --shim, `google.colab` in the
-kernel is the headless stand-in.
+kernel is the headless stand-in. With --python, the kernel runs on that Python (a project's virtualenv with ipykernel,
+when testbench runs from uvx, uv tool or pipx) instead of the python3 kernel of the Python running this.
 """
 import argparse
 import os
@@ -20,6 +21,7 @@ def main(argv=None):
     ap.add_argument("--workdir", required=True)
     ap.add_argument("--state-dir", required=True)
     ap.add_argument("--shim", action="store_true")
+    ap.add_argument("--python")
     a = ap.parse_args(argv)
     state, workdir = Path(a.state_dir), Path(a.workdir)
     state.mkdir(parents=True, exist_ok=True)
@@ -27,7 +29,12 @@ def main(argv=None):
     for name in ("ready", "kernel.pid", "kernel.json"):
         (state / name).unlink(missing_ok=True)
     from jupyter_client import KernelManager
-    km = KernelManager(kernel_name="python3", connection_file=str(state / "kernel.json"))
+    if a.python:
+        from agent_testbench.notebook import only_spec, project_kernel
+        km = KernelManager(kernel_name="python3", connection_file=str(state / "kernel.json"),
+                           kernel_spec_manager=only_spec(project_kernel(a.python)))
+    else:
+        km = KernelManager(kernel_name="python3", connection_file=str(state / "kernel.json"))
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     env.pop("MPLBACKEND", None)                         # the kernel's own plots render inline
     km.start_kernel(cwd=str(workdir), env=env)

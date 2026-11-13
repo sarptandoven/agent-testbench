@@ -165,7 +165,9 @@ ipykernel in the virtualenv. The log's first line names the Python the kernel ra
   `testbench lint`'s rules are written for Python notebooks.
 
 Live sessions (`testbench session start`) always run an IPython kernel; `testbench exec --cells` sends a
-notebook's cells to it, so use it with Python notebooks.
+notebook's cells to it, so use it with Python notebooks. A local session started from uvx, uv tool or pipx picks
+its kernel's Python by the same rule as a notebook step - the project's virtualenv when it has ipykernel - and
+`session start` says which it got and why.
 
 ## The Colab stand-in
 

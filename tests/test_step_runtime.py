@@ -304,6 +304,64 @@ def test_from_a_tool_environment_check_finds_a_notebooks_imports_in_the_projects
         f"the venv's Python lacks it: installed there, not with uvx --with ({what}: {how})"
 
 
+def tb(capsys, *argv) -> tuple[int, str]:
+    """testbench in this process (so the simulated tool environment holds), as a person types it."""
+    from agent_testbench import cli as CLI
+    try:
+        code = CLI.main(list(argv))
+    except SystemExit as done:
+        code = done.code
+    return code or 0, capsys.readouterr().out
+
+
+def test_from_a_tool_environment_a_local_session_runs_on_the_projects_venv(tmp_path, from_uv_tool, monkeypatch,
+                                                                           capsys):
+    root = tmp_path / "proj"
+    root.mkdir()
+    python = make_venv(root / ".venv", ipykernel=True)
+    (site_packages(python) / "venv_only_mod.py").write_text("VALUE = 7\n")
+    write_config(root, {"project": "p", "plans": {"smoke": "python -c pass"}})
+    monkeypatch.chdir(root)
+    code, out = tb(capsys, "session", "start", "uvs")
+    try:
+        assert code == 0, out
+        assert f"[testbench] the kernel runs on the project's Python: {python}." in out, "the start says which Python"
+        h = json.loads((root / ".testbench" / "sessions" / "uvs" / "state.json").read_text())["handles"]
+        assert h["python"] == str(python) and h["tool"] == "uv tool"
+        code, out = tb(capsys, "exec", "-s", "uvs", "import sys, venv_only_mod\nprint('IN', sys.prefix, venv_only_mod.VALUE)")
+        assert code == 0 and "IN " in out and " 7" in out, out
+        assert Path(out.split("IN ", 1)[1].split()[0]).resolve() == (root / ".venv").resolve(), "the kernel is the venv's"
+        code, out = tb(capsys, "session", "shell", "-s", "uvs", 'python -c "import sys; print(sys.prefix)"')
+        assert code == 0 and Path(out.strip().splitlines()[-1]).resolve() == (root / ".venv").resolve(), \
+            "`python` in session shell is the project's, as in a run: step"
+        with monkeypatch.context() as m:                    # what session install would run (no network here)
+            seen = []
+            m.setattr(subprocess, "run", lambda argv, **kw: seen.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""))
+            code, out = tb(capsys, "session", "install", "-s", "uvs", "tiny-pkg")
+        assert code == 0 and seen == [[str(python), "-m", "pip", "install", "tiny-pkg"]], "into the kernel's Python"
+    finally:
+        tb(capsys, "session", "stop", "--all")
+
+
+def test_session_install_never_puts_packages_in_a_tool_environments_own_python(tmp_path):
+    from agent_testbench import session_backends as SB
+    root = tmp_path / "proj"
+    root.mkdir()
+    state = {"name": "s", "handles": {"python": sys.executable, "tool": "uvx", "kernel_note": "the project has none"}}
+    with pytest.raises(SB.SessionError) as refused:
+        SB.LocalSession(root, {}, tmp_path / "s", state).install(["tiny-pkg"])
+    said = str(refused.value)
+    venv = str(Path(".venv") / BIN / ("python.exe" if os.name == "nt" else "python"))
+    assert said.startswith(f"not installed: the session's kernel runs on testbench's own Python (uvx: {sys.executable})")
+    assert f"`python -m venv .venv`, then `{CK._pip(venv, ['ipykernel', 'tiny-pkg'])}`" in said, said
+    assert "`testbench session stop s`, `testbench session start s`" in said
+    python = make_venv(root / ".venv", ipykernel=False)
+    (python.parent.parent / "pyvenv.cfg").write_text("home = /usr\nuv = 0.11.0\n")       # a virtualenv uv made: no pip
+    assert CK.pip_argv(str(python), ["x"]) == ["uv", "pip", "install", "--python", str(python), "x"]
+    with pytest.raises(SB.SessionError, match=r"uv pip install --python"):
+        SB.LocalSession(root, {}, tmp_path / "s", state).install(["tiny-pkg"])
+
+
 def test_reading_a_notebook_without_cell_ids_says_nothing(tmp_path):
     nb = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell("x = 1")])
     data = json.loads(nbformat.writes(nb))

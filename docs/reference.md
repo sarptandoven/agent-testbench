@@ -184,7 +184,7 @@ notebook: run code or cells, look at the values and plots, fix, run again, witho
 
 | backend | machine | project files | stops |
 |---|---|---|---|
-| `local` | this machine, this Python environment | the project folder itself | supervisor: idle / max minutes |
+| `local` | this machine, this Python environment - from uvx, uv tool or pipx the project's virtualenv when it has ipykernel, as for a notebook step (`session start` says which); `session install` installs for the kernel's Python and `session shell`'s `python` is the project's | the project folder itself | supervisor: idle / max minutes |
 | `modal` | a Modal Sandbox (what Modal Notebooks run on) with the GPU you pick; image from `modal:` | copied to `/work/project` (also `/content`); `/testbench` is the project's volume (`$TESTBENCH_CACHE` = `/testbench/cache`) | Modal itself (lifetime = max minutes, idle timeout = idle minutes; a running command counts as activity) and the supervisor |
 | `colab` | a Colab VM through Google's Colab CLI | copied to `/content` | the VM's own watchdog (max minutes + 10, idle minutes + 10; it releases the VM) and the supervisor (idle / max minutes) |
 | `ssh` | any machine `ssh` reaches (keys, no password) | copied to `<ssh.workdir>/<project>/sessions/NAME/project` | the machine's own watchdog (max minutes + 2, idle minutes + 10) and the supervisor (idle / max minutes) |
