@@ -184,7 +184,7 @@ notebook: run code or cells, look at the values and plots, fix, run again, witho
 
 | backend | machine | project files | stops |
 |---|---|---|---|
-| `local` | this machine, this Python environment | the project folder itself | supervisor: idle / max minutes |
+| `local` | this machine, this Python environment - from uvx, uv tool or pipx the project's virtualenv when it has ipykernel, as for a notebook step (`session start` says which); `session install` installs for the kernel's Python and `session shell`'s `python` is the project's | the project folder itself | supervisor: idle / max minutes |
 | `modal` | a Modal Sandbox (what Modal Notebooks run on) with the GPU you pick; image from `modal:` | copied to `/work/project` (also `/content`); `/testbench` is the project's volume (`$TESTBENCH_CACHE` = `/testbench/cache`) | Modal itself (lifetime = max minutes, idle timeout = idle minutes; a running command counts as activity) and the supervisor |
 | `colab` | a Colab VM through Google's Colab CLI | copied to `/content` | the VM's own watchdog (max minutes + 10, idle minutes + 10; it releases the VM) and the supervisor (idle / max minutes) |
 | `ssh` | any machine `ssh` reaches (keys, no password) | copied to `<ssh.workdir>/<project>/sessions/NAME/project` | the machine's own watchdog (max minutes + 2, idle minutes + 10) and the supervisor (idle / max minutes) |
@@ -404,7 +404,7 @@ testbench loop stop
 | field | |
 |---|---|
 | `source` | at launch: `commit`, `branch`, `dirty` (uncommitted changes or untracked files were part of the run), `changes_sha256` (the diff against the commit and the untracked files), `untracked_files`; null outside git. `.testbench/` is not counted |
-| `environment` | where the plan ran (recorded on that machine, Modal, Colab and ssh too): `python`, `platform`, `machine`, `packages` and `packages_sha256` (of the sorted name==version list) |
+| `environment` | where the plan ran (recorded on that machine, Modal, Colab and ssh too): `python`, `implementation`, `platform`, `machine`, `executable`, `packages`, `packages_sha256` (of the sorted name==version list) and `package_versions` (what `testbench diff` compares) - of the Python the steps' `python` resolves to. That is the Python running testbench, unless testbench runs from uvx, uv tool or pipx: then it is the project's (its virtualenv, else the `python` on PATH), asked by running it, and `testbench` (`tool`, `python`, `executable`) names the Python testbench itself ran on. If that Python cannot say, the fields are testbench's own and `note` says why |
 | `steps[].runtime` | what each step ran on, found the way the step finds it: `python` (`path`, `version`) - what its command's `python` resolved to, or the Python it names; from uvx the project's own - and for a notebook the `kernel` and its Python; `node`, `go` or `cargo` when the command uses them. report.md's "The steps ran on" line; `testbench diff` names a step whose interpreter changed |
 | `evidence`, `evidence_sha256` | every file under `steps/` with its size and sha256, and one sha256 over all of them |
 | `worst_case_usd`, `approved`, `remote_stop` | the bound checked before launch, whether a person approved it, and the hard stop on the remote side |

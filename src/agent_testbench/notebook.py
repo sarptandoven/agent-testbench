@@ -263,6 +263,18 @@ def project_kernel(python: str):
                       display_name="Python 3 (the project's virtualenv)", language="python", env={}, metadata={})
 
 
+def only_spec(spec):
+    """A kernel spec manager that knows one spec, whatever kernel name is asked for: a KernelManager given it starts
+    that kernel (project_kernel's) instead of the installed python3."""
+    from jupyter_client.kernelspec import KernelSpecManager
+
+    class OneSpec(KernelSpecManager):
+        def get_kernel_spec(self, kernel_name):
+            return spec
+
+    return OneSpec()
+
+
 # ---- parameters -------------------------------------------------------------------------------------------
 
 def form_fields(source: str) -> dict:
@@ -504,13 +516,7 @@ def run(nb_path: str | Path, *, params: dict, cells: list[int] | None, deadline:
         def create_kernel_manager(self):                         # the project's Python: a kernel spec of its own
             if spec is None:
                 return super().create_kernel_manager()
-            from jupyter_client.kernelspec import KernelSpecManager
-
-            class OneSpec(KernelSpecManager):
-                def get_kernel_spec(self, kernel_name):
-                    return spec
-
-            self.km = self.kernel_manager_class(kernel_name=self.kernel_name, kernel_spec_manager=OneSpec(),
+            self.km = self.kernel_manager_class(kernel_name=self.kernel_name, kernel_spec_manager=only_spec(spec),
                                                 config=self.config)
             return self.km
 

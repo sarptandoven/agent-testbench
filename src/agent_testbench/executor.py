@@ -251,6 +251,18 @@ def step_path(project: Path, environ: dict | None = None) -> str:
     return os.pathsep.join(first + rest + [own])
 
 
+def steps_python(path: str) -> str | None:
+    """The Python a step's `python` resolves to on step_path's PATH, when testbench runs from a tool environment of its
+    own (uvx, uv tool, pipx) and that is another environment's Python (the project's): the one the proof record's
+    `environment` then describes (provenance.environment). None when the steps' `python` is testbench's own."""
+    if not tool_environment():
+        return None
+    found = shutil.which("python", path=path)
+    if not found or _norm(Path(found).parent) == _norm(Path(sys.executable).parent):   # bin/python next to python3
+        return None
+    return found
+
+
 def kernel_python(project: Path, environ: dict | None = None) -> tuple[str | None, str]:
     """For a Python notebook on this machine: (the Python its kernel should run, a note for the step's log). None is
     the kernel testbench always starts (its own Python's). From uvx, uv tool or pipx that Python holds none of the
@@ -269,7 +281,7 @@ def kernel_python(project: Path, environ: dict | None = None) -> tuple[str | Non
     if not _has_ipykernel(str(python), environ):
         from .check import _pip
         return None, (f"the kernel runs on {own}: the project's virtualenv ({venv}) has no ipykernel. "
-                      f"`{_pip(str(python), ['ipykernel'])}` puts it there, and notebooks then run on the project's "
+                      f"`{_pip(str(python), ['ipykernel'])}` puts it there, and the kernel then runs on the project's "
                       "Python")
     return str(python), ""
 
@@ -369,11 +381,12 @@ def execute_plan(plan: dict, *, project_dir: str | Path, run_dir: str | Path, wo
     run_dir.mkdir(parents=True, exist_ok=True)
     workdir = Path(workdir).resolve() if workdir else project
     from .provenance import environment
-    report = {"testbench_version": __version__, **(meta or {}), "status": "running", "started": time.time(),
-              "steps": [], "workdir": str(workdir), "environment": environment()}
-    sampler = GpuSampler()
     base_env = {**os.environ, "TESTBENCH_RUN_DIR": str(run_dir), "TESTBENCH_PROJECT_DIR": str(project),
                 "PATH": step_path(project)}
+    report = {"testbench_version": __version__, **(meta or {}), "status": "running", "started": time.time(),
+              "steps": [], "workdir": str(workdir),                 # about the Python the steps' `python` is
+              "environment": environment(steps_python(base_env["PATH"]), base_env)}
+    sampler = GpuSampler()
     stop_reason = None
     seal, seen, steps = None, {}, plan["steps"]                 # data: cut in the run's copy (dataseal.py)
     versions: dict = {}                                         # each interpreter's version, asked once a run

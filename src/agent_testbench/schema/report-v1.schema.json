@@ -37,7 +37,7 @@
       }
     },
     "environment": {
-      "description": "where the plan's code ran (recorded on that machine)",
+      "description": "where the plan's code ran (recorded on that machine): the Python the steps' `python` resolves to and its packages - the Python that runs testbench, or from uvx, uv tool or pipx the project's own (see testbench)",
       "type": "object",
       "properties": {
         "python": {"type": "string"},
@@ -48,7 +48,17 @@
         "packages": {"type": "integer"},
         "packages_sha256": {"type": "string", "description": "sha256 of the sorted name==version list"},
         "package_versions": {"type": "object", "additionalProperties": {"type": "string"},
-                             "description": "every installed package's version, by lowercase name (testbench diff names the ones that changed)"}
+                             "description": "every installed package's version, by lowercase name (testbench diff names the ones that changed)"},
+        "testbench": {
+          "type": "object",
+          "description": "only when testbench ran from a tool environment of its own (uvx, uv tool, pipx) and the steps' `python` was another Python: the fields above are that Python's (asked by running it), and this is the Python testbench itself ran on",
+          "properties": {
+            "tool": {"type": ["string", "null"], "description": "uvx, uv tool or pipx"},
+            "python": {"type": "string"},
+            "executable": {"type": "string"}
+          }
+        },
+        "note": {"type": "string", "description": "the steps' `python` was another Python than testbench's, but it could not say what it has installed: why, and that the fields above are testbench's own"}
       }
     },
     "evidence": {

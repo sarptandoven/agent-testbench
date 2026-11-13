@@ -29,7 +29,8 @@ package the notebook imports) is skipped with the command that installs it. With
 nothing is installed at all: `run:` steps use the project's own Python (its `.venv`), and so does the notebook's
 kernel when that `.venv` has ipykernel; otherwise the kernel runs in uvx's own environment, so `check` names the
 packages to add (`uvx --with scikit-learn --with matplotlib agent-testbench check`). Each report says which Python
-every step ran on. Exit codes: 0 every plan that ran passed, 1 one failed, 2 nothing to check.
+every step ran on, and records the packages of the project's Python, not uvx's. Exit codes: 0 every plan that ran
+passed, 1 one failed, 2 nothing to check.
 
 ### 2. See what this machine can run
 

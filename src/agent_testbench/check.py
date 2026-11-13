@@ -77,10 +77,16 @@ def _pip(python: str, packages: list[str]) -> str:
         return f"uv tool install --force {withs} agent-testbench"
     if kind == "pipx":
         return f"pipx inject agent-testbench {q(packages)}"
+    return q(pip_argv(python, packages))
+
+
+def pip_argv(python: str, packages: list[str]) -> list[str]:
+    """The command that installs packages for a Python of the project's (not a tool environment's): uv's pip for a
+    virtualenv uv made, which has no pip of its own; else that Python's pip."""
     cfg = Path(python).parent.parent / "pyvenv.cfg"
     if cfg.is_file() and re.search(r"(?m)^uv\s*=", cfg.read_text(errors="replace")):
-        return f"uv pip install --python {q([python])} {q(packages)}"
-    return f"{q([python])} -m pip install {q(packages)}"
+        return ["uv", "pip", "install", "--python", python, *packages]
+    return [python, "-m", "pip", "install", *packages]
 
 
 def _notebook_needs(notebook: Path, root: Path) -> tuple[str, str] | None:

@@ -60,16 +60,31 @@ class LocalSession:
         self.kdir = self.sdir / "kernel"
 
     def start(self) -> dict:
+        from .executor import kernel_python, step_path, tool_environment
         from .runs import spawn
         env = {**os.environ, "TESTBENCH_SESSION": self.state["name"]}
         missing = [s for s in self.state.get("secrets", []) if s not in env]
         if missing:
             raise SessionError(f"secrets not in this environment: {', '.join(missing)} - export them first")
-        proc = spawn([sys.executable, "-m", "agent_testbench.kernelkit.launcher", "--workdir", str(self.root),
-                      "--state-dir", str(self.kdir), "--shim"], cwd=self.root, env=env, log_path=self.sdir / "kernel.log")
+        argv = [sys.executable, "-m", "agent_testbench.kernelkit.launcher", "--workdir", str(self.root),
+                "--state-dir", str(self.kdir), "--shim"]
+        tool = tool_environment()
+        python, why = kernel_python(self.root, env)        # uvx & co: the project's venv, as a notebook step's kernel
+        if tool:                                            # `python` in the kernel's commands: the project's, as in a step
+            env["PATH"] = step_path(self.root, env)
+        if python:
+            argv.append(f"--python={python}")
+        note = f"the kernel runs on the project's Python: {python}" if python else why
+        if note:
+            with open(self.sdir / "kernel.log", "a") as log:
+                log.write(f"[testbench] {note}\n")
+        proc = spawn(argv, cwd=self.root, env=env, log_path=self.sdir / "kernel.log")
         for _ in range(240):
             if (self.kdir / "ready").exists():
-                return {"launcher_pid": proc.pid, "workdir": str(self.root)}
+                from .notebook import kernel_executable
+                return {"launcher_pid": proc.pid, "workdir": str(self.root),
+                        "python": python or kernel_executable("python3", env) or sys.executable,
+                        **({"tool": tool, "kernel_note": note} if tool else {})}
             if proc.poll() is not None:
                 break
             time.sleep(0.25)
@@ -103,14 +118,50 @@ class LocalSession:
         shutil.copyfile(local, dst)
 
     def install(self, packages: list[str]) -> str:
-        p = subprocess.run([sys.executable, "-m", "pip", "install", *packages], capture_output=True, text=True, timeout=1800)
+        """Into the Python the kernel runs on: testbench's own as ever, or from uvx, uv tool or pipx the project's
+        virtualenv. A tool environment's own Python is refused: what goes in there is not the project's."""
+        from .executor import _norm
+        h = self.state.get("handles") or {}
+        python = h.get("python") or sys.executable
+        if h.get("tool") and _norm(python) == _norm(sys.executable):
+            raise SessionError(self._not_into_testbench(h, packages))
+        if h.get("tool"):
+            from .check import pip_argv
+            argv = pip_argv(python, packages)
+        else:
+            argv = [sys.executable, "-m", "pip", "install", *packages]        # installed like any package: as ever
+        try:
+            p = subprocess.run(argv, capture_output=True, text=True, timeout=1800)
+        except FileNotFoundError:                          # uv pip for a venv uv made, and no uv on PATH
+            return f"`{argv[0]}` is not on PATH, so nothing was installed for {python}\n(pip exited 127)"
         return (p.stdout + p.stderr)[-3000:] + ("" if p.returncode == 0 else f"\n(pip exited {p.returncode})")
+
+    def _not_into_testbench(self, h: dict, packages: list[str]) -> str:
+        """Why `session install` refuses a kernel on a tool environment's own Python, and the commands that put the
+        kernel on the project's virtualenv instead."""
+        from .check import _pip
+        from .executor import BIN, project_venv
+        venv, _ = project_venv(self.root)
+        exe = "python.exe" if os.name == "nt" else "python"
+        if venv:
+            why = f"the project's virtualenv ({venv}) had no ipykernel when the session started"
+            how = f"`{_pip(str(venv / BIN / exe), ['ipykernel', *packages])}`"
+        else:
+            why = "the project has no virtualenv (.venv or venv)"
+            how = f"`python -m venv .venv`, then `{_pip(str(Path('.venv') / BIN / exe), ['ipykernel', *packages])}`"
+        name = self.state["name"]
+        return (f"not installed: the session's kernel runs on testbench's own Python ({h['tool']}: {h['python']}), "
+                f"where packages are not the project's, because {why}. Put ipykernel and the packages in the "
+                f"project's virtualenv - {how} - then start the session again (`testbench session stop {name}`, "
+                f"`testbench session start {name}`), and its kernel runs there")
 
     def sync(self) -> str:
         return "local sessions run in the project folder itself; nothing to sync"
 
     def shell(self, command: str, timeout: float) -> str:
-        p = subprocess.run(command, shell=True, cwd=self.root, capture_output=True, text=True, timeout=timeout)
+        from .executor import step_path, tool_environment
+        env = {**os.environ, "PATH": step_path(self.root)} if tool_environment() else None   # the project's `python`
+        p = subprocess.run(command, shell=True, cwd=self.root, env=env, capture_output=True, text=True, timeout=timeout)
         return (p.stdout + p.stderr)[-20000:]
 
     def stop(self) -> None:
